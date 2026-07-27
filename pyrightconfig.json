@@ -1,4 +1,0 @@
-{
-  "include": ["shared", "nodes", "typings"],
-  "stubPath": "typings"
-}

@@ -1,0 +1,1 @@
+"""Graph/comparison-chains domain — ChainManager (graph construction from comparisons, topological chain building via DP on SCC-condensed DAG, top/bottom detection, component merging), proxy models (NodeProxy, ChainProxy, ComponentProxy)."""

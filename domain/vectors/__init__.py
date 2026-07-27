@@ -1,0 +1,1 @@
+"""Vector/term extraction — prompt tokenization via depth-aware splitting, parenthetical weight parsing (term:1.2), stopword filtering with configurable connectors/splitters, deduplication keeping highest weight, and ExtractionResult dataclass with filtered/stripped/duplicate tracking."""

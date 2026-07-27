@@ -1,0 +1,1 @@
+"""Observability/logging — SharedLogger and ModuleLogger with configurable level/filter hooks, task-scoped output buffers (CaptureStream), SSE broadcast to frontend subscribers, and CustomFormatter for trimmed log output."""

@@ -1,0 +1,1 @@
+"""Tests for vector/term extraction — parametrized tests for extract_terms with varied prompt patterns, clean_term normalization, deduplication weighting logic, filter stopword removal, and weight-from-parenthesis parsing."""
