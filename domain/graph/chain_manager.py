@@ -6,8 +6,8 @@ from typing import Any
 import time
 from tqdm import tqdm
 
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
-from comfyui_image_scorer.core.configuration.settings import config
+from ...core.observability.logger import get_logger, ModuleLogger
+from ...core.configuration.settings import config
 
 logger: ModuleLogger = get_logger(__name__)
 

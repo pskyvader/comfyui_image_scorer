@@ -8,9 +8,9 @@ import gc
 from typing import Any
 from sklearn.preprocessing import PolynomialFeatures
 
-from comfyui_image_scorer.core.observability.logger import get_logger
-from comfyui_image_scorer.core.configuration.settings import config
-from comfyui_image_scorer.domain.analysis.trueskill import (
+from ...core.observability.logger import get_logger
+from ...core.configuration.settings import config
+from ..analysis.trueskill import (
     public_score_from_rating,
     replay_ratings,
 )
@@ -443,7 +443,7 @@ def _label_person_map_slot(vec_name: str, pos_in_unit: int) -> str:
 
 def _load_map_slots(vec_name: str) -> list[str] | None:
     """Load the saved map JSON for a map-type vector, returning slot labels by index."""
-    from comfyui_image_scorer.core.filesystem.paths import maps_dir
+    from ...core.filesystem.paths import maps_dir
 
     path = os.path.join(maps_dir, f"{vec_name}_map.json")
     if os.path.exists(path):

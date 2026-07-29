@@ -8,10 +8,12 @@ import torch
 from torchvision import transforms
 import numpy as np
 
-from comfyui_image_scorer.core.observability.logger import get_logger
-from comfyui_image_scorer.domain.vectors.helpers import l2_normalize_batch
-from comfyui_image_scorer.core.io.serialization import load_json
-from comfyui_image_scorer.core.filesystem.paths import vectors_size_file
+from ...core.observability.logger import get_logger
+from ...infrastructure.ml_models.model_loader import model_loader
+from .helpers import l2_normalize_batch
+from ...core.io.serialization import load_json
+from ...core.filesystem.paths import vectors_size_file
+from ...infrastructure.ml_models.batch_sizer import BatchSizer
 
 logger = get_logger(__name__)
 
@@ -22,7 +24,7 @@ imageTuple = tuple[str, Image.Image]
 
 
 class ImageVector:
-    def __init__(self, name: str, model_key: str, slot_size: int, model_loader: Any, batch_sizer: Any) -> None:
+    def __init__(self, name: str, model_key: str, slot_size: int) -> None:
         self.name = name
         self.model_key = model_key
         self.slot_size = slot_size
@@ -34,8 +36,7 @@ class ImageVector:
         self._transform: transforms.Compose | None = None
         self.variable_input: bool = True
         self.model_input_size: sizeTuple | None = None
-        self.batch_sizer = batch_sizer
-        self.model_loader = model_loader
+        self.batch_sizer = BatchSizer(model_key=model_key)
 
         self.vector_sizes, _ = load_json(vectors_size_file, expect=dict)
 
@@ -117,7 +118,7 @@ class ImageVector:
         ]
         device = next(model.parameters()).device
 
-        batch_tensor = torch.stack(transformed_images, dim=0).to(  # type: ignore[arg-type]
+        batch_tensor = torch.stack(transformed_images, dim=0).to(
             device, non_blocking=True
         )
 
@@ -148,14 +149,8 @@ class ImageVector:
 
     def test_batch(self, batch_tensor: torch.Tensor, device: str) -> None:
         with torch.inference_mode():
-            # Ensure model is in eval mode so dropout/batchnorm don't waste memory
             self.model.eval()
-
-            # Full pass is the only way to catch the "21 vs 85" discrepancy
             self.model(batch_tensor)
-
-            # The "Force-Fail": Without this, Python won't know the GPU crashed
-            # until it's too late to catch it in this loop.
             torch.cuda.synchronize(device)
 
     def get_batch_size(self, width: int, height: int, rebuild: bool) -> int:
@@ -172,9 +167,9 @@ class ImageVector:
             result: vectorDict = {}
             return result
         self.model, self.vector_length, _, self._transform = (
-            self.model_loader.load_vision_model(self.model_key)
+            model_loader.load_vision_model(self.model_key)
         )
-        model_info = self.model_loader.get_model_info(self.model_key)
+        model_info = model_loader.get_model_info(self.model_key)
         self.variable_input = model_info["variable_input"]
         self.model_input_size = sizeTuple(
             model_info["input_size"]
@@ -205,11 +200,6 @@ class ImageVector:
     ) -> vectorDict | sizeTuple:
         """
         Exact-size bucketing with controlled RAM and VRAM usage.
-
-        - Images are NOT stored globally.
-        - Only paths + indices are stored.
-        - Images are loaded per batch only.
-        - Order of vectors is preserved.
         """
 
         logger.debug(
@@ -217,9 +207,9 @@ class ImageVector:
         )
 
         self.model, self.vector_length, total_memory, self._transform = (
-            self.model_loader.load_vision_model(self.model_key)
+            model_loader.load_vision_model(self.model_key)
         )
-        model_info = self.model_loader.get_model_info(self.model_key)
+        model_info = model_loader.get_model_info(self.model_key)
         self.variable_input = model_info["variable_input"]
         self.model_input_size = sizeTuple(model_info["input_size"])
 
@@ -229,23 +219,17 @@ class ImageVector:
             )
             self.get_batch_size(rebuild_width, rebuild_height, rebuild=True)
 
-        # self.model = model
-        # self.vector_length = vector_length
-
         total = len(entries)
         vectors: vectorDict = {}
         if len(entries) == 0:
             logger.debug("empty image list")
             return self.vector_list
 
-        # --------------------------------------------------
-        # PASS 1: Build buckets using only metadata
-        # --------------------------------------------------
         buckets: dict[sizeTuple, list[imagePathTuple]] = defaultdict(list)
 
         for idx, img_path in entries.items():
             with Image.open(img_path) as img:
-                size: sizeTuple = img.size  # (width, height)
+                size: sizeTuple = img.size
             buckets[size].append((idx, img_path))
 
         sorted_buckets = OrderedDict(
@@ -256,7 +240,6 @@ class ImageVector:
             sorted_buckets.items()
         )
 
-        # if variable size is false, collapse all buckets into a single one
         if not self.variable_input:
             all_items: list[imagePathTuple] = []
             for size, items in bucket_list:
@@ -270,9 +253,6 @@ class ImageVector:
         logger.debug(f"\nTotal memory: {total_memory}")
         logger.debug(f"\nTotal: {total}")
 
-        # --------------------------------------------------
-        # PASS 2: Process each bucket
-        # --------------------------------------------------
         with tqdm(
             total=total_buckets,
             desc="Buckets",
@@ -291,22 +271,15 @@ class ImageVector:
                 max_batch_size = 0
                 for bucket_idx, (size, items) in enumerate(bucket_list, start=1):
                     num_items: int = len(items)
-                    # if num_items > max_batch_size:
                     width, height = sizeTuple(
                         self.model_input_size
                         if (not self.variable_input and self.model_input_size)
                         else size
                     )
-                    # if rebuild_width == width and rebuild_height == height:
-                    #     print(f"rebuild triggered by size: {size}")
-                    #     print(
-                    #         f"rebuild width: {rebuild_width}, rebuild height: {rebuild_height}"
-                    #     )
-                    #     rebuild = True
                     max_batch_size = self.get_batch_size(width, height, False)
                     max_batch_size = int(
                         max_batch_size * memory_usage
-                    )  # max memory percentage allowed to use
+                    )
 
                     if num_items > max_batch_size * 2:
                         torch.backends.cudnn.benchmark = True
@@ -317,13 +290,11 @@ class ImageVector:
                         f"Bucket {bucket_idx} | Size: {size} | Items: {num_items} | Max Batch size: {max_batch_size}"
                     )
 
-                    # Process bucket in sub-batches
                     for i in range(0, num_items, max_batch_size):
 
                         batch_slice = items[i : i + max_batch_size]
                         batch_indices, batch_paths = zip(*batch_slice)
 
-                        # Load & preprocess batch in one call
                         current_image_batch: list[Image.Image] = (
                             self.prepare_image_batch(batch_paths)
                         )
@@ -331,11 +302,6 @@ class ImageVector:
                             zip(batch_indices, current_image_batch)
                         )
 
-                        # Encode batch. The batch sizer deliberately pushes the
-                        # GPU toward its memory limit to discover the max batch
-                        # size, so a CUDA OOM here is expected: emit a warning,
-                        # free VRAM, and return the failing size so the caller
-                        # retries with the rebuilt (smaller) profile.
                         try:
                             batch_vecs = self.create_image_vector_batch(current_batch)
                         except Exception as e:
@@ -347,15 +313,14 @@ class ImageVector:
                                 f"error while encoding images, retrying With size: {size}..."
                             )
                             del current_batch
+                            del batch_vecs
                             del vectors
                             return (width, height)
 
-                        # Store vectors in original order
                         vectors.update(batch_vecs)
 
                         pbar.update(len(batch_slice))
 
-                        # Explicit cleanup (important for VRAM stability)
                         del current_batch
                         del batch_vecs
                     torch.cuda.empty_cache()

@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
+from ...core.observability.logger import get_logger, ModuleLogger
 
 logger: ModuleLogger = get_logger(__name__)
 

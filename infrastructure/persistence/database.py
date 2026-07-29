@@ -6,8 +6,8 @@ import sqlite3
 import time
 from pathlib import Path
 
-from comfyui_image_scorer.core.filesystem.paths import cache_file
-from comfyui_image_scorer.core.observability.logger import ModuleLogger, get_logger
+from ...core.filesystem.paths import cache_file
+from ...core.observability.logger import ModuleLogger, get_logger
 
 logger: ModuleLogger = get_logger(__name__)
 

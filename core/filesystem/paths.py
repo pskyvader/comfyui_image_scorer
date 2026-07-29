@@ -1,5 +1,5 @@
 import os
-from comfyui_image_scorer.core.configuration.settings import config
+from ..configuration.settings import config, PROJECT_ROOT
 from pathlib import Path
 
 root: Path = Path(__file__).parents[2]
@@ -8,7 +8,23 @@ output_dir: str = os.path.join(root, "output")
 maps_dir: str = os.path.join(output_dir, "maps")
 cache_file: str = os.path.join(output_dir, "cache.db")
 
-image_root: str = config["image_root"]
+
+def _resolve_image_root() -> str:
+    try:
+        raw = config["image_root"]
+        if raw:
+            return raw
+    except KeyError:
+        pass
+    try:
+        from folder_paths import get_output_directory
+        return get_output_directory()
+    except ImportError:
+        pass
+    return str(PROJECT_ROOT.parents[1] / "output")
+
+
+image_root: str = _resolve_image_root()
 image_root_processed: str = os.path.join(image_root, "scored")
 
 vectors_size_file: str = os.path.join(output_dir, "image_vector_size.json")

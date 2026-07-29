@@ -9,12 +9,12 @@ from collections.abc import Callable
 from typing import Any
 from skimage.feature import local_binary_pattern
 
-from comfyui_image_scorer.domain.analysis.mediapipe_analysis import MediaPipeAnalyzer, POSE_LANDMARK_NAMES
-from comfyui_image_scorer.domain.analysis.attribute_analysis import FaceAttributeAnalyzer, NSFWAnalyzer
-from comfyui_image_scorer.core.configuration.settings import config
-from comfyui_image_scorer.core.io.serialization import atomic_write_json
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
-from comfyui_image_scorer.domain.vectors.image_vector import ImageVector
+from .mediapipe_analysis import MediaPipeAnalyzer, POSE_LANDMARK_NAMES
+from .attribute_analysis import FaceAttributeAnalyzer, NSFWAnalyzer
+from ...core.configuration.settings import config
+from ...core.io.serialization import atomic_write_json
+from ...core.observability.logger import get_logger, ModuleLogger
+from ..vectors.image_vector import ImageVector
 
 logger: ModuleLogger = get_logger(__name__)
 

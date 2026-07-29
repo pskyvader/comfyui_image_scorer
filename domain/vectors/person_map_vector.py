@@ -1,7 +1,8 @@
 from typing import Any
 
-from comfyui_image_scorer.core.configuration.settings import config
-from comfyui_image_scorer.domain.vectors.helpers import get_value_from_entry
+from ...infrastructure.loading.maps_loader import maps_list
+from ...core.configuration.settings import config
+from .helpers import get_value_from_entry
 
 
 class PersonMapVector:
@@ -13,9 +14,8 @@ class PersonMapVector:
     appears. Each person contributes one contiguous block of softmax weights.
     """
 
-    def __init__(self, name: str, maps_list: Any) -> None:
+    def __init__(self, name: str) -> None:
         self.name: str = name
-        self.maps_list = maps_list
         self.value_list: dict[str, list[dict[str, float]]] = {}
         self.vector_list: dict[str, list[float]] = {}
         self.vector_config = config["vector"]["vectors"]
@@ -26,7 +26,7 @@ class PersonMapVector:
         )
 
     def _per_unit(self) -> int:
-        return len(self.maps_list.get_all_categories(self.name))
+        return len(maps_list.get_all_categories(self.name))
 
     def _grow(self, needed: int) -> None:
         i = self._config_index()
@@ -51,9 +51,9 @@ class PersonMapVector:
                     for cat in person:
                         if cat == "":
                             continue
-                        index, _ = self.maps_list.get_value(self.name, cat)
+                        index, _ = maps_list.get_value(self.name, cat)
                         if index == -1 and add_new_values:
-                            self.maps_list.add_value(self.name, cat)
+                            maps_list.add_value(self.name, cat)
             self.value_list[id] = raw
             max_instances = max(max_instances, len(raw))
         if add_new_values and max_instances > 0:
@@ -61,7 +61,7 @@ class PersonMapVector:
         return self.value_list
 
     def create_vector_list(self) -> dict[str, list[float]]:
-        cats = self.maps_list.get_all_categories(self.name)
+        cats = maps_list.get_all_categories(self.name)
         per_unit = len(cats)
         target = self.vector_config[self._config_index()]["slot_size"]
         for id, raw in self.value_list.items():

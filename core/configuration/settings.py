@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 from collections.abc import MutableMapping, Iterator
 
-from comfyui_image_scorer.core.io.serialization import load_json
+from ..io.serialization import load_json
 
 PathLike = str | Path
 ConfigDict = dict[str, Any]

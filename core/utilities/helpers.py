@@ -5,8 +5,8 @@ from pathlib import Path
 from PIL import Image
 import torch
 from torch import Tensor
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
-from comfyui_image_scorer.core.filesystem.paths import (
+from ..observability.logger import get_logger, ModuleLogger
+from ..filesystem.paths import (
     models_dir,
     vectors_dir,
     vectors_file,

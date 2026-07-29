@@ -1,9 +1,9 @@
 from PIL.Image import Image
 import torch
 from typing import Any
-from comfyui_image_scorer.core.configuration.settings import config
-from comfyui_image_scorer.core.utilities.helpers import export_image_batch
-from comfyui_image_scorer.application.services.scoring_service import ScoringService
+from .....core.configuration.settings import config
+from .....core.utilities.helpers import export_image_batch
+from .....application.services.scoring_service import ScoringService
 
 
 class AestheticScoreNode:

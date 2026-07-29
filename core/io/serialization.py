@@ -7,7 +7,7 @@ from tqdm import tqdm
 import time
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
+from ..observability.logger import get_logger, ModuleLogger
 logger: ModuleLogger = get_logger(__name__)
 
 

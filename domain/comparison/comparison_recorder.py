@@ -3,18 +3,62 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 import time
 
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
-from comfyui_image_scorer.domain.comparison.state import invalidate_images_cache
-from comfyui_image_scorer.domain.analysis.trueskill import (
+from ...core.observability.logger import get_logger, ModuleLogger
+from .state import invalidate_images_cache
+from ..analysis.trueskill import (
     Rating,
     public_score_from_rating,
     rating_from_row,
     update_ratings,
 )
+
 logger: ModuleLogger = get_logger(__name__)
+
+
+class ComparisonRepository(Protocol):
+    def add_comparison(
+        self,
+        filename_a: str,
+        filename_b: str,
+        winner: str,
+        weight: float,
+        transitive_depth: int,
+        timestamp: str,
+    ) -> int | None: ...
+    def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool: ...
+    def get_all_comparisons(self) -> list[dict[str, Any]]: ...
+
+
+class ImageRepository(Protocol):
+    def get_image(self, filename: str) -> dict[str, Any] | None: ...
+    def update_image_rating_state(
+        self,
+        filename: str,
+        score: float,
+        rating_mu: float,
+        rating_sigma: float,
+        comparison_count: int,
+        touch_timestamp: bool = True,
+    ) -> bool: ...
+
+
+class PathSyncer(Protocol):
+    def sync_image_metadata_to_json(
+        self,
+        filename: str,
+        score: float,
+        rating_mu: float,
+        rating_sigma: float,
+        comparison_count: int,
+        all_comparisons: list[dict[str, Any]] | None = None,
+    ) -> bool: ...
+
+
+class GraphService(Protocol):
+    def apply_comparison(self, winner: str, loser: str) -> None: ...
 
 
 def update_scores_after_comparison(
@@ -38,3 +82,113 @@ def update_scores_after_comparison(
     loser_data["score"] = public_score_from_rating(loser_rating)
     loser_data["comparison_count"] = int(loser_data["comparison_count"]) + 1
     return winner_data, loser_data
+
+
+class ComparisonRecorder:
+    def __init__(
+        self,
+        comparison_repo: ComparisonRepository,
+        image_repo: ImageRepository,
+        path_syncer: PathSyncer,
+        graph_service: GraphService,
+    ) -> None:
+        self._comparison_repo = comparison_repo
+        self._image_repo = image_repo
+        self._path_syncer = path_syncer
+        self._graph_service = graph_service
+
+    def _persist_image_state(self, filename: str, data: dict[str, Any]) -> bool:
+        return self._image_repo.update_image_rating_state(
+            filename=filename,
+            score=float(data["score"]),
+            rating_mu=float(data["rating_mu"]),
+            rating_sigma=float(data["rating_sigma"]),
+            comparison_count=int(data["comparison_count"]),
+            touch_timestamp=True,
+        )
+
+    def record_comparison(
+        self,
+        filename_a: str,
+        filename_b: str,
+        winner: str,
+        impact_factor: float,
+        transitive_depth: int,
+    ) -> bool:
+        """Record one direct comparison and update both image ratings."""
+        if self._comparison_repo.comparison_exists_for_pair(filename_a, filename_b):
+            logger.warning(
+                "duplicate pair comparison for %s vs %s. remember to clean up later",
+                filename_a,
+                filename_b,
+            )
+
+        data_a = self._image_repo.get_image(filename_a)
+        data_b = self._image_repo.get_image(filename_b)
+        if not data_a or not data_b or filename_a == filename_b:
+            return False
+
+        if winner == filename_a:
+            winner_filename, loser_filename = filename_a, filename_b
+            winner_data, loser_data = data_a, data_b
+        else:
+            winner_filename, loser_filename = filename_b, filename_a
+            winner_data, loser_data = data_b, data_a
+
+        winner_data, loser_data = update_scores_after_comparison(
+            winner_filename, loser_filename, winner_data, loser_data, impact_factor
+        )
+
+        ts = datetime.now(timezone.utc).isoformat()
+        comp_id = self._comparison_repo.add_comparison(
+            filename_a=filename_a,
+            filename_b=filename_b,
+            winner=winner,
+            weight=impact_factor,
+            transitive_depth=transitive_depth,
+            timestamp=ts,
+        )
+        if not comp_id:
+            logger.error(
+                "Failed to insert comparison into DB: %s vs %s, winner=%s",
+                filename_a,
+                filename_b,
+                winner,
+            )
+            return False
+
+        if not self._persist_image_state(winner_filename, winner_data):
+            return False
+        if not self._persist_image_state(loser_filename, loser_data):
+            return False
+
+        all_comparisons = self._comparison_repo.get_all_comparisons()
+        saved_winner = self._path_syncer.sync_image_metadata_to_json(
+            filename=winner_filename,
+            score=float(winner_data["score"]),
+            rating_mu=float(winner_data["rating_mu"]),
+            rating_sigma=float(winner_data["rating_sigma"]),
+            comparison_count=int(winner_data["comparison_count"]),
+            all_comparisons=all_comparisons,
+        )
+        saved_loser = self._path_syncer.sync_image_metadata_to_json(
+            filename=loser_filename,
+            score=float(loser_data["score"]),
+            rating_mu=float(loser_data["rating_mu"]),
+            rating_sigma=float(loser_data["rating_sigma"]),
+            comparison_count=int(loser_data["comparison_count"]),
+            all_comparisons=all_comparisons,
+        )
+        if not saved_winner or not saved_loser:
+            logger.error(
+                "Failed to sync JSON history for comparison %s (%s vs %s)",
+                comp_id,
+                winner_filename,
+                loser_filename,
+            )
+            return False
+
+        self._graph_service.apply_comparison(winner_filename, loser_filename)
+        invalidate_images_cache()
+
+        return True

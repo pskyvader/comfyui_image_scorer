@@ -6,18 +6,18 @@ import numpy as np
 import numpy.typing as npt
 from tqdm import tqdm
 
-from comfyui_image_scorer.core.observability.logger import get_logger
+from ...core.observability.logger import get_logger
 
-from comfyui_image_scorer.domain.vectors.helpers import get_value_from_entry, l2_normalize_batch
+from .helpers import get_value_from_entry, l2_normalize_batch
+from ...infrastructure.ml_models.model_loader import model_loader
 
 logger = get_logger(__name__)
 
 
 class EmbeddingVector:
-    def __init__(self, name: str, slot_size: int, model_loader: Any) -> None:
+    def __init__(self, name: str, slot_size: int) -> None:
         self.name = name
         self.slot_size = slot_size
-        self.model_loader = model_loader
         self.value_list: dict[str, str] = {}
         self.vector_list: dict[str, list[float]] = {}
         self.text_list: dict[str, str] = {}
@@ -38,7 +38,7 @@ class EmbeddingVector:
     def create_vector_batch(
         self, current_batch: Iterable[tuple[str, str]]
     ) -> dict[str, list[float]]:
-        model, vector_length = self.model_loader.load_embedding_model()
+        model, vector_length = model_loader.load_embedding_model()
         batch_id, batch_values = zip(*current_batch)
         encoded_values = model.encode(list(batch_values))
         processed: npt.NDArray[np.float32] = np.asarray(

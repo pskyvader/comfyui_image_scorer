@@ -7,9 +7,9 @@ import pickle
 import base64
 
 
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
-from comfyui_image_scorer.core.io.serialization import load_single_jsonl
-from comfyui_image_scorer.core.filesystem.paths import (
+from ...core.observability.logger import get_logger, ModuleLogger
+from ...core.io.serialization import load_single_jsonl
+from ...core.filesystem.paths import (
     vectors_file,
     scores_file,
     models_dir,
@@ -23,7 +23,7 @@ from comfyui_image_scorer.core.filesystem.paths import (
     index_file,
     comparisons_file,
 )
-from comfyui_image_scorer.core.utilities.helpers import remove_directory
+from ...core.utilities.helpers import remove_directory
 
 logger: ModuleLogger = get_logger(__name__)
 

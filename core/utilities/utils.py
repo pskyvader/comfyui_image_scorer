@@ -3,7 +3,7 @@
 from typing import Any
 import ast
 
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
+from ..observability.logger import get_logger, ModuleLogger
 logger: ModuleLogger = get_logger(__name__)
 
 

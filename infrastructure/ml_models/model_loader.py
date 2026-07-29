@@ -6,7 +6,7 @@ from torch import nn
 from safetensors.torch import load_file as load_safetensors
 from torchvision import transforms
 import timm
-from comfyui_image_scorer.core.configuration.settings import config
+from ...core.configuration.settings import config
 from sentence_transformers import SentenceTransformer
 from transformers import AutoModel
 from transformers import CLIPImageProcessor, AutoImageProcessor, AutoModelForImageClassification

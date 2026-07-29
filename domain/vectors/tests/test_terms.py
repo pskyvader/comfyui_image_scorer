@@ -1,6 +1,6 @@
 import pytest
 
-from comfyui_image_scorer.domain.vectors.terms import (
+from ..terms import (
     extract_weight_from_paren,
     clean_term,
     filter_terms,

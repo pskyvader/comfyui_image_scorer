@@ -1,7 +1,7 @@
 from typing import Any
 
-from comfyui_image_scorer.core.configuration.settings import config
-from comfyui_image_scorer.domain.vectors.helpers import get_value_from_entry
+from ...core.configuration.settings import config
+from .helpers import get_value_from_entry
 
 
 class PositionVector:

@@ -9,14 +9,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
-from comfyui_image_scorer.core.configuration.settings import config
-from comfyui_image_scorer.core.io.serialization import atomic_write_json, load_json
-from comfyui_image_scorer.core.filesystem.paths import image_root_processed
-from comfyui_image_scorer.infrastructure.persistence.comparisons_repository import (
+from ...core.observability.logger import get_logger, ModuleLogger
+from ...core.configuration.settings import config
+from ...core.io.serialization import atomic_write_json, load_json
+from ...core.filesystem.paths import image_root_processed
+from .comparisons_repository import (
     get_all_comparisons,
 )
-from comfyui_image_scorer.infrastructure.persistence.images_repository import (
+from .images_repository import (
     get_image as get_image_data,
 )
 

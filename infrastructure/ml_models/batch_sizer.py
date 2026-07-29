@@ -6,12 +6,12 @@ from typing import Any
 
 import torch
 
-from comfyui_image_scorer.core.io.serialization import atomic_write_json, load_json
-from comfyui_image_scorer.core.observability.logger import get_logger
+from ...core.io.serialization import atomic_write_json, load_json
+from ...core.observability.logger import get_logger
 
-from comfyui_image_scorer.core.configuration.settings import config
-from comfyui_image_scorer.infrastructure.ml_models.model_loader import model_loader
-from comfyui_image_scorer.core.filesystem.paths import vectors_size_file
+from ...core.configuration.settings import config
+from .model_loader import model_loader
+from ...core.filesystem.paths import vectors_size_file
 
 logger = get_logger(__name__)
 

@@ -2,8 +2,8 @@ from typing import Any, cast
 import os
 import json
 
-from comfyui_image_scorer.core.filesystem.paths import maps_dir
-from comfyui_image_scorer.core.observability.logger import get_logger
+from ...core.filesystem.paths import maps_dir
+from ...core.observability.logger import get_logger
 
 logger = get_logger(__name__)
 

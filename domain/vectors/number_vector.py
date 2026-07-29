@@ -1,5 +1,5 @@
 from typing import Any
-from comfyui_image_scorer.domain.vectors.helpers import get_value_from_entry
+from .helpers import get_value_from_entry
 
 
 class IntVector:

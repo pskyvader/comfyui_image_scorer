@@ -36,8 +36,6 @@ url = "https://download.pytorch.org/whl/cu130"
 requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["comfyui_image_scorer", "comfyui_image_scorer.*"]
 
 [project.scripts]
 comfyui-scorer = "comfyui_image_scorer.adapters.cli.main:main"

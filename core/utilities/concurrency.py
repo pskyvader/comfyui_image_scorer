@@ -4,7 +4,7 @@ from typing import Any, Callable, TypeVar
 from tqdm import tqdm
 import time
 
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
+from ..observability.logger import get_logger, ModuleLogger
 
 R = TypeVar("R")
 logger: ModuleLogger = get_logger(__name__)

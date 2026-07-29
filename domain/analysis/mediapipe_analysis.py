@@ -5,7 +5,7 @@ import numpy as np
 from numpy import typing as npt
 from PIL import Image
 
-from comfyui_image_scorer.core.filesystem.paths import mediapipe_models_dir
+from ...core.filesystem.paths import mediapipe_models_dir
 
 import mediapipe as mp
 

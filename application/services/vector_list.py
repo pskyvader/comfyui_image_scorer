@@ -5,24 +5,25 @@ from tqdm import tqdm
 import os
 import time
 
-# print(f"package:{__package__}, name: {__name__}, file: {__file__}", flush=True)
+from ...core.observability.logger import get_logger, ModuleLogger
+from ...core.configuration.settings import config
+from ...domain.vectors.image_vector import ImageVector
+from ...domain.vectors.map_vector import MapVector
+from ...domain.vectors.number_vector import IntVector, FloatVector
+from ...domain.vectors.embedding_vector import EmbeddingVector
+from ...domain.vectors.position_vector import PositionVector
+from ...domain.vectors.keypoint_vector import KeypointVector
+from ...domain.vectors.person_map_vector import PersonMapVector
 
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
-from comfyui_image_scorer.core.configuration.settings import config
-from comfyui_image_scorer.domain.vectors.image_vector import ImageVector
-from comfyui_image_scorer.domain.vectors.map_vector import MapVector
-from comfyui_image_scorer.domain.vectors.number_vector import IntVector, FloatVector
-from comfyui_image_scorer.domain.vectors.embedding_vector import EmbeddingVector
-from comfyui_image_scorer.domain.vectors.position_vector import PositionVector
-from comfyui_image_scorer.domain.vectors.keypoint_vector import KeypointVector
-from comfyui_image_scorer.domain.vectors.person_map_vector import PersonMapVector
-
-from comfyui_image_scorer.core.filesystem.paths import split_dir, scores_file
-from comfyui_image_scorer.core.io.serialization import load_single_jsonl, write_single_jsonl
-from comfyui_image_scorer.domain.analysis.trueskill import (
+from ...core.filesystem.paths import split_dir, scores_file
+from ...core.io.serialization import load_single_jsonl, write_single_jsonl
+from ...infrastructure.loading.maps_loader import maps_list
+from ...domain.analysis.trueskill import (
     public_score_from_rating,
     Rating,
 )
+from ...infrastructure.persistence.comparisons_repository import get_all_comparisons
+from ...infrastructure.persistence.images_repository import get_image
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -43,18 +44,7 @@ class VectorList:
         self,
         raw_data: list[tuple[str, dict[str, Any], str, str]],
         read_only: bool,
-        maps_list: Any,
-        model_loader: Any,
-        batch_sizer: Any,
-        comparison_repo: Any,
-        image_repo: Any,
     ) -> None:
-
-        self._maps_list = maps_list
-        self._model_loader = model_loader
-        self._batch_sizer = batch_sizer
-        self._comparison_repo = comparison_repo
-        self._image_repo = image_repo
 
         self.image_paths: dict[str, str] = {}
         self.entries: dict[str, Any] = {}
@@ -82,7 +72,6 @@ class VectorList:
                 or file_id in self.image_paths
             ):
                 duplicated.append(file_id)
-                # logger.debug(f"Duplicate file_id found in entries: {file_id}")
             else:
                 self.unique_ids.append(file_id)
             self.entries[file_id] = entry
@@ -107,24 +96,24 @@ class VectorList:
             name = current_type["name"]
 
             if v_type == self._MAP:
-                vec = MapVector(name, self._maps_list)
+                vec = MapVector(name)
             elif v_type == self._INT:
                 vec = IntVector(name, current_type["max_normalization"])
             elif v_type == self._FLOAT:
                 vec = FloatVector(name, current_type["max_normalization"])
             elif v_type == self._EMBEDDING:
                 slot_size = current_type["slot_size"]
-                vec = EmbeddingVector(name, slot_size=slot_size, model_loader=self._model_loader)
+                vec = EmbeddingVector(name, slot_size=slot_size)
             elif v_type == self._IMAGE:
                 model_key = current_type["model_key"]
                 slot_size = current_type["slot_size"]
-                vec = ImageVector(name, model_key=model_key, slot_size=slot_size, model_loader=self._model_loader, batch_sizer=self._batch_sizer)
+                vec = ImageVector(name, model_key=model_key, slot_size=slot_size)
             elif v_type == self._POSITION:
                 vec = PositionVector(name)
             elif v_type == self._KEYPOINT:
                 vec = KeypointVector(name)
             elif v_type == self._PERSON_MAP:
-                vec = PersonMapVector(name, self._maps_list)
+                vec = PersonMapVector(name)
             else:
                 raise ValueError(f"Unknown vector type: {v_type}")
 
@@ -158,15 +147,11 @@ class VectorList:
         return new_paths
 
     def create_vectors(self) -> None:
-        # split by data type
         for v in self.sorted_vectors:
             c = self.sorted_vectors[v]
             alias = c["alias"]
-            # print(f"Vector config for {v}: {c}")
             if c["type"] == self._MAP:
                 map_vector: MapVector = c["vector"]
-                # Category registration into the map is done during the text
-                # (metadata) stage, not here; create_vectors only maps values.
                 new_entries = self._exclude_present_entry(map_vector)
                 map_vector.parse_value_list(new_entries, self.add_new_to_map, alias)
                 map_vector.create_vector_list()
@@ -195,14 +180,13 @@ class VectorList:
                 embedding_vector.create_text_list(batch_size=256)
 
                 self.sorted_vectors[v]["vector"] = embedding_vector
-            elif c["type"] == self._IMAGE:  # and self.process_images:
+            elif c["type"] == self._IMAGE:
                 image_vector: ImageVector = c["vector"]
                 new_image_paths: dict[str, str] = self._exclude_present_image_path(
                     image_vector
                 )
                 result = (-1, -1)
                 while isinstance(result, tuple):
-                    # print(f"processing images with size: {result}...")
                     result = image_vector.create_vector_list_from_paths(
                         new_image_paths,
                         0.85,
@@ -264,24 +248,15 @@ class VectorList:
             c = self.sorted_vectors[v]
             current_vector = c["vector"]
             vector_ids = set(current_vector.vector_list.keys())
-            # logger.debug(
-            #     f" for vector {c["name"]} initial valid_ids count: {len(valid_ids)}"
-            # )
             error_ids[c["name"]] = []
             errors: list[str] = []
             for id in valid_ids:
                 if id not in vector_ids:
                     errors.append(id)
-                    # logger.debug(
-                    #     f"ID '{id[:10]}...' missing from vector '{c['name']}', removing"
-                    # )
             if len(errors) > 0:
                 error_ids[c["name"]] = errors
 
             valid_ids = [id for id in valid_ids if id in vector_ids]
-            # logger.debug(
-            #     f"After filtering with vector '{c['name']}': valid_ids count: {len(valid_ids)}, error_ids count: {len(error_ids)}"
-            # )
 
         logger.info(f"valid vectors:{len(valid_ids)}")
         if len(error_ids.items()) > 0:
@@ -315,12 +290,7 @@ class VectorList:
                     (valid_vectors), c["name"], c["slot_size"]
                 )
                 clean_arrays.append(converted_vector)
-                # logging.debug(
-                #     f"Joined vector '{c['name']}' with shape {converted_vector.shape}, (original: {len(current_vector.vector_list)} entries)"
-                # )
                 pbar.update(1)
-
-        # print(f"clean_arrays lengths: {[len(arr) for arr in clean_arrays]}")
 
         logger.info("assembling vectors...")
         self.final_vector = np.column_stack(clean_arrays).tolist()
@@ -395,7 +365,7 @@ class VectorList:
         index_lookup = {fid: idx for idx, fid in enumerate(index_list)}
         comparison_rows: list[dict[str, Any]] = []
 
-        for row in self._comparison_repo.get_all_comparisons():
+        for row in get_all_comparisons():
             filename_a = row.get("filename_a")
             filename_b = row.get("filename_b")
             winner = row.get("winner")
@@ -464,10 +434,6 @@ class VectorList:
 
     def update_lists(self) -> None:
         logger.info("updating vector lists...")
-        # Use the filename as the object key (matching text_data.jsonl style)
-        # so the merged vectors.jsonl / scores.jsonl are self-identifying and
-        # no longer require index.jsonl to reconstruct alignment. index.jsonl
-        # is still written for compatibility but is not used as the join key.
         self.vectors_list = [{fid: vec} for fid, vec in zip(self.unique_ids, self.final_vector)]
         self.text_list = self.final_text_data
         self.index_list: list[str] = self.unique_ids
@@ -475,12 +441,6 @@ class VectorList:
         self.comparisons_list = self.final_comparison_data
 
     def load_split_files(self) -> None:
-        """Load split files back into each vector's ``.vector_list`` /
-        ``.value_list`` / ``.text_list`` — the reverse of
-        :meth:`export_split_files`.
-
-        Returns the ordered list of unique IDs found in the splits.
-        """
         _start = time.perf_counter()
 
         global cache_split_data
@@ -497,7 +457,6 @@ class VectorList:
                 name = c["name"]
                 v_type = c["type"]
                 current_vector = c["vector"]
-                # logger.debug(f"vector: {v}", _start)
 
                 split_path = os.path.join(split_dir, v_type, f"{name}.jsonl")
                 if not os.path.exists(split_path):
@@ -517,12 +476,8 @@ class VectorList:
                         self.unique_ids.append(obj["id"])
                         raw_vals[obj["id"]] = obj["raw"]
                         vec_vals[obj["id"]] = obj["vector"]
-                        # Re-register categories from the stored raw value so the
-                        # map vocabulary stays complete even when split files
-                        # already covered these entries (the text stage may not
-                        # have registered them on a prior run).
                         if v_type in (self._MAP, self._PERSON_MAP):
-                            self._maps_list.register_value(name, obj["raw"])
+                            maps_list.register_value(name, obj["raw"])
                     else:
                         invalid.append(obj)
 
@@ -545,9 +500,7 @@ class VectorList:
                 elif v_type == self._IMAGE:
                     current_vector.path_list = raw_vals
                 pbar.update(1)
-            # return unique_ids
 
-        # replace adding only uniques each step for just transform to set and then list again, once
         logger.debug(f"before unique:{len(self.unique_ids)}")
         self.unique_ids = list(set(self.unique_ids))
         logger.debug(f"after unique:{len(self.unique_ids)}")
@@ -569,9 +522,6 @@ class VectorList:
                 "Scores file is empty. Attempting to rebuild scores mapping from DB..."
             )
         elif all(isinstance(s, dict) and len(s) == 1 for s in scores_list):
-            # Filename-as-key format (matches text_data.jsonl): one key/value
-            # per record, keyed by filename. Aligns by filename id with no
-            # positional assumption and no dependency on index.jsonl.
             self.scores = {str(fid): float(score) for s in scores_list for fid, score in s.items()}
             missing = [fid for fid in self.unique_ids if fid not in self.scores]
             if missing:
@@ -580,7 +530,7 @@ class VectorList:
                 )
                 errors: list[str] = []
                 for fid in missing:
-                    row = self._image_repo.get_image(fid)
+                    row = get_image(fid)
                     if row is not None:
                         self.scores[fid] = public_score_from_rating(
                             Rating(
@@ -590,13 +540,11 @@ class VectorList:
                         )
                     else:
                         errors.append(fid)
-                        # logger.warning(f"No DB record for ID: {fid}")
                 logger.warning(
                     f"Missing IDs with no DB record: {len(errors)}. Sample: {errors[:5]}"
                 )
             return
         elif len(scores_list) == len(self.unique_ids):
-            # Legacy positional format kept for backward compatibility.
             self.scores = {
                 fid: score for fid, score in zip(self.unique_ids, scores_list)
             }
@@ -608,7 +556,7 @@ class VectorList:
 
         for ids in self.unique_ids:
             if not ids in self.scores:
-                row = self._image_repo.get_image(ids)
+                row = get_image(ids)
                 if row is not None:
                     mu_skill = float(row["rating_mu"])
                     sigma_uncertainty = float(row["rating_sigma"])
@@ -664,7 +612,6 @@ class VectorList:
 
                 split_data: list[dict[str, Any]] = []
 
-                # with jsonlines.open(out_file, mode="w") as writer:
                 for uid in current_vector.vector_list.keys():
                     raw_val = raw_values[uid]
                     vec_val = current_vector.vector_list[uid]

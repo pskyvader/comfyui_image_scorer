@@ -15,8 +15,8 @@ from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler
 from typing import Any
 
-from comfyui_image_scorer.core.io.serialization import load_single_jsonl
-from comfyui_image_scorer.core.filesystem.paths import vectors_file, text_data_file
+from ...core.io.serialization import load_single_jsonl
+from ...core.filesystem.paths import vectors_file, text_data_file
 
 matplotlib.use("Agg")
 

@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from comfyui_image_scorer.domain.graph.chain_manager import ChainManager
-    from comfyui_image_scorer.domain.graph.node_proxy import NodeProxy
-    from comfyui_image_scorer.domain.graph.chain_proxy import ChainProxy
+    from .chain_manager import ChainManager
+    from .node_proxy import NodeProxy
+    from .chain_proxy import ChainProxy
 
-from comfyui_image_scorer.domain.graph import node_proxy as _node_proxy
-from comfyui_image_scorer.domain.graph import chain_proxy as _chain_proxy
+from . import node_proxy as _node_proxy
+from . import chain_proxy as _chain_proxy
 
 
 class ComponentProxy:

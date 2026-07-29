@@ -7,9 +7,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from comfyui_image_scorer.core.observability.logger import ModuleLogger, get_logger
+from ...core.observability.logger import ModuleLogger, get_logger
 
-from comfyui_image_scorer.infrastructure.persistence.database import get_db_connection
+from .database import get_db_connection
 
 logger: ModuleLogger = get_logger(__name__)
 

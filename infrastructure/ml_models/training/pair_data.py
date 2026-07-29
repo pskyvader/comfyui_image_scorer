@@ -5,8 +5,8 @@ from typing import Any, Sequence
 import numpy as np
 import numpy.typing as npt
 
-from comfyui_image_scorer.core.io.serialization import load_single_jsonl
-from comfyui_image_scorer.core.filesystem.paths import comparisons_file
+from ....core.io.serialization import load_single_jsonl
+from ....core.filesystem.paths import comparisons_file
 from tqdm import tqdm
 
 

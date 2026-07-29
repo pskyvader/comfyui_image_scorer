@@ -7,21 +7,20 @@ import torch
 import warnings
 from PIL.Image import Image
 
-from comfyui_image_scorer.core.configuration.settings import config
-from comfyui_image_scorer.core.utilities.helpers import export_image_batch
-from comfyui_image_scorer.domain.analysis.image_analysis import ImageAnalysis
-from comfyui_image_scorer.domain.vectors.image_vector import ImageVector
-from comfyui_image_scorer.domain.data_transformation.data_transformer import DataTransformer
-from comfyui_image_scorer.domain.training.calibration import (
+from ...core.configuration.settings import config
+from ...core.utilities.helpers import export_image_batch
+from ...domain.analysis.image_analysis import ImageAnalysis
+from ...domain.vectors.image_vector import ImageVector
+from ...domain.data_transformation.data_transformer import DataTransformer
+from ...domain.training.calibration import (
     apply_score_calibration,
     extract_score_calibration,
 )
-from comfyui_image_scorer.infrastructure.loading.training_loader import training_loader
-from comfyui_image_scorer.infrastructure.ml_models.model_loader import model_loader
-from comfyui_image_scorer.infrastructure.ml_models.batch_sizer import BatchSizer
-from comfyui_image_scorer.infrastructure.ml_models.training.model_trainer import model_trainer
-from comfyui_image_scorer.infrastructure.loading.maps_loader import maps_list
-from comfyui_image_scorer.application.services.vector_list import VectorList
+from ...infrastructure.loading.training_loader import training_loader
+from ...infrastructure.ml_models.model_loader import model_loader
+from ...infrastructure.ml_models.batch_sizer import BatchSizer
+from ...infrastructure.ml_models.training.model_trainer import model_trainer
+from .vector_list import VectorList
 
 
 class ScoringService:
@@ -93,11 +92,6 @@ class ScoringService:
         vector_list = VectorList(
             processed_data,
             read_only=True,
-            maps_list=maps_list,
-            model_loader=self._model_loader,
-            batch_sizer=self._batch_sizer(model_key=""),
-            comparison_repo=None,
-            image_repo=None,
         )
         vector_list.create_vectors()
 

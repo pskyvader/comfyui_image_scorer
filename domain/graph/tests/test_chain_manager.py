@@ -8,9 +8,9 @@ import logging
 import time
 import pytest
 from tqdm import tqdm
-from comfyui_image_scorer.application.services.graph_service import CrystalGraph
-from comfyui_image_scorer.domain.graph.chain_manager import ChainManager
-from comfyui_image_scorer.infrastructure.persistence.comparisons_repository import (
+from ....application.services.graph_service import CrystalGraph
+from ..chain_manager import ChainManager
+from ....infrastructure.persistence.comparisons_repository import (
     get_all_comparisons,
     get_images_with_only_wins,
     get_images_with_only_losses,

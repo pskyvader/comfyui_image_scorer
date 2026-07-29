@@ -6,13 +6,13 @@ from tqdm import tqdm
 import time
 
 
-from comfyui_image_scorer.core.observability.logger import get_logger, ModuleLogger
+from ...core.observability.logger import get_logger, ModuleLogger
 
-from comfyui_image_scorer.domain.database.ports import ImageRepository, ComparisonRepository
-from comfyui_image_scorer.domain.graph.chain_manager import ChainManager
-from comfyui_image_scorer.domain.graph.node_proxy import NodeProxy
-from comfyui_image_scorer.domain.graph.chain_proxy import ChainProxy
-from comfyui_image_scorer.domain.graph.component_proxy import ComponentProxy
+from ...domain.database.ports import ImageRepository, ComparisonRepository
+from ...domain.graph.chain_manager import ChainManager
+from ...domain.graph.node_proxy import NodeProxy
+from ...domain.graph.chain_proxy import ChainProxy
+from ...domain.graph.component_proxy import ComponentProxy
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -340,3 +340,34 @@ class CrystalGraph:
                 # f": {errors}"
             )
         return self._chain_map
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton with lazy repo wiring
+# ---------------------------------------------------------------------------
+
+
+class _LazyImageRepo:
+    def get_all_images(self) -> list[dict[str, Any]]:
+        from ...infrastructure.persistence.images_repository import get_all_images
+        return get_all_images()
+
+    def get_image(self, filename: str) -> dict[str, Any] | None:
+        from ...infrastructure.persistence.images_repository import get_image
+        return get_image(filename)
+
+
+class _LazyComparisonRepo:
+    def get_all_comparisons(self) -> list[dict[str, Any]]:
+        from ...infrastructure.persistence.comparisons_repository import get_all_comparisons
+        return get_all_comparisons()
+
+    def get_total_comparisons(self) -> int:
+        from ...infrastructure.persistence.comparisons_repository import get_total_comparisons
+        return get_total_comparisons()
+
+
+crystal_graph: CrystalGraph = CrystalGraph(
+    image_repo=_LazyImageRepo(),
+    comparison_repo=_LazyComparisonRepo(),
+)

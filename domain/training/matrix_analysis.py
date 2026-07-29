@@ -12,7 +12,7 @@ import numpy as np
 from tqdm import tqdm
 import polars as pl
 
-from comfyui_image_scorer.core.io.serialization import write_single_jsonl
+from ...core.io.serialization import write_single_jsonl
 
 
 class MatrixAnalyzer:

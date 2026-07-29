@@ -95,18 +95,9 @@ No layer may import from a layer to its right. The **ComfyUI node integration is
   - `database.py` — DB maintenance (cleanup, dedup, vacuum)
 - `output.py` — Rich/typer formatting helpers
 
-**Exposed via `pyproject.toml`:**
-```toml
-[project.scripts]
-comfyui-scorer = "comfyui_image_scorer.adapters.cli.main:app"
-```
-
-**Usage after `pip install -e .`:**
+The CLI is accessible via:
 ```bash
-comfyui-scorer server --port 8080
-comfyui-scorer training run --config config/training_config.json
-comfyui-scorer vectors generate --input output/images --output output/vectors
-comfyui-scorer database cleanup --vacuum
+python scorer.py --help
 ```
 
 ---

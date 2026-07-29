@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import erf, exp, pi, sqrt
 
-from comfyui_image_scorer.core.configuration.settings import config
+from ...core.configuration.settings import config
 
 INITIAL_MEAN = 25.0
 INITIAL_UNCERTAINTY = INITIAL_MEAN / 3.0

@@ -20,12 +20,12 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 import lightgbm as lgb
 
-from comfyui_image_scorer.core.observability.logger import get_logger
-from comfyui_image_scorer.core.configuration.settings import config
-from comfyui_image_scorer.core.io.serialization import load_single_jsonl
-from comfyui_image_scorer.infrastructure.loading.training_loader import training_loader
-from comfyui_image_scorer.core.filesystem.paths import index_file
-from comfyui_image_scorer.domain.training.calibration import build_score_calibration
+from ....core.observability.logger import get_logger
+from ....core.configuration.settings import config
+from ....core.io.serialization import load_single_jsonl
+from ...loading.training_loader import training_loader
+from ....core.filesystem.paths import index_file
+from ....domain.training.calibration import build_score_calibration
 from .pair_data import build_pairwise_dataset, load_comparison_records
 
 logger = get_logger(__name__)

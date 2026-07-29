@@ -1,1 +1,1 @@
-"""Application services — ScoringService: full scoring workflow encapsulating image analysis, vector creation, feature filtering, model prediction, and score calibration; CrystalGraph: high-level graph API orchestrating ChainManager + repositories."""
+"""Application services - ScoringService: full scoring workflow encapsulating image analysis, vector creation, feature filtering, model prediction, and score calibration; CrystalGraph: high-level graph API orchestrating ChainManager + repositories."""
