@@ -74,7 +74,7 @@ class ImageAnalysis(ImageVector):
             raise KeyError("No image-type entries found in vector_config")
         model_key = image_entries[0]["model_key"]
         slot_size = image_entries[0]["slot_size"]
-        super().__init__("tmp_image", model_key=model_key, slot_size=slot_size, model_loader=model_loader, batch_sizer=batch_sizer)
+        super().__init__("tmp_image", model_key=model_key, slot_size=slot_size)
         self.raw_data: list[ImageEntry] = raw_data
         self.processed_data: list[ImageEntry] = []
         self._mediapipe = MediaPipeAnalyzer()

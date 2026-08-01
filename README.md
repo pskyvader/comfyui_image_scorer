@@ -16,7 +16,7 @@ No layer may import from a layer to its right. The **ComfyUI node integration is
 
 | Path | Purpose |
 |---|---|
-| `comfyui_image_scorer/` | Python package (installable source) |
+| `comfyui_image_scorer/` | Python package (source only — never pip-installed; only its dependencies are installed) |
 | `config/` | Runtime configuration files (JSON) — read-only at startup |
 | `downloaded_models/` | Downloaded third-party model weights (MediaPipe `.task`, `.tflite`) — input only |
 | `output/` | **Regeneratable runtime state** (git-ignored). Safe to `rm -rf`. Contains: SQLite DB, vector caches, generated maps, exported models. |
@@ -36,6 +36,88 @@ No layer may import from a layer to its right. The **ComfyUI node integration is
 - `utilities/` — Pure functions (collections, math, text, time)
 
 **Rule:** `core` imports **nothing** from `domain`, `application`, `adapters`, or `infrastructure`.
+
+### Dependency Tree
+
+**Condensed** — nesting = dependency; each box may import every box that contains it:
+
+```
+rule: a box may import every box that contains it (inner builds on outer)
+┌────────────────────────────┐
+│            core            │
+│  utilities, config, paths  │
+│  stdlib only               │
+│ ┌────────────────────────┐ │
+│ │         domain         │ │
+│ │  business logic,       │ │
+│ │  algorithms, ports     │ │
+│ │ ┌────────────────────┐ │ │
+│ │ │    application     │ │ │
+│ │ │  orchestrates      │ │ │
+│ │ │  use cases         │ │ │
+│ │ │ ┌────────────────┐ │ │ │
+│ │ │ │    adapters    │ │ │ │
+│ │ │ │  ComfyUI nodes,│ │ │ │
+│ │ │ │  CLI, Flask    │ │ │ │
+│ │ │ └────────────────┘ │ │ │
+│ │ └────────────────────┘ │ │
+│ │ ┌────────────────────┐ │ │
+│ │ │  infrastructure    │ │ │
+│ │ │  SQLite, ML        │ │ │
+│ │ │  models, loaders   │ │ │
+│ │ └────────────────────┘ │ │
+│ └────────────────────────┘ │
+└────────────────────────────┘
+```
+
+Nothing imports `infrastructure` — its implementations reach callers via
+dependency injection; `adapters` depends on everything above it.
+
+**Full layout** — the package root (the `comfyui_image_scorer/` folder itself) is the importable module. Arrows show what each layer may import from — imports point downward only.
+
+```
+comfyui_image_scorer/
+├── core/                                  ← imports: stdlib only
+│   ├── configuration/                     settings loading, validation, defaults
+│   ├── filesystem/                        path registry, resolution, runtime dirs
+│   ├── observability/                     structured logging, correlation IDs
+│   ├── io/                                serialization, atomic writes
+│   └── utilities/                         pure functions (collections, math, text, time)
+│
+├── domain/                                ← imports: core
+│   ├── analysis/                          image/attribute analysis, MediaPipe integration
+│   ├── comparison/                        TrueSkill rating, pairwise state, phase ordering
+│   │   └── algorithm/                     merge-sort ranker, pair activation, graph helpers
+│   ├── database/                          repository interfaces, entities, schema
+│   ├── data_transformation/               feature pipelines, metadata normalization, map configs
+│   ├── graph/                             crystal graph, chain management, proxy objects
+│   ├── training/                          HPO orchestration, calibration, parameter analysis
+│   └── vectors/                           embedding, keypoint, position, person-map vectors
+│
+├── application/                           ← imports: core, domain
+│   ├── analysis/                          run_stats, run_matrix/run_parameter_analysis
+│   ├── data_transform/                    data preparation, map configs
+│   ├── dto/                               data transfer objects
+│   ├── hyperparameters/                   hyperparameter optimizer
+│   ├── ports/                             abstract interfaces for adapters
+│   └── services/                          Scoring, Ranking, Gallery, Map, Training services
+│
+├── adapters/                              ← imports: core, domain, application
+│   ├── cli/                               argparse router + commands (server, training,
+│   │                                      vectors, database, files, analyze)
+│   ├── comfyui/                           ComfyUI node integration (primary deliverable)
+│   ├── server/                            Flask REST API (routing, endpoints, middleware)
+│   ├── analysis/ comparison/ database_structure/ data_transform/ gallery/
+│   ├── maps/ maps2/ training_hyperparameters/
+│   │                                      server frontends, one folder per feature
+│   └── .../frontend/                      static JS/CSS/HTML per feature
+│
+└── infrastructure/                        ← imports: core, domain (implements domain ports)
+    ├── external_services/                 HTTP clients, third-party services
+    ├── loading/                           model loaders (aesthetic, MediaPipe, maps)
+    ├── ml_models/                         ONNX/TFLite wrappers, batch sizer, model trainer
+    └── persistence/                       SQLite repositories, folder organizer, cleanup
+```
 
 ---
 
@@ -122,6 +204,46 @@ python scorer.py --help
 
 **Violations are architectural errors.** Use dependency injection (pass implementations as arguments) to cross boundaries outward.
 
+### Dependency Violation Test
+
+Yes — an AST-based import scan. Parse every module in each layer, resolve each
+import to its top-level layer, and assert it is in that layer's allowed set
+(stdlib and installed third-party packages are ignored):
+
+```python
+# tests/test_architecture.py
+import ast
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+LAYERS = ("core", "domain", "application", "adapters", "infrastructure")
+ALLOWED = {
+    "core": (),
+    "domain": ("core",),
+    "application": ("core", "domain"),
+    "adapters": ("core", "domain", "application"),
+    "infrastructure": ("core", "domain"),
+}
+
+def test_no_architectural_violations():
+    for layer, allowed in ALLOWED.items():
+        for path in sorted((ROOT / layer).rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                target = None
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    target = node.module.split(".")[0]
+                elif isinstance(node, ast.Import):
+                    target = node.names[0].name.split(".")[0]
+                if target in LAYERS and target not in allowed and layer != target:
+                    raise AssertionError(f"{path.relative_to(ROOT)}: {layer} imports {target}")
+```
+
+Run with `pytest tests/test_architecture.py`. Existing violations (e.g.
+`domain`/`application`/`adapters` importing `infrastructure`) must be fixed by
+moving code across the boundary — never by relaxing the test. The `core` row
+has an empty allowed set on purpose: `core` imports only stdlib.
+
 ---
 
 ## Runtime Data Rules
@@ -148,9 +270,9 @@ python scorer.py --help
 
 ## Development Conventions
 
-1. **Imports:** Absolute from package root (`from comfyui_image_scorer.core.configuration import Settings`). No `sys.path` manipulation. No relative imports (`from ....core...`). **Why:** Relative imports break when running files as scripts, when entry points differ (ComfyUI vs. server), or when restructuring. Absolute imports work everywhere once the package is installed in editable mode (`pip install -e .`). Both ComfyUI nodes and the server entry point resolve correctly.
+1. **Imports:** always relative, otherwise comfyui will struggle.
 2. **Tests:** Colocated `tests/` subdirectory next to tested module (e.g., `domain/comparison/tests/test_trueskill.py`).
-3. **Typing:** Full type hints on public APIs. `pyright --level=basic` must pass.
+3. **Typing:** Full type hints on public APIs. `pyright` must pass in strict mode (`"typeCheckingMode": "strict"` in `pyrightconfig.json`).
 4. **No global mutable state** in `core`/`domain`/`application`. State lives in `adapters` or `infrastructure`.
 5. **Configuration** enters only via `core.configuration` — no `os.getenv` scattered in domain code.
 
@@ -170,10 +292,11 @@ ComfyUI discovers nodes at startup. Verify registration works:
 
 **3. Programmatic test** (run in CI / locally):
 ```bash
-# From project root
+# From project root (parent dir must be on sys.path — same as ComfyUI loading
+# this folder from custom_nodes/, and same as pytest's pythonpath = [".."])
 python -c "
 import sys
-sys.path.insert(0, '.')
+sys.path.insert(0, '..')
 from comfyui_image_scorer.adapters.comfyui import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
 print('Nodes:', list(NODE_CLASS_MAPPINGS.keys()))
 for name, cls in NODE_CLASS_MAPPINGS.items():
@@ -206,9 +329,10 @@ def test_aesthetic_nodes_registered():
 - **Practical over architectural** — add abstractions only when they remove real duplication or match existing ComfyUI patterns
 - **Fewer dependencies** — no new deps unless absolutely necessary
 - **Delete dead code aggressively** — no fallbacks, migration paths, debug prints, or compatibility branches that aren't needed
-- **Revert broken behavior fast** — better to remove a broken feature than keep a partial fix
+
 - **Preserve APIs** — node names, model-loading behavior, file layout, workflow compatibility unless explicitly replacing them
-- **No AI-generated code style** — no unnecessary helper layers, vague names, boilerplate comments, defensive branches without real failure modes, broad rewrites
+- **No AI-generated code style** — no unnecessary helper layers, vague names, boilerplate comments, defensive branches without real failure modes, broad rewrites, try catch blocks, default values
+
 
 ### Architecture Boundaries
 - **Layer focus** — each layer owns its concepts; don't leak UI, API, workflow, queue, persistence, telemetry, model-loading, node, or execution concerns across layers
@@ -218,7 +342,7 @@ def test_aesthetic_nodes_registered():
 
 ### No Internet Requests
 - **No outbound network calls** from core/domain/application layers — no telemetry, analytics, tracking, usage reporting, crash reporting, update checks, remote config, feature flags, metrics, licensing checks
-- **Model downloading only when explicitly user-initiated** — limited to requested artifact, no background activity
+- **Model downloading only when explicitly user-initiated** — limited to requested artifact, no background activity. The only download path is the `files download models` CLI command (all models in `prepare_config.json`: HF/timm/torch.hub + MediaPipe). Runtime model loading is offline-only: missing models fail fast with a hint to run that command
 - **Local-only behavior allowed** — if it stays on user's machine with no network access, tracking, or persistent identification
 
 ### State Ownership
@@ -240,8 +364,8 @@ def test_aesthetic_nodes_registered():
 - **Remove training-only behavior** (dropout) from inference code; preserve checkpoint compatibility with `nn.Identity` if needed
 
 ### Python Style
-- **Imports at module scope** — no inline imports unless for optional-backend probes or import cycles
-- **No unnecessary try/except** — only for optional deps/platform/backends with a useful fallback
+- **Imports at module scope** — no inline imports, ever.
+- **No unnecessary try/except** — just dont create any.
 - **No version workarounds** for pinned library versions
 - **Fail clearly** on unsupported formats, invalid quantization, bad state — no silent quality degradation
 - **Match local file style** — long lines, simple helpers, module-level state, direct tensor ops are fine when clearer
@@ -309,8 +433,9 @@ def test_aesthetic_nodes_registered():
 > This ensures `torch`, `comfy`, and all ComfyUI-internal packages resolve correctly for both the server and node entry points.
 
 ```bash
-# Install in editable mode
-pip install -e .
+# Install dependencies only — the package itself is never pip-installed
+# (regenerate requirements.txt via: uv pip compile pyproject.toml -o requirements.txt)
+pip install -r requirements.txt
 
 # Run type checks
 pyright

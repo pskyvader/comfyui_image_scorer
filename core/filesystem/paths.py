@@ -10,18 +10,11 @@ cache_file: str = os.path.join(output_dir, "cache.db")
 
 
 def _resolve_image_root() -> str:
-    try:
-        raw = config["image_root"]
-        if raw:
-            return raw
-    except KeyError:
-        pass
-    try:
-        from folder_paths import get_output_directory
-        return get_output_directory()
-    except ImportError:
-        pass
-    return str(PROJECT_ROOT.parents[1] / "output")
+    if config["image_root"] != "":
+        return config["image_root"]
+    from folder_paths import get_output_directory
+
+    return get_output_directory()
 
 
 image_root: str = _resolve_image_root()
@@ -42,7 +35,7 @@ text_data_file: str = os.path.join(vectors_dir, "text_data.jsonl")
 
 
 models_dir: str = os.path.join(output_dir, "models")
-mediapipe_models_dir: str = os.path.join(root, "downloaded_models")
+mediapipe_models_dir: str = os.path.join(output_dir, "downloaded_models")
 
 training_model: str = os.path.join(models_dir, "model.npz")
 vectors_data: str = os.path.join(models_dir, "vectors.npz")

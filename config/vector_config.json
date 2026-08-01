@@ -123,7 +123,7 @@
             "name": "model",
             "type": "map",
             "max_normalization": null,
-            "slot_size": 24,
+            "slot_size": 25,
             "alias": [
                 "model_title",
                 "model_name",

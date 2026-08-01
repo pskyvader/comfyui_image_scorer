@@ -1,168 +1,144 @@
 from __future__ import annotations
 
+import itertools
 import os
-from collections import defaultdict
-from typing import Any
+from typing import Any, Iterator
 
 from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.filesystem.paths import (
-    vectors_dir, split_dir, vectors_file, scores_file,
-    comparisons_file, index_file, text_data_file,
-    image_root_processed,
+    vectors_file,
+    scores_file,
+    comparisons_file,
+    text_data_file,
+    vectors_dir,
+    image_root,
 )
 from ...core.io.serialization import (
-    load_single_jsonl, write_single_jsonl,
-    discover_files, collect_valid_files,
+    write_single_jsonl,
+    discover_files,
+    collect_valid_files,
 )
 from ...core.configuration.settings import config
-from ...domain.vectors.helpers import get_value_from_entry
+from ...domain.analysis.image_analysis import ImageAnalysis
+from ...domain.analysis.trueskill import replay_ratings, public_score_from_rating
+from ...application.services.vector_list import VectorList
+from ...application.data_transform.config.maps import register_map_values
+from ...infrastructure.ml_models.model_loader import (
+    model_loader,
+    verify_models_present,
+)
+from ...infrastructure.ml_models.batch_sizer import BatchSizer
+from ...infrastructure.persistence.comparisons_repository import get_all_comparisons
 
 logger: ModuleLogger = get_logger(__name__)
+verify_models_present()
 
 
-def _count_jsonl(path: str) -> int:
-    if not os.path.exists(path):
-        return 0
-    count = 0
-    for _ in load_single_jsonl(path):
-        count += 1
-    return count
+def build_split_files(limit: int) -> dict[str, int]:
+    logger.info("Starting image processing...")
 
+    if not os.path.isdir(image_root):
+        raise FileNotFoundError(
+            f"Configured image_root does not exist or is not a directory: {image_root}"
+        )
+    batch_size = config["prepare"]["batch_size"]
+    max_workers = config["prepare"]["max_workers"]
 
-_EXCLUDED_KEYS = frozenset({
-    "comparison_history", "bbox", "nose", "left_eye_inner", "left_eye",
-    "left_eye_outer", "right_eye_inner", "right_eye", "right_eye_outer",
-    "left_ear", "right_ear", "mouth_left", "mouth_right",
-    "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
-    "left_wrist", "right_wrist", "left_pinky", "right_pinky",
-    "left_index", "right_index", "left_thumb", "right_thumb",
-    "left_hip", "right_hip", "left_knee", "right_knee",
-    "left_ankle", "right_ankle", "left_heel", "right_heel",
-    "left_foot_index", "right_foot_index", "face_bbox", "body_pose",
-    "last_compared", "prompt_tags", "filename",
-    "negative_prompt", "positive_prompt", "custom_text",
-    "artifact_score", "colorfulness", "contrast", "edge_density",
-    "noise_score", "sharpness", "texture_lbp",
-})
+    logger.debug("loading already-processed ids from split files...")
+    split_ids = VectorList([], read_only=False)
+    processed_files: set[str] | None = None
+    for c in split_ids.sorted_vectors.values():
+        ids = set(c["vector"].vector_list.keys())
+        if ids:
+            processed_files = ids if processed_files is None else processed_files & ids
+    processed_files = processed_files or set()
 
-
-def _flatten_to_vector(value: Any, key: str | None = None) -> list[float]:
-    if key is not None and key in _EXCLUDED_KEYS:
-        return []
-    result: list[float] = []
-    if isinstance(value, dict):
-        for k, v in value.items():
-            result.extend(_flatten_to_vector(v, k))
-    elif isinstance(value, (list, tuple)):
-        for v in value:
-            result.extend(_flatten_to_vector(v))
-    elif isinstance(value, (int, float)):
-        result.append(float(value))
-    return result
-
-
-def _build_vectors_from_analysis(limit: int = 0) -> dict[str, Any]:
-    prepare_conf = config["prepare"]
-    max_workers = int(prepare_conf["max_workers"])
-
-    pairs = list(discover_files(image_root_processed))
+    logger.info(f"collecting files in {image_root}...")
+    files: Iterator[tuple[str, str]] = discover_files(image_root)
+    if processed_files:
+        files = (f for f in files if os.path.basename(f[0]) not in processed_files)
     if limit > 0:
-        pairs = pairs[:limit]
-
-    entries = collect_valid_files(
-        pairs, set(), image_root_processed, limit=0,
-        max_workers=max_workers, scored_only=True,
+        files = itertools.islice(files, limit)
+    collected_data = collect_valid_files(
+        files,
+        max_workers=max_workers,
+        scored_only=True,
     )
-    os.makedirs(vectors_dir, exist_ok=True)
-    os.makedirs(split_dir, exist_ok=True)
 
-    from ...application.services.vector_list import VectorList
-    from ...infrastructure.loading.maps_loader import maps_list
+    if len(collected_data) == 0:
+        logger.info("No new valid files found. Exiting.")
+        result = {"total": len(processed_files), "new": 0}
 
-    for _path, entry, _timestamp, _file_id in entries:
-        if not isinstance(entry, dict):
-            continue
-        for v in config["vector"]["vectors"]:
-            if v["type"] in ("map", "person_map"):
-                value = get_value_from_entry(entry, v["name"], v.get("alias"))
-                if value is not None:
-                    maps_list.register_value(v["name"], value)
+        return result
 
-    vector_list = VectorList(entries, read_only=False)
+    logger.info("analyzing images ...")
+    image_analysis = ImageAnalysis(collected_data, model_loader, BatchSizer)
+    processed_data = image_analysis.analyze_images_from_paths(batch_size, max_workers)
+    register_map_values(processed_data)
+    logger.info(f"processed data:{len(processed_data)}. Creating vector list object...")
+    vectors_list_parser = VectorList(
+        processed_data,
+        read_only=False,
+    )
 
-    vector_list.create_vectors()
-    vector_list.export_split_files()
+    vectors_list_parser.create_vectors()
+    vectors_list_parser.export_split_files()
 
-    vector_entries: list[dict[str, Any]] = []
-    index_entries: list[str] = []
-    text_entries: list[dict[str, Any]] = []
-
-    for img_path, entry, timestamp, file_id in entries:
-        flat_vec = _flatten_to_vector(entry)
-        vector_entries.append({file_id: flat_vec})
-        index_entries.append(file_id)
-        text_part = {k: v for k, v in entry.items() if isinstance(v, (str, int, float, bool))}
-        text_entries.append({"id": file_id, **text_part})
-
-    write_single_jsonl(vectors_file, vector_entries, "w")
-    write_single_jsonl(index_file, index_entries, "w")
-    write_single_jsonl(text_data_file, text_entries, "w")
-
-    return {
-        "entries": len(entries),
-        "split_files": len(vector_list.sorted_vectors),
+    summary = {
+        "total": len(processed_files) + len(processed_data),
+        "new": len(processed_data),
     }
 
+    logger.info("=== DONE ===")
+    logger.info(f"Total: {summary['total']} ({summary['new']} new)")
 
-def run_prepare(limit: int = 0, batch: bool = False) -> dict[str, Any]:
-    os.makedirs(split_dir, exist_ok=True)
-    build_result = _build_vectors_from_analysis(limit=limit)
-    rebuild_result = run_rebuild_scores_only()
+    return summary
+
+
+def build_full_files() -> dict[str, Any]:
+    os.makedirs(vectors_dir, exist_ok=True)
+
+    vector_list = VectorList([], read_only=False)
+
+    if not vector_list.unique_ids:
+        logger.info("No split data found, skipping full file build.")
+        return {"vectors": 0, "text_data": 0}
+
+    vector_list.filter_missing_vectors()
+    vector_list.join_vectors()
+    vector_list.join_text_data()
+    vector_list.update_lists()
+
+    write_single_jsonl(vectors_file, vector_list.vectors_list, mode="w")
+    write_single_jsonl(text_data_file, vector_list.text_list, mode="w")
+
     return {
-        "vectors": _count_jsonl(vectors_file),
-        "scores": _count_jsonl(scores_file),
-        "index": _count_jsonl(index_file),
-        "text_data": _count_jsonl(text_data_file),
-        "build": build_result,
-        "scores": rebuild_result,
+        "vectors": len(vector_list.vectors_list),
+        "text_data": len(vector_list.text_list),
     }
 
 
 def run_rebuild_scores_only() -> dict[str, Any]:
-    if not os.path.exists(vectors_file):
-        return {"error": "vectors.jsonl must exist before rebuilding scores"}
-    if not os.path.exists(index_file):
-        return {"error": "index.jsonl must exist before rebuilding scores"}
+    rows = get_all_comparisons()
 
-    scores: list[dict[str, float]] = []
-    comparisons: list[dict[str, Any]] = []
-    vector_data = list(load_single_jsonl(vectors_file))
-
-    from ...infrastructure.persistence.images_repository import get_all_images
-    from ...infrastructure.persistence.comparisons_repository import get_all_comparisons
-
-    db_images = {img["filename"]: img for img in get_all_images()}
-    db_compares = get_all_comparisons()
-
-    for entry in vector_data:
-        for file_id, meta in entry.items():
-            db_entry = db_images.get(str(file_id))
-            if db_entry:
-                scores.append({file_id: float(db_entry["score"])})
-
-    for comp in db_compares:
-        comparisons.append({
+    comparisons = [
+        {
+            "id": comp["id"],
             "comparison_id": comp["id"],
             "filename_a": comp["filename_a"],
             "filename_b": comp["filename_b"],
             "winner": comp["winner"],
             "timestamp": comp["timestamp"],
-        })
-
-    write_single_jsonl(scores_file, scores, "w")
+        }
+        for comp in rows
+    ]
     write_single_jsonl(comparisons_file, comparisons, "w")
 
-    return {
-        "scores": len(scores),
-        "comparisons": len(comparisons),
-    }
+    replayed = replay_ratings(rows)
+    scores = [
+        {fid: public_score_from_rating(rating)}
+        for fid, (rating, _count) in replayed.items()
+    ]
+    write_single_jsonl(scores_file, scores, "w")
+
+    return {"scores": len(scores)}

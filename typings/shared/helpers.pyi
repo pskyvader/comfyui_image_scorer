@@ -9,9 +9,6 @@ from torch import Tensor
 def remove_directory(directory_path: Path) -> None:
     ...
 
-def remove_vectors() -> None:
-    ...
-
 def remove_models() -> None:
     ...
 

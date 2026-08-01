@@ -1,128 +1,403 @@
 from __future__ import annotations
 
-import copy
-import itertools
 import random
-import time
+from itertools import product, islice
 from typing import Any
 
 import numpy as np
 
-from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.configuration.settings import config
+from ...core.observability.logger import get_logger, ModuleLogger
+from ...domain.data_transformation.data_transformer import (
+    DataTransformer,
+    list_filtered_features,
+)
 from ...infrastructure.loading.training_loader import training_loader
-from ...infrastructure.ml_models.training.model_trainer import model_trainer, grid_base, around
+from ...infrastructure.ml_models.training.model_trainer import (
+    model_trainer,
+    grid_base,
+    around,
+)
 
 logger: ModuleLogger = get_logger(__name__)
 
+NUM_CONFIGS = 5
+
+# Guard to prevent re-entrant or concurrent HPO loop runs. The HPO loop must
+# be started explicitly and may not be invoked more than once at a time.
+_hpo_running = False
+
+
+def generate_random_config() -> dict[str, Any]:
+    cfg: dict[str, Any] = {"best_score": -1000000.0, "training_time": 0.0}
+    for key, cell in grid_base.items():
+        if cell["type"] == "int":
+            cfg[key] = int(random.randint(int(cell["min"]), int(cell["max"])))
+        else:
+            cfg[key] = float(random.uniform(cell["min"], cell["max"]))
+    return cfg
+
+
+def generate_fastest_setup() -> dict[str, Any]:
+    """Generates a config likely to be fast (fewer estimators, shallow trees)."""
+    cfg: dict[str, Any] = {"best_score": -1000000.0, "training_time": 99999.0}
+    force_max = {
+        "min_child_samples",
+        "reg_alpha",
+        "reg_lambda",
+        "min_split_gain",
+        "learning_rate",
+    }
+    for key, cell in grid_base.items():
+        bound_key = "max" if key in force_max else "min"
+        if cell["type"] == "int":
+            cfg[key] = int(cell[bound_key])
+        else:
+            cfg[key] = float(cell[bound_key])
+    return cfg
+
+
+def generate_slowest_setup() -> dict[str, Any]:
+    """Generates a config likely to be slow (max estimators, deep trees)."""
+    cfg: dict[str, Any] = {"best_score": -1000000.0, "training_time": 99999.0}
+    force_min = {
+        "min_child_samples",
+        "reg_alpha",
+        "reg_lambda",
+        "min_split_gain",
+        "learning_rate",
+    }
+    for key, cell in grid_base.items():
+        bound_key = "min" if key in force_min else "max"
+        if cell["type"] == "int":
+            cfg[key] = int(cell[bound_key])
+        else:
+            cfg[key] = float(cell[bound_key])
+    return cfg
+
+
+def crossover_config(cfg1: dict[str, Any], cfg2: dict[str, Any]) -> dict[str, Any]:
+    """Merge two configs into a new child by picking each key from one parent."""
+    new_cfg: dict[str, Any] = {"best_score": -1000000.0, "training_time": 0.0}
+    for key in grid_base.keys():
+        new_cfg[key] = cfg1[key] if random.random() < 0.5 else cfg2[key]
+    return new_cfg
+
+
+def _load_state() -> dict[str, Any]:
+    training_config = config["training"]
+    return {
+        "configs": [dict(training_config[f"top{i}"]) for i in range(1, NUM_CONFIGS + 1)],
+        "step": 0,
+        "cycle": 0,
+        "used_keys": (
+            training_config["used_keys"] if "used_keys" in training_config else []
+        ),
+    }
+
+
+def _save_state(state: dict[str, Any]) -> None:
+    training_config = config["training"]
+    for i in range(NUM_CONFIGS):
+        training_config[f"top{i + 1}"] = state["configs"][i]
+    training_config["used_keys"] = state["used_keys"]
+
+
+def reset_hyperparameters() -> dict[str, Any]:
+    configs = [
+        generate_random_config(),
+        generate_random_config(),
+        generate_slowest_setup(),
+        generate_fastest_setup(),
+        generate_random_config(),
+    ]
+    state = {"configs": configs, "step": 0, "cycle": 0, "used_keys": []}
+    _save_state(state)
+    return state
+
 
 def load_training_data() -> tuple[np.ndarray, np.ndarray]:
-    vectors = training_loader.load_vectors_array()
-    scores = training_loader.load_scores_array()
-    return vectors, scores
+    """Load keyed vectors/scores, compress unused features, then keep only
+    files with enough comparisons (scores replayed on the kept subset)."""
+    transformer = DataTransformer(training_loader, model_trainer)
+    vectors_keyed = training_loader.load_vectors()
+    scores_keyed = training_loader.load_scores()
+    n_features_total = next(iter(vectors_keyed.values())).shape[0]
+    logger.info(
+        "raw data loaded: %s vectors, %s scores, %s features",
+        len(vectors_keyed),
+        len(scores_keyed),
+        n_features_total,
+    )
+
+    filter_steps = 1000
+    logger.info("filtering unused features after %s steps...", filter_steps)
+    kept_feature_idx = transformer.filter_unused_features(
+        vectors_keyed, scores_keyed, steps=filter_steps
+    )
+    list_filtered_features(transformer)
+    logger.info(
+        "Feature filtering: kept %s features (%.1f%%), dropped %s.",
+        len(kept_feature_idx),
+        100 * len(kept_feature_idx) / n_features_total,
+        n_features_total - len(kept_feature_idx),
+    )
+
+    threshold = config["training"]["min_comparisons_threshold"]
+    logger.info("filtering low comparison data (threshold=%s) ...", threshold)
+    rule = transformer.filter_low_comparisons(threshold=threshold)
+    kept_filenames = set(rule)
+    scores_subset = {fid: score for fid, (score, _count) in rule.items()}
+
+    x_rows: list[np.ndarray] = []
+    y_rows: list[float] = []
+    for fid in scores_keyed:
+        if fid not in kept_filenames:
+            continue
+        vec = vectors_keyed.get(fid)
+        if vec is None:
+            continue
+        x_rows.append(vec[kept_feature_idx])
+        y_rows.append(scores_subset[fid])
+
+    x = np.array(x_rows, dtype=np.float32)
+    y = np.array(y_rows, dtype=np.float32)
+    logger.info(
+        "Comparison filtering: kept %s filenames (threshold=%s), dropped %s.",
+        len(kept_filenames),
+        threshold,
+        len(scores_keyed) - len(kept_filenames),
+    )
+    logger.info("Training data ready: X=%s, Y=%s", x.shape, y.shape)
+    return x, y
 
 
-def _sample_combinations(base_config: dict[str, Any], max_combos: int) -> list[dict[str, Any]]:
-    varied: dict[str, list[Any]] = {}
-    for key in ["learning_rate", "num_leaves", "max_depth", "min_child_samples",
-                 "reg_alpha", "reg_lambda", "subsample", "colsample_bytree",
-                 "min_split_gain", "n_estimators", "early_stopping_rounds"]:
-        current = base_config.get(key)
-        if current is not None:
-            varied[key] = list(around(key, current))
+def _evaluate_config(
+    cfg: dict[str, Any], X: np.ndarray, y: np.ndarray
+) -> tuple[float, float, str]:
+    _, metrics = model_trainer.train_model(
+        config_dict=cfg, X=X, y=y, enable_plotting=False
+    )
+    return (
+        float(metrics["score"]),
+        float(metrics["training_time"]),
+        str(metrics["primary_metric"]),
+    )
 
-    if not varied:
-        return [base_config]
 
-    keys, values = zip(*varied.items())
-    all_combos = [dict(zip(keys, combo)) for combo in itertools.product(*values)]
+def _run_step_on_config(
+    cfg: dict[str, Any],
+    used_keys: list[str],
+    X: np.ndarray,
+    y: np.ndarray,
+    max_combos: int,
+) -> tuple[dict[str, Any], list[str]]:
+    all_keys = list(grid_base.keys())
+    random.shuffle(all_keys)
 
-    if len(all_combos) <= max_combos:
-        return all_combos
+    chosen_key = None
+    for key in all_keys:
+        if key not in used_keys:
+            chosen_key = key
+            break
+    if chosen_key is None:
+        chosen_key = all_keys[0]
+        used_keys = []
 
-    return random.sample(all_combos, max_combos)
+    varied_vals = around(chosen_key, cfg[chosen_key])
+    logger.info(
+        "    Varying: %s (current=%s) -> %s",
+        chosen_key,
+        f"{cfg[chosen_key]:.6g}",
+        [round(v, 6) for v in varied_vals],
+    )
+    logger.info("    Recently used params: %s", used_keys)
+
+    param_grid = {k: [cfg[k]] for k in all_keys}
+    param_grid[chosen_key] = varied_vals
+
+    keys_grid = list(param_grid.keys())
+    value_lists = [list(param_grid[k]) for k in keys_grid]
+    all_combos = [dict(zip(keys_grid, vals)) for vals in product(*value_lists)]
+    combos = list(islice(iter(all_combos), max_combos))
+
+    best_cfg = cfg.copy()
+    best_score = cfg.get("best_score")
+    best_time = cfg.get("training_time")
+    training_objective = config["training"]["objective"]
+    improved = False
+
+    for i, combo in enumerate(combos):
+        logger.info("---" * 10)
+        merged = {**cfg, **combo}
+        score, t_time, primary_metric = _evaluate_config(merged, X, y)
+        directions = model_trainer.METRIC_DIRECTIONS.get(training_objective, {})
+        higher_is_better = directions.get(primary_metric, True)
+
+        arrow = ""
+        if (higher_is_better and score > best_score) or (
+            not higher_is_better and score < best_score
+        ):
+            best_score = score
+            best_time = t_time
+            best_cfg = {**merged, "best_score": score, "training_time": t_time}
+            arrow = "  <-- NEW BEST"
+            improved = True
+
+        logger.info(
+            "      Combo %s/%s: %s=%s  score=%.6f  time=%.2fs%s",
+            i + 1,
+            len(combos),
+            chosen_key,
+            f"{combo[chosen_key]:.6g}",
+            score,
+            t_time,
+            arrow,
+        )
+
+    if improved:
+        logger.info("    Config improved: score=%.6f, time=%.2fs", best_score, best_time)
+    else:
+        logger.info("    Config unchanged: best score remains %s", best_score)
+        used_keys.append(chosen_key)
+
+    if len(used_keys) > len(all_keys):
+        used_keys = used_keys[-len(all_keys) // 3 :]
+
+    return best_cfg, used_keys
 
 
 def hpo_cycle(
-    config_dict: dict[str, Any],
     X: np.ndarray,
     y: np.ndarray,
-    cycle: int,
+    optimization_steps: int = 100,
+    max_combos: int = 4,
+    cycle: int = 0,
 ) -> dict[str, Any]:
-    logger.info("HPO cycle %s: training with %s", cycle, config_dict)
-    model, metrics = model_trainer.train_model(
-        config_dict=config_dict, X=X, y=y, enable_plotting=False,
-    )
-    score = metrics.get("score", 0.0)
-    logger.info("HPO cycle %s complete — score=%s", cycle, score)
-    return {"config": config_dict, "metrics": metrics, "cycle": cycle}
+    global _hpo_running
+    if _hpo_running:
+        raise RuntimeError(
+            "HPO loop is already running. Concurrent or nested runs are not allowed."
+        )
+    _hpo_running = True
+    try:
+        state = _load_state()
+        if (
+            not state
+            or "configs" not in state
+            or len(state.get("configs", [])) != NUM_CONFIGS
+        ):
+            raise RuntimeError(
+                "HPO state missing or invalid. Call reset_hyperparameters() to initialize."
+            )
+
+        configs = state["configs"]
+        used_keys = state.get("used_keys", [])
+        step_start = state.get("step", 0)
+
+        logger.info("\n" + "=" * 80)
+        logger.info(
+            "HPO Cycle %s — Starting from step %s/%s",
+            cycle + 1,
+            step_start,
+            optimization_steps,
+        )
+
+        for i in range(step_start, optimization_steps):
+            idx = i % NUM_CONFIGS
+            logger.info("\n" + "---" * 25)
+            logger.info("Step %s/%s  —  Config %s", i + 1, optimization_steps, idx + 1)
+            cfg = configs[idx]
+            logger.info(
+                "best_score=%s  training_time=%.2fs",
+                f"{cfg['best_score']:.6f}",
+                cfg.get("training_time"),
+            )
+            logger.info(" %s", cfg)
+
+            configs[idx], used_keys = _run_step_on_config(
+                configs[idx], used_keys, X, y, max_combos
+            )
+            state["step"] = i + 1
+            state["configs"] = configs
+            state["used_keys"] = used_keys
+            _save_state(state)
+
+        logger.info("\n" + "=" * 80)
+        logger.info("Cycle complete — Sorting configs by score")
+
+        training_objective = config["training"]["objective"]
+        directions = model_trainer.METRIC_DIRECTIONS.get(training_objective, {})
+        if directions:
+            higher_is_better = any(bool(v) for v in directions.values())
+        else:
+            higher_is_better = True
+
+        logger.info(
+            "Sorting configs with higher_is_better=%s (objective=%s)",
+            higher_is_better,
+            training_objective,
+        )
+        configs.sort(
+            key=lambda c: c.get("best_score", -1000000.0),
+            reverse=higher_is_better,
+        )
+        for i, c in enumerate(configs):
+            logger.info(
+                "  Rank %s: score=%s  time=%.2fs",
+                i + 1,
+                f"{c.get('best_score', -1):.6f}",
+                c.get("training_time", 0),
+            )
+
+        logger.info(
+            "\nBreeding next generation — keeping top 2, creating 2 children via crossover"
+        )
+        parents = [configs[0], configs[1]]
+        child1 = crossover_config(dict(parents[0]), dict(parents[1]))
+        child2 = crossover_config(dict(parents[0]), dict(parents[1]))
+        random_child = generate_random_config()
+        logger.info("  Parent 1:  score=%s", f"{parents[0].get('best_score', -1):.6f}")
+        logger.info("  Parent 2:  score=%s", f"{parents[1].get('best_score', -1):.6f}")
+
+        new_configs = [parents[0], parents[1], child1, child2, random_child]
+        new_state = {
+            "configs": new_configs,
+            "step": 0,
+            "cycle": cycle + 1,
+            "used_keys": used_keys,
+        }
+        _save_state(new_state)
+
+        logger.info("\nCycle %s complete. Trigger again to start next cycle.", cycle + 1)
+        logger.info("=" * 80 + "\n")
+        return new_state
+    finally:
+        _hpo_running = False
 
 
 def run_hpo_cycles(
     cycles: int | None = None,
-    steps_per_cycle: int | None = None,
+    optimization_steps: int | None = None,
     max_combos: int | None = None,
-) -> dict[str, Any]:
+) -> list[dict[str, Any]]:
+    """Run multiple HPO cycles. Each cycle runs optimization_steps steps
+    over the top1..top5 configs and breeds the next generation."""
     training_config = config["training"]
     if cycles is None:
         cycles = int(training_config["cycles"])
-    if steps_per_cycle is None:
-        steps_per_cycle = int(training_config["steps_per_cycle"])
+    if optimization_steps is None:
+        optimization_steps = int(training_config["optimization_steps"])
     if max_combos is None:
         max_combos = int(training_config["max_combos"])
 
     X, y = load_training_data()
-    logger.info("Loaded %s samples, %s features", len(X), X.shape[1])
 
-    top1 = training_config["top1"]
-    base_config: dict[str, Any] = {
-        "n_estimators": steps_per_cycle,
-        "learning_rate": top1["learning_rate"],
-        "num_leaves": top1["num_leaves"],
-        "max_depth": top1["max_depth"],
-        "min_child_samples": top1["min_child_samples"],
-        "reg_alpha": top1["reg_alpha"],
-        "reg_lambda": top1["reg_lambda"],
-        "subsample": top1["subsample"],
-        "colsample_bytree": top1["colsample_bytree"],
-        "min_split_gain": top1["min_split_gain"],
-        "early_stopping_rounds": top1["early_stopping_rounds"],
-    }
-
-    all_results: list[dict[str, Any]] = []
-    best_score = -float("inf")
-    best_config: dict[str, Any] = {}
-
-    for cycle in range(1, cycles + 1):
-        combos = _sample_combinations(base_config, max_combos)
-        logger.info(
-            "Cycle %s/%s: testing %s configurations",
-            cycle, cycles, len(combos),
+    results = []
+    for i in range(cycles):
+        logger.info("[run_hpo_cycles] Starting cycle %s/%s", i + 1, cycles)
+        res = hpo_cycle(
+            X, y, optimization_steps=optimization_steps, max_combos=max_combos, cycle=i
         )
-        cycle_results: list[dict[str, Any]] = []
-        for cfg in combos:
-            cfg["n_estimators"] = steps_per_cycle
-            result = hpo_cycle(cfg, X, y, cycle)
-            cycle_results.append(result)
-
-        for result in cycle_results:
-            score = result["metrics"].get("score", 0.0)
-            if score > best_score:
-                best_score = score
-                best_config = result["config"]
-                logger.info("New best score: %s", score)
-
-        all_results.extend(cycle_results)
-
-        if best_config:
-            for k, v in best_config.items():
-                if k in base_config:
-                    base_config[k] = v
-
-    all_results.sort(key=lambda r: r["metrics"].get("score", 0.0), reverse=True)
-    return {
-        "best_score": best_score,
-        "best_config": best_config,
-        "total_cycles": cycles,
-        "total_trials": len(all_results),
-    }
+        results.append(res)
+    return results

@@ -15,15 +15,9 @@ from ...domain.vectors.position_vector import PositionVector
 from ...domain.vectors.keypoint_vector import KeypointVector
 from ...domain.vectors.person_map_vector import PersonMapVector
 
-from ...core.filesystem.paths import split_dir, scores_file
+from ...core.filesystem.paths import split_dir
 from ...core.io.serialization import load_single_jsonl, write_single_jsonl
 from ...infrastructure.loading.maps_loader import maps_list
-from ...domain.analysis.trueskill import (
-    public_score_from_rating,
-    Rating,
-)
-from ...infrastructure.persistence.comparisons_repository import get_all_comparisons
-from ...infrastructure.persistence.images_repository import get_image
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -49,7 +43,6 @@ class VectorList:
         self.image_paths: dict[str, str] = {}
         self.entries: dict[str, Any] = {}
         self.unique_ids: list[str] = []
-        self.scores: dict[str, float] = {}
         self.vector_config = config["vector"]["vectors"]
         self.sorted_vectors: dict[str, Any] = {}
         self.read_only = read_only
@@ -59,7 +52,6 @@ class VectorList:
 
         if not self.read_only:
             self.load_split_files()
-            self.load_split_scores()
 
         duplicated: list[str] = []
         for data in raw_data:
@@ -68,7 +60,6 @@ class VectorList:
             if (
                 file_id in self.unique_ids
                 or file_id in self.entries
-                or file_id in self.scores
                 or file_id in self.image_paths
             ):
                 duplicated.append(file_id)
@@ -76,11 +67,6 @@ class VectorList:
                 self.unique_ids.append(file_id)
             self.entries[file_id] = entry
             if not self.read_only:
-
-                mu_skill = float(entry["rating_mu"])
-                sigma_uncertainty = float(entry["rating_sigma"])
-                score: float = public_score_from_rating(Rating(mu_skill=mu_skill, sigma_uncertainty=sigma_uncertainty))
-                self.scores[file_id] = score
                 self.image_paths[file_id] = image_path
         if len(duplicated) > 0:
             logger.debug(
@@ -88,7 +74,6 @@ class VectorList:
             )
         self.final_vector: list[list[float]] = []
         self.final_text_data: list[dict[str, Any]] = []
-        self.final_comparison_data: list[dict[str, Any]] = []
 
     def configure_sorted_vectors(self) -> None:
         for current_type in self.vector_config:
@@ -185,14 +170,7 @@ class VectorList:
                 new_image_paths: dict[str, str] = self._exclude_present_image_path(
                     image_vector
                 )
-                result = (-1, -1)
-                while isinstance(result, tuple):
-                    result = image_vector.create_vector_list_from_paths(
-                        new_image_paths,
-                        0.85,
-                        rebuild_width=result[0],
-                        rebuild_height=result[1],
-                    )
+                image_vector.create_vector_list_from_paths(new_image_paths)
                 self.sorted_vectors[v]["vector"] = image_vector
             elif c["type"] == self._POSITION:
                 position_vector: PositionVector = c["vector"]
@@ -231,18 +209,9 @@ class VectorList:
         return arr
 
     def filter_missing_vectors(self) -> None:
-        logger.debug("filtering missing scores...")
+        logger.debug("filtering missing vectors...")
         valid_ids: list[str] = self.unique_ids
-        scores_list: set[str] = set(self.scores.keys())
         error_ids: dict[str, list[str]] = {}
-        error_ids["scores"] = []
-        for id in valid_ids:
-            if id not in scores_list:
-                error_ids["scores"].append(id)
-            valid_ids = [id for id in valid_ids if id in scores_list]
-        logger.info(
-            f"valid vectors with present scores:{len(valid_ids)}, error vectors: {len(error_ids)}"
-        )
 
         for v in self.sorted_vectors:
             c = self.sorted_vectors[v]
@@ -357,88 +326,10 @@ class VectorList:
         self.final_text_data = clean_arrays
         return self.final_text_data
 
-    def join_comparison_data(self) -> list[dict[str, Any]]:
-        if self.final_comparison_data:
-            return self.final_comparison_data
-
-        index_list = getattr(self, "index_list", self.unique_ids)
-        index_lookup = {fid: idx for idx, fid in enumerate(index_list)}
-        comparison_rows: list[dict[str, Any]] = []
-
-        for row in get_all_comparisons():
-            filename_a = row.get("filename_a")
-            filename_b = row.get("filename_b")
-            winner = row.get("winner")
-            if filename_a is None or filename_b is None or winner is None:
-                logger.warning(
-                    f"Skipping comparison row {row.get('id')}: missing required "
-                    f"filename_a/filename_b/winner (got a={filename_a!r}, "
-                    f"b={filename_b!r}, winner={winner!r})"
-                )
-                continue
-
-            filename_a = str(filename_a)
-            filename_b = str(filename_b)
-            winner = str(winner)
-
-            if (
-                filename_a not in index_lookup
-                or filename_b not in index_lookup
-                or winner not in index_lookup
-            ):
-                continue
-
-            if winner == filename_a:
-                loser = filename_b
-                winner_side = "a"
-            elif winner == filename_b:
-                loser = filename_a
-                winner_side = "b"
-            else:
-                continue
-
-            score_a = self.scores.get(filename_a)
-            score_b = self.scores.get(filename_b)
-            score_diff = (
-                abs(float(score_a) - float(score_b))
-                if score_a is not None and score_b is not None
-                else None
-            )
-            weight_value = row.get("weight", 1.0)
-            weight = 1.0 if weight_value is None else float(weight_value)
-
-            comparison_rows.append(
-                {
-                    "comparison_id": int(row.get("id", 0) or 0),
-                    "filename_a": filename_a,
-                    "filename_b": filename_b,
-                    "winner": winner,
-                    "loser": loser,
-                    "winner_side": winner_side,
-                    "index_a": index_lookup[filename_a],
-                    "index_b": index_lookup[filename_b],
-                    "winner_index": index_lookup[winner],
-                    "loser_index": index_lookup[loser],
-                    "score_a": float(score_a) if score_a is not None else None,
-                    "score_b": float(score_b) if score_b is not None else None,
-                    "score_diff": score_diff,
-                    "weight": weight,
-                    "transitive_depth": int(row.get("transitive_depth", 0) or 0),
-                    "timestamp": str(row.get("timestamp", "")),
-                }
-            )
-
-        self.final_comparison_data = comparison_rows
-        self.comparisons_list = self.final_comparison_data
-        return self.final_comparison_data
-
     def update_lists(self) -> None:
         logger.info("updating vector lists...")
         self.vectors_list = [{fid: vec} for fid, vec in zip(self.unique_ids, self.final_vector)]
         self.text_list = self.final_text_data
-        self.index_list: list[str] = self.unique_ids
-        self.scores_list = [{fid: float(self.scores[fid])} for fid in self.index_list]
-        self.comparisons_list = self.final_comparison_data
 
     def load_split_files(self) -> None:
         _start = time.perf_counter()
@@ -514,56 +405,6 @@ class VectorList:
             logger.debug(
                 f"example clip skip: {example}, conditions: {"raw ok" if example[1][0]["raw"] else "raw missing"} , {"vector ok" if example[1][0]["vector"] else "vector missing"}"
             )
-
-    def load_split_scores(self):
-        scores_list = list(load_single_jsonl(scores_file))
-        if not scores_list:
-            logger.warning(
-                "Scores file is empty. Attempting to rebuild scores mapping from DB..."
-            )
-        elif all(isinstance(s, dict) and len(s) == 1 for s in scores_list):
-            self.scores = {str(fid): float(score) for s in scores_list for fid, score in s.items()}
-            missing = [fid for fid in self.unique_ids if fid not in self.scores]
-            if missing:
-                logger.warning(
-                    f"{len(missing)} IDs present in vectors but missing from scores; rebuilding those from DB..."
-                )
-                errors: list[str] = []
-                for fid in missing:
-                    row = get_image(fid)
-                    if row is not None:
-                        self.scores[fid] = public_score_from_rating(
-                            Rating(
-                                mu_skill=float(row["rating_mu"]),
-                                sigma_uncertainty=float(row["rating_sigma"]),
-                            )
-                        )
-                    else:
-                        errors.append(fid)
-                logger.warning(
-                    f"Missing IDs with no DB record: {len(errors)}. Sample: {errors[:5]}"
-                )
-            return
-        elif len(scores_list) == len(self.unique_ids):
-            self.scores = {
-                fid: score for fid, score in zip(self.unique_ids, scores_list)
-            }
-            return
-
-        logger.warning(
-            f"Scores list length {len(scores_list)} does not match unique IDs length {len(self.unique_ids)}. Attempting to rebuild scores mapping from DB..."
-        )
-
-        for ids in self.unique_ids:
-            if not ids in self.scores:
-                row = get_image(ids)
-                if row is not None:
-                    mu_skill = float(row["rating_mu"])
-                    sigma_uncertainty = float(row["rating_sigma"])
-                    score = public_score_from_rating(Rating(mu_skill=mu_skill, sigma_uncertainty=sigma_uncertainty))
-                    self.scores[ids] = score
-                else:
-                    logger.warning(f"No DB record for ID: {ids}")
 
     def export_split_files(self) -> None:
         global cache_split_data

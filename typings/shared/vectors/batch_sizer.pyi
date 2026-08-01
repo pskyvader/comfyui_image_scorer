@@ -28,12 +28,10 @@ class ProfileData:
 
 
 class BatchSizer:
-    _SAFETY_FRACTION: float = ...
     def __init__(self) -> None:
         ...
     
-    def get(self, width: int, height: int, rebuild: bool = ...) -> int:
+    def get(self, width: int, height: int, rebuild: bool = ..., bound: int | None = ...) -> int:
         ...
-    
 
 

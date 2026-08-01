@@ -342,8 +342,9 @@ class ImageProcessor:
 
         prepare_conf = config["prepare"]
         all_entries = collect_valid_files(
-            dir_file_pairs, set(), str(ranked_root), limit=0,
-            max_workers=int(prepare_conf["max_workers"]), scored_only=False,
+            dir_file_pairs,
+            max_workers=int(prepare_conf["max_workers"]),
+            scored_only=False,
         )
 
         for img_path, entry, _timestamp, _file_id in all_entries:

@@ -1,6 +1,7 @@
 {
     "max_workers": 20,
     "batch_size": 50,
+    "memory_usage": 0.85,
     "prompt_representation": {
         "name": "all-mpnet-base-v2",
         "output_dim": 768,
@@ -39,6 +40,14 @@
             "name": "Falconsai/nsfw_image_detection",
             "device": "cuda",
             "output_dim": 1
+        },
+        "face_detection": {
+            "name": "face_detection.tflite",
+            "url": "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite"
+        },
+        "pose_landmarker": {
+            "name": "pose_landmarker.task",
+            "url": "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task"
         }
     }
 }

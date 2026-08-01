@@ -29,7 +29,7 @@ def reset_configs():
 def run_hpo():
     _start = time.perf_counter()
     cycles = config["training"]["cycles"]
-    num_steps = config["training"]["steps_per_cycle"]
+    optimization_steps = config["training"]["optimization_steps"]
     max_combos = config["training"]["max_combos"]
 
     def _run(tid):
@@ -37,7 +37,7 @@ def run_hpo():
         from ....application.hyperparameters.hyperparameter_optimizer import (
             run_hpo_cycles,
         )
-        res = run_hpo_cycles(cycles=cycles, num_steps=num_steps, max_combos=max_combos)
+        res = run_hpo_cycles(cycles=cycles, optimization_steps=optimization_steps, max_combos=max_combos)
         set_task_output(
             tid,
             {

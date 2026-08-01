@@ -12,7 +12,7 @@ from ....core.filesystem.paths import image_root
 from ....core.utilities.tasks import start_task, get_task_status, set_task_output
 from ....core.filesystem.paths import vectors_file, scores_file, index_file, text_data_file
 from ....core.observability.logger import get_logger, ModuleLogger
-from ....core.utilities.helpers import remove_vectors
+from ....core.utilities.helpers import delete_full_vectors
 
 data_bp = Blueprint("data_v2", __name__, url_prefix="/api/data")
 logger: ModuleLogger = get_logger(__name__)
@@ -41,7 +41,8 @@ def prepare_data():
         _start = time.perf_counter()
 
         from ....application.data_transform.prepare_data import (
-            run_prepare,
+            build_split_files,
+            build_full_files,
             run_rebuild_scores_only,
         )
 
@@ -56,7 +57,11 @@ def prepare_data():
             summary = run_text_only()
             result = {"type": "text_only", "summary": summary}
         else:
-            summary = run_prepare(limit=flags["limit"])
+            summary = {
+                "split": build_split_files(limit=flags["limit"]),
+                "full": build_full_files(),
+                "scores": run_rebuild_scores_only(),
+            }
             result = {"type": "full", "summary": summary}
 
         for name, path in [
@@ -100,21 +105,20 @@ def scan_import():
 
 @data_bp.route("/delete-vectors", methods=["POST"])
 def delete_vectors():
-    """Delete all vector files from disk.
-
-    Requires explicit user confirmation in the front end before calling
-    — this operation cannot be undone.
-    """
+    """Delete the full vector files from disk, keeping the split files intact."""
     _start = time.perf_counter()
 
     def _run(tid):
         _start = time.perf_counter()
-        remove_vectors()
+        delete_full_vectors()
         set_task_output(
             tid,
             {
                 "status": "done",
-                "result": {"type": "delete_vectors", "message": "Vector files removed"},
+                "result": {
+                    "type": "delete_vectors",
+                    "message": "Full vector files removed (split data kept)",
+                },
             },
         )
 

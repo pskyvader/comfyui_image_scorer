@@ -58,47 +58,37 @@ def discover_files(root: str) -> Iterator[tuple[str, str]]:
 
 
 def collect_single_file(
-    file: tuple[str, str], processed_files: set[str], root: str
+    file: tuple[str, str]
 ) -> tuple[str, dict[str, Any], str, str] | None:
     _start = time.perf_counter()
     img_path, meta_path = file
 
     file_id = os.path.basename(img_path)
-    result: tuple[str, dict[str, Any], str, str] | None
-
-    if file_id in processed_files or img_path in processed_files:
+    entry, err = load_json(meta_path, expect=dict)
+    if err or entry is None:
         result = None
     else:
-        entry, err = load_json(meta_path, expect=dict)
-        if err == "not_found" or entry is None:
-            result = None
-        elif err:
-            result = None
-        else:
-            if "score" not in entry:
-                keys = list(entry.keys())
-                if keys:
-                    first_key = keys[0]
-                    if isinstance(entry[first_key], dict) and len(keys) < 5:
-                        timestamp = first_key
-                        entry = entry[first_key]
-                    else:
-                        timestamp = "unknown"
+        if "score" not in entry:
+            keys = list(entry.keys())
+            if keys:
+                first_key = keys[0]
+                if isinstance(entry[first_key], dict) and len(keys) < 5:
+                    timestamp = first_key
+                    entry = entry[first_key]
                 else:
                     timestamp = "unknown"
             else:
-                timestamp = next(iter(entry.keys())) if entry.keys() else "unknown"
+                timestamp = "unknown"
+        else:
+            timestamp = next(iter(entry.keys())) if entry.keys() else "unknown"
 
-            result = (img_path, entry, timestamp, file_id)
+        result = (img_path, entry, timestamp, file_id)
 
     return result
 
 
 def collect_valid_files(
     files: Iterator[tuple[str, str]],
-    processed_files: set[str],
-    root: str,
-    limit: int,
     max_workers: int,
     scored_only: bool,
 ) -> list[tuple[str, dict[str, Any], str, str]]:
@@ -107,13 +97,7 @@ def collect_valid_files(
     if files:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
-                executor.submit(
-                    collect_single_file,
-                    file,
-                    processed_files,
-                    root,
-                )
-                for file in files
+                executor.submit(collect_single_file, file) for file in files
             ]
             # total=len(files)
             with tqdm(desc="Collecting", unit=" files", delay=3.0) as pbar:
@@ -127,12 +111,6 @@ def collect_valid_files(
                         continue
 
                     collected_data.append(result)
-
-                    if limit > 0 and len(collected_data) >= limit:
-                        for f in futures:
-                            f.cancel()
-                        executor.shutdown(wait=False, cancel_futures=True)
-                        break
 
     return collected_data
 

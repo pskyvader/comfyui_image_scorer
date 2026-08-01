@@ -37,8 +37,6 @@ class ProfileData:
 
 
 class BatchSizer:
-    _SAFETY_FRACTION: float = 0.9
-
     def __init__(self, model_key: str) -> None:
         self._model_key = model_key
         self._active: ProfileData | None = None
@@ -62,7 +60,9 @@ class BatchSizer:
                 for key, entries in history_data.items()
             }
             profile_fields = {
-                key: value for key, value in profile_data.items() if key != "history"
+                key: value
+                for key, value in profile_data.items()
+                if key not in ("history", "caps")
             }
             profiles.append(ProfileData(**profile_fields, history=history))
 
@@ -105,7 +105,13 @@ class BatchSizer:
 
         return result
 
-    def get(self, width: int, height: int, rebuild: bool) -> int:
+    def get(
+        self,
+        width: int,
+        height: int,
+        rebuild: bool,
+        bound: int | None = None,
+    ) -> int:
         _start = time.perf_counter()
         self._ensure_session_profiled()
         profile = self._active
@@ -114,15 +120,23 @@ class BatchSizer:
         key = self._resolution_key(width, height)
         if key in profile.history and not rebuild:
             result = max(entry.batch_size for entry in profile.history[key])
+            if bound is not None:
+                result = min(result, bound)
 
             return result
 
-        result = self._profile_new_resolution(width, height, rebuild)
+        result = self._profile_new_resolution(width, height, rebuild, bound)
+        if bound is not None:
+            result = min(result, bound)
 
         return result
 
     def _profile_new_resolution(
-        self, width: int, height: int, rebuild: bool
+        self,
+        width: int,
+        height: int,
+        rebuild: bool,
+        bound: int | None = None,
     ) -> int:
         _start = time.perf_counter()
         profile = self._active
@@ -132,18 +146,16 @@ class BatchSizer:
         if key not in profile.history:
             profile.history[key] = []
 
-        torch.cuda.set_per_process_memory_fraction(0.99, 0)
         model, _, _, _ = model_loader.load_vision_model(model_key=self._model_key)
         profile.model_memory_bytes = int(torch.cuda.memory_allocated(profile.device_id))
 
         device_id = profile.device_id
-        available = (
-            int(profile.total_memory * self._SAFETY_FRACTION)
-            - profile.model_memory_bytes
-        )
+        available = int(profile.total_memory) - profile.model_memory_bytes
 
         if rebuild and profile.history[key]:
             best = max(entry.batch_size for entry in profile.history[key])
+            if bound is not None:
+                best = min(best, bound)
             result = self._evaluate_candidate(
                 model=model,
                 profile=profile,
@@ -158,12 +170,14 @@ class BatchSizer:
                 return result
             low, high = 1, best - 1
         else:
-            high = 500
+            high = 1000
             if profile.pixel_cost is not None:
                 per_image = profile.pixel_cost * width * height * 3
                 fixed = profile.fixed_overhead or 0
                 if per_image > 0:
                     high = max(1, int((available - fixed) / per_image) * 2)
+            if bound is not None:
+                high = min(high, bound)
             low = 1
 
         last_success = 0
@@ -241,15 +255,16 @@ class BatchSizer:
 
             peak = int(torch.cuda.max_memory_allocated(device_id))
             delta = peak - profile.model_memory_bytes
-            profile.history[key].append(
-                HistoryEntry(
-                    batch_size=candidate,
-                    delta_memory=delta,
-                    timestamp=time.time(),
+            threshold = int(profile.total_memory)
+            if peak < threshold:
+                profile.history[key].append(
+                    HistoryEntry(
+                        batch_size=candidate,
+                        delta_memory=delta,
+                        timestamp=time.time(),
+                    )
                 )
-            )
-            threshold = int(profile.total_memory * self._SAFETY_FRACTION)
-            result = candidate if peak < threshold else None
+                result = candidate
         except Exception as e:
             logger.warning(
                 f"batch size {candidate} for resolution {width}x{height} failed with error: {e}"

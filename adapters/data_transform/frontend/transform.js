@@ -94,7 +94,7 @@ class DataTransformView {
                     this.poller.start(result.task_id);
                     return;
                 case "delete-vectors":
-                    if (!confirm("This will DELETE all vector files from disk. This cannot be undone. Continue?")) {
+                    if (!confirm("This will DELETE the full vector files from disk. Split data is kept. This cannot be undone. Continue?")) {
                         this.poller.log("Delete vectors cancelled by user.");
                         return;
                     }

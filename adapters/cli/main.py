@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 
 from ...core.observability.logger import get_logger
@@ -11,16 +12,30 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> argparse.Argume
     build_sub = build_parser.add_subparsers(dest="build_command")
 
     split = build_sub.add_parser("split-vectors", help="Build split vector files")
-    split.add_argument("--limit", type=int, default=0)
-    split.add_argument("--batch", action="store_true")
+    split.add_argument(
+        "--limit", type=int, default=0, help="Process at most N new files (0 = no limit)"
+    )
+    split.add_argument(
+        "--batch",
+        action="store_true",
+        help="Loop with --limit until no new files remain",
+    )
 
     build_sub.add_parser("full-vectors", help="Build full vectors + text data")
 
     build_sub.add_parser("scores", help="Build scores + comparisons")
 
-    all_parser = build_sub.add_parser("all", help="Run full pipeline")
-    all_parser.add_argument("--limit", type=int, default=0)
-    all_parser.add_argument("--batch", action="store_true")
+    all_parser = build_sub.add_parser(
+        "all", help="Run full pipeline (splits -> full vectors -> scores)"
+    )
+    all_parser.add_argument(
+        "--limit", type=int, default=0, help="Process at most N new files per step (0 = no limit)"
+    )
+    all_parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Loop with --limit until no new files remain",
+    )
 
     return build_parser
 
@@ -33,9 +48,9 @@ def _add_training_parser(subparsers: argparse._SubParsersAction) -> argparse.Arg
     train.add_argument("--steps", type=int, default=100)
 
     hpo = training_sub.add_parser("hpo", help="Hyperparameter optimization")
-    hpo.add_argument("--cycles", type=int, default=None)
-    hpo.add_argument("--steps-per-cycle", type=int, default=None)
-    hpo.add_argument("--max-combos", type=int, default=None)
+    hpo.add_argument("--cycles", type=int, default=None, help="Number of HPO cycles (generations)")
+    hpo.add_argument("--optimization-steps", type=int, default=None, help="HPO optimization steps per cycle (not model training steps)")
+    hpo.add_argument("--max-combos", type=int, default=None, help="Max config combinations evaluated per step")
 
     return training_parser
 
@@ -54,7 +69,7 @@ def _add_database_parser(subparsers: argparse._SubParsersAction) -> argparse.Arg
     return database_parser
 
 
-def _add_files_parser(subparsers: argparse._SubParsersAction) -> tuple[argparse.ArgumentParser, argparse.ArgumentParser, argparse.ArgumentParser]:
+def _add_files_parser(subparsers: argparse._SubParsersAction) -> tuple[argparse.ArgumentParser, argparse.ArgumentParser, argparse.ArgumentParser, argparse.ArgumentParser]:
     files_parser = subparsers.add_parser("files", help="File management")
     files_sub = files_parser.add_subparsers(dest="files_command")
 
@@ -65,11 +80,15 @@ def _add_files_parser(subparsers: argparse._SubParsersAction) -> tuple[argparse.
     remove_sub.add_parser("maps", help="Remove output/maps/")
     remove_sub.add_parser("downloaded-models", help="Remove downloaded_models/ (mediapipe)")
 
+    download = files_sub.add_parser("download", help="Download models from prepare config")
+    download_sub = download.add_subparsers(dest="download_command")
+    download_sub.add_parser("models", help="Download all models in prepare config (HF/timm/torch.hub + mediapipe)")
+
     cleanup_parser = files_sub.add_parser("cleanup", help="Deduplicate scored entries, then move remaining orphaned files to root")
     cleanup_parser.add_argument("--limit", type=int, default=0)
     cleanup_parser.add_argument("--dry-run", action="store_true")
 
-    return files_parser, remove, cleanup_parser
+    return files_parser, remove, download, cleanup_parser
 
 
 def _add_analyze_parser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -98,7 +117,7 @@ def main() -> int:
     training_parser = _add_training_parser(subparsers)
     build_parser = _add_build_parser(subparsers)
     database_parser = _add_database_parser(subparsers)
-    files_parser, files_remove_parser, files_cleanup_parser = _add_files_parser(subparsers)
+    files_parser, files_remove_parser, files_download_parser, files_cleanup_parser = _add_files_parser(subparsers)
     analyze_parser = _add_analyze_parser(subparsers)
 
     args = parser.parse_args()
@@ -114,7 +133,7 @@ def main() -> int:
         elif args.training_command == "hpo":
             return run_hpo(
                 cycles=args.cycles,
-                steps_per_cycle=args.steps_per_cycle,
+                optimization_steps=args.optimization_steps,
                 max_combos=args.max_combos,
             )
         else:
@@ -169,6 +188,17 @@ def main() -> int:
                 return 0
             else:
                 files_remove_parser.print_help()
+                return 1
+        elif args.files_command == "download":
+            if args.download_command == "models":
+                os.environ["HF_HUB_OFFLINE"] = "0"
+                from ...infrastructure.ml_models.model_loader import download_configured_models
+                from ...infrastructure.external_services.mediapipe_models import download_mediapipe_models
+                download_configured_models()
+                download_mediapipe_models()
+                return 0
+            else:
+                files_download_parser.print_help()
                 return 1
         elif args.files_command == "cleanup":
             from ...infrastructure.persistence.cleanup_orphans import cleanup_orphans

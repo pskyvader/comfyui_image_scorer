@@ -28,10 +28,10 @@ def parallel_batch(fn: Callable[..., R], items: list[tuple[Any, ...]]) -> list[R
 def discover_files(root: str) -> Iterator[tuple[str, str]]:
     ...
 
-def collect_single_file(file: tuple[str, str], processed_files: set[str], root: str) -> tuple[str, dict[str, Any], str, str] | None:
+def collect_single_file(file: tuple[str, str]) -> tuple[str, dict[str, Any], str, str] | None:
     ...
 
-def collect_valid_files(files: list[tuple[str, str]], processed_files: set[str], root: str, limit: int = ..., max_workers: int | None = ..., scored_only: bool = ...) -> list[tuple[str, dict[str, Any], str, str]]:
+def collect_valid_files(files: Iterator[tuple[str, str]], max_workers: int, scored_only: bool) -> list[tuple[str, dict[str, Any], str, str]]:
     ...
 
 T = TypeVar("T")

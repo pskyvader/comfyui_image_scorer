@@ -1,9 +1,7 @@
-from PIL.Image import Image
 import torch
 from typing import Any
-from .....core.configuration.settings import config
-from .....core.utilities.helpers import export_image_batch
 from .....application.services.scoring_service import ScoringService
+from .....infrastructure.ml_models.model_loader import verify_models_present
 
 
 class AestheticScoreNode:
@@ -58,8 +56,8 @@ class AestheticScoreNode:
         lora_strength: float,
         min_images: int = 1,
         max_images: int = 10,
-        memory_usage: float = 0.85,
     ) -> tuple[torch.Tensor, torch.Tensor, bool, list[float]]:
+        verify_models_present()
         return self._scoring_service.score(
             image=image,
             threshold=threshold,
@@ -74,5 +72,4 @@ class AestheticScoreNode:
             lora_strength=lora_strength,
             min_images=min_images,
             max_images=max_images,
-            memory_usage=memory_usage,
         )

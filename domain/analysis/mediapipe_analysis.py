@@ -5,19 +5,10 @@ import numpy as np
 from numpy import typing as npt
 from PIL import Image
 
-from ...core.filesystem.paths import mediapipe_models_dir
-
 import mediapipe as mp
 
-_mediapipe_loaded = False
-_mp = None
-_FaceDetector = None
-_FaceDetectorOptions = None
-_PoseLandmarker = None
-_PoseLandmarkerOptions = None
-_RunningMode = None
-_BaseOptions = None
-
+from ...core.configuration.settings import config
+from ...core.filesystem.paths import mediapipe_models_dir
 
 # MediaPipe Pose landmark names, in model output order (0..32).
 POSE_LANDMARK_NAMES = [
@@ -57,22 +48,6 @@ POSE_LANDMARK_NAMES = [
 ]
 
 
-def _ensure_mediapipe():
-    global _mediapipe_loaded, _mp
-    global _FaceDetector, _FaceDetectorOptions
-    global _PoseLandmarker, _PoseLandmarkerOptions, _RunningMode, _BaseOptions
-    if _mediapipe_loaded:
-        return
-    _mp = mp
-    _FaceDetector = mp.tasks.vision.FaceDetector
-    _FaceDetectorOptions = mp.tasks.vision.FaceDetectorOptions
-    _PoseLandmarker = mp.tasks.vision.PoseLandmarker
-    _PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
-    _RunningMode = mp.tasks.vision.RunningMode
-    _BaseOptions = mp.tasks.BaseOptions
-    _mediapipe_loaded = True
-
-
 class MediaPipeAnalyzer:
     """Detects faces and body pose using MediaPipe.
 
@@ -92,34 +67,47 @@ class MediaPipeAnalyzer:
         return np.asarray(img.convert("RGB"))
 
     def _get_face_detector(self) -> Any:
-        _ensure_mediapipe()
         if self._face_detector is None:
-            model_path = os.path.join(mediapipe_models_dir, "face_detection.tflite")
-            options = _FaceDetectorOptions(
-                base_options=_BaseOptions(model_asset_path=model_path),
-                running_mode=_RunningMode.IMAGE,
+            model_path = os.path.join(
+                mediapipe_models_dir,
+                config["prepare"]["attribute_models"]["face_detection"]["name"],
+            )
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(
+                    f"MediaPipe face detector model not found: {model_path}. "
+                    "Run 'comfyui-scorer files download models' first."
+                )
+            options = mp.tasks.vision.FaceDetectorOptions(
+                base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
+                running_mode=mp.tasks.vision.RunningMode.IMAGE,
                 min_detection_confidence=0.5,
             )
-            self._face_detector = _FaceDetector.create_from_options(options)
+            self._face_detector = mp.tasks.vision.FaceDetector.create_from_options(options)
         return self._face_detector
 
     def _get_pose_landmarker(self) -> Any:
-        _ensure_mediapipe()
         if self._pose_landmarker is None:
-            model_path = os.path.join(mediapipe_models_dir, "pose_landmarker.task")
-            options = _PoseLandmarkerOptions(
-                base_options=_BaseOptions(model_asset_path=model_path),
-                running_mode=_RunningMode.IMAGE,
+            model_path = os.path.join(
+                mediapipe_models_dir,
+                config["prepare"]["attribute_models"]["pose_landmarker"]["name"],
+            )
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(
+                    f"MediaPipe pose landmarker model not found: {model_path}. "
+                    "Run 'comfyui-scorer files download models' first."
+                )
+            options = mp.tasks.vision.PoseLandmarkerOptions(
+                base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
+                running_mode=mp.tasks.vision.RunningMode.IMAGE,
                 min_pose_detection_confidence=0.5,
             )
-            self._pose_landmarker = _PoseLandmarker.create_from_options(options)
+            self._pose_landmarker = mp.tasks.vision.PoseLandmarker.create_from_options(options)
         return self._pose_landmarker
 
     def analyze(self, img: Image.Image) -> dict[str, Any]:
-        _ensure_mediapipe()
         rgb = self._image_to_rgb(img)
         height, width = rgb.shape[0], rgb.shape[1]
-        mp_image = _mp.Image(image_format=_mp.ImageFormat.SRGB, data=rgb)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
         face_detector = self._get_face_detector()
         face_result = face_detector.detect(mp_image)
@@ -157,7 +145,7 @@ class MediaPipeAnalyzer:
                             "x": lm.x,
                             "y": lm.y,
                             "z": lm.z,
-                            "visibility": 1.0,
+                            "visibility": lm.visibility,
                         }
                     )
 

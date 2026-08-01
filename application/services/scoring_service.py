@@ -46,7 +46,6 @@ class ScoringService:
         lora_strength: float,
         min_images: int = 1,
         max_images: int = 10,
-        memory_usage: float = 0.85,
     ) -> tuple[torch.Tensor, torch.Tensor, bool, list[float]]:
         assert len(image) >= 1, "'image' must contain at least one image."
         if not positive.strip():
@@ -110,7 +109,7 @@ class ScoringService:
             rebuild = False
             retry = True
             while retry:
-                result = image_vector.create_vector_list(images_dict, 0.85, rebuild)
+                result = image_vector.create_vector_list(images_dict, rebuild)
                 if result is None:
                     rebuild = True
                     retry = True

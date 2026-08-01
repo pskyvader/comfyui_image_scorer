@@ -8,9 +8,9 @@ from torch import Tensor
 from ..observability.logger import get_logger, ModuleLogger
 from ..filesystem.paths import (
     models_dir,
-    vectors_dir,
     vectors_file,
     scores_file,
+    comparisons_file,
     index_file,
     text_data_file,
 )
@@ -25,14 +25,11 @@ def remove_directory(directory_path: Path) -> None:
         shutil.rmtree(directory_path)
 
 
-def remove_vectors() -> None:
-    directory_path = Path(vectors_dir)
-    remove_directory(directory_path)
-
-
 def delete_full_vectors() -> None:
-    """Delete the four full vector files but keep the split/ directory intact."""
-    for path_str in [vectors_file, scores_file, index_file, text_data_file]:
+    """Delete the full vector files but keep the split/ directory intact."""
+    for path_str in [
+        vectors_file, scores_file, index_file, text_data_file, comparisons_file,
+    ]:
         p = Path(path_str)
         if p.exists():
             logger.info(f"Removing {p}")

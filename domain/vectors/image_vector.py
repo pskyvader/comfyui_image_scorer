@@ -1,3 +1,4 @@
+import math
 from PIL import Image, ImageFile
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -9,6 +10,7 @@ from torchvision import transforms
 import numpy as np
 
 from ...core.observability.logger import get_logger
+from ...core.configuration.settings import config
 from ...infrastructure.ml_models.model_loader import model_loader
 from .helpers import l2_normalize_batch
 from ...core.io.serialization import load_json
@@ -21,6 +23,14 @@ sizeTuple = tuple[int, int]
 vectorDict = dict[str, list[float]]
 imagePathTuple = tuple[str, str]
 imageTuple = tuple[str, Image.Image]
+
+
+def scaled_batch_size(batch_size: int) -> int:
+    return max(int(batch_size * config["prepare"]["memory_usage"]), 1)
+
+
+def probe_bound_for_failed(failed_batch_size: int) -> int:
+    return math.ceil(failed_batch_size / config["prepare"]["memory_usage"]) - 1
 
 
 class ImageVector:
@@ -39,9 +49,6 @@ class ImageVector:
         self.batch_sizer = BatchSizer(model_key=model_key)
 
         self.vector_sizes, _ = load_json(vectors_size_file, expect=dict)
-
-        # only use dedicated memory
-        torch.cuda.set_per_process_memory_fraction(0.99, 0)
 
     def array_to_pil(self, arr: Any) -> list[Image.Image]:
         arr = np.asarray(arr)
@@ -147,20 +154,19 @@ class ImageVector:
         result: dict[str, list[float]] = dict(zip(batch_id, normalized_list))
         return result
 
-    def test_batch(self, batch_tensor: torch.Tensor, device: str) -> None:
-        with torch.inference_mode():
-            self.model.eval()
-            self.model(batch_tensor)
-            torch.cuda.synchronize(device)
-
-    def get_batch_size(self, width: int, height: int, rebuild: bool) -> int:
-        result = self.batch_sizer.get(width, height, rebuild)
+    def get_batch_size(
+        self,
+        width: int,
+        height: int,
+        rebuild: bool,
+        bound: int | None = None,
+    ) -> int:
+        result = self.batch_sizer.get(width, height, rebuild, bound)
         return result
 
     def create_vector_list(
         self,
         entries: dict[str, Image.Image],
-        memory_usage: float,
         rebuild: bool,
     ) -> vectorDict | None:
         if not entries:
@@ -177,8 +183,7 @@ class ImageVector:
             else list(entries.values())[0].size
         )
         bw, bh = self.model_input_size
-        batch_size: int = self.get_batch_size(bw, bh, rebuild)
-        batch_size = max(int(batch_size * memory_usage), 1)
+        batch_size: int = scaled_batch_size(self.get_batch_size(bw, bh, rebuild))
         logger.debug(
             f"batch size: {batch_size} for image size: {self.model_input_size}"
         )
@@ -191,13 +196,7 @@ class ImageVector:
             self.vector_list.update(current_processed_images)
         return self.vector_list
 
-    def create_vector_list_from_paths(
-        self,
-        entries: dict[str, str],
-        memory_usage: float,
-        rebuild_width: int,
-        rebuild_height: int,
-    ) -> vectorDict | sizeTuple:
+    def create_vector_list_from_paths(self, entries: dict[str, str]) -> vectorDict:
         """
         Exact-size bucketing with controlled RAM and VRAM usage.
         """
@@ -212,12 +211,6 @@ class ImageVector:
         model_info = model_loader.get_model_info(self.model_key)
         self.variable_input = model_info["variable_input"]
         self.model_input_size = sizeTuple(model_info["input_size"])
-
-        if rebuild_width > 0 and rebuild_height > 0:
-            logger.debug(
-                f"rebuild requested for size ({rebuild_width},{rebuild_height})"
-            )
-            self.get_batch_size(rebuild_width, rebuild_height, rebuild=True)
 
         total = len(entries)
         vectors: vectorDict = {}
@@ -276,9 +269,8 @@ class ImageVector:
                         if (not self.variable_input and self.model_input_size)
                         else size
                     )
-                    max_batch_size = self.get_batch_size(width, height, False)
-                    max_batch_size = int(
-                        max_batch_size * memory_usage
+                    max_batch_size = scaled_batch_size(
+                        self.get_batch_size(width, height, False)
                     )
 
                     if num_items > max_batch_size * 2:
@@ -287,11 +279,11 @@ class ImageVector:
                         torch.backends.cudnn.benchmark = False
 
                     bucket_pbar.set_description(
-                        f"Bucket {bucket_idx} | Size: {size} | Items: {num_items} | Max Batch size: {max_batch_size}"
+                        f"Bucket/size {bucket_idx}/{size} | Items/Max: {num_items}/{max_batch_size}"
                     )
 
-                    for i in range(0, num_items, max_batch_size):
-
+                    i = 0
+                    while i < num_items:
                         batch_slice = items[i : i + max_batch_size]
                         batch_indices, batch_paths = zip(*batch_slice)
 
@@ -301,21 +293,34 @@ class ImageVector:
                         current_batch: list[imageTuple] = list(
                             zip(batch_indices, current_image_batch)
                         )
+                        batch_vecs: vectorDict | None = None
 
                         try:
                             batch_vecs = self.create_image_vector_batch(current_batch)
-                        except Exception as e:
+                        except torch.cuda.OutOfMemoryError as e:
                             torch.cuda.empty_cache()
-                            pbar.close()
-                            bucket_pbar.close()
-                            logger.warning(str(e))
-                            logger.warning(
-                                f"error while encoding images, retrying With size: {size}..."
-                            )
                             del current_batch
                             del batch_vecs
-                            del vectors
-                            return (width, height)
+                            del current_image_batch
+                            if max_batch_size <= 1:
+                                raise RuntimeError(
+                                    "CUDA out of memory while encoding a single "
+                                    f"image at size {size}"
+                                ) from e
+                            failed_size = max_batch_size
+                            probe_result = self.get_batch_size(
+                                width,
+                                height,
+                                rebuild=True,
+                                bound=probe_bound_for_failed(failed_size),
+                            )
+                            max_batch_size = scaled_batch_size(probe_result)
+                            logger.warning(
+                                f"CUDA out of memory at batch size {failed_size} "
+                                f"for size {size}, recalculating and retrying "
+                                f"with {max_batch_size}..."
+                            )
+                            continue
 
                         vectors.update(batch_vecs)
 
@@ -323,6 +328,8 @@ class ImageVector:
 
                         del current_batch
                         del batch_vecs
+                        del current_image_batch
+                        i += len(batch_slice)
                     torch.cuda.empty_cache()
 
                     bucket_pbar.update(1)

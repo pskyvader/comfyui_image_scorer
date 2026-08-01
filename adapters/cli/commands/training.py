@@ -35,14 +35,19 @@ def run_hpo(**kwargs: Any) -> int:
     from ....application.hyperparameters.hyperparameter_optimizer import run_hpo_cycles
 
     cycles = kwargs.get("cycles")
-    steps_per_cycle = kwargs.get("steps_per_cycle")
+    optimization_steps = kwargs.get("optimization_steps")
     max_combos = kwargs.get("max_combos")
 
-    result = run_hpo_cycles(
-        cycles=cycles,
-        steps_per_cycle=steps_per_cycle,
-        max_combos=max_combos,
+    defaults = config["training"]
+    logger.info(
+        "HPO options — cycles=%s, optimization_steps=%s, max_combos=%s",
+        cycles if cycles is not None else f'{defaults["cycles"]} (config default)',
+        optimization_steps if optimization_steps is not None else f'{defaults["optimization_steps"]} (config default)',
+        max_combos if max_combos is not None else f'{defaults["max_combos"]} (config default)',
     )
-    logger.info("HPO complete — best score=%s", result.get("best_score"))
-    logger.info("Best config: %s", result.get("best_config"))
+
+    result = run_hpo_cycles(cycles=cycles, optimization_steps=optimization_steps, max_combos=max_combos)
+    logger.info("HPO complete — %s cycles run", len(result))
+    if result:
+        logger.info("Best config: %s", result[-1]["configs"][0])
     return 0
