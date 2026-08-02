@@ -22,18 +22,30 @@ NodeTuple = tuple[NodeProxy, bool]
 
 
 class ComparisonRepository(Protocol):
-    def get_all_comparisons(self, weight: float | None = None) -> list[dict[str, Any]]: ...
+    def get_all_comparisons(
+        self, weight: float | None = None
+    ) -> list[dict[str, Any]]: ...
     def get_images_with_only_wins(self) -> list[str]: ...
     def get_images_with_only_losses(self) -> list[str]: ...
 
 
 class CrystalGraph(Protocol):
     def get_node(self, node_id: str | None = None) -> Any: ...
-    def get_all_nodes(self, only_top: bool = False, only_bottom: bool = False) -> list[Any]: ...
-    def get_component(self, node_id: str | None = None, component_id: int | None = None, chain_id: int | None = None) -> Any: ...
-    def get_all_chains(self, min_length: int = 0, sort_order: str = "desc") -> list[tuple[Any, list[Any]]]: ...
+    def get_all_nodes(
+        self, only_top: bool = False, only_bottom: bool = False
+    ) -> list[Any]: ...
+    def get_component(
+        self,
+        node_id: str | None = None,
+        component_id: int | None = None,
+        chain_id: int | None = None,
+    ) -> Any: ...
+    def get_all_chains(
+        self, min_length: int = 0, sort_order: str = "desc"
+    ) -> list[tuple[Any, list[Any]]]: ...
     def get_graph_stats(self) -> dict[str, Any]: ...
     def are_in_same_path(self, img1: str, img2: str) -> bool: ...
+
     _chain: Any
 
 
@@ -137,14 +149,21 @@ def phase_seed_coverage(
 ) -> tuple[str, str] | None:
     _start = time.perf_counter()
     seed_target = int(config["ranking"]["seed_target_comparisons"])
+    seed_nodes: list[dict[str, Any]] = [
+        img for img in seed_candidates if int(img["comparison_count"]) < seed_target
+    ]
+
     under_seed_target = sorted(
-        [img for img in seed_candidates if int(img["comparison_count"]) < seed_target],
+        seed_nodes,
         key=lambda img: (
             int(img["comparison_count"]),
             -float(img["rating_sigma"]),
         ),
     )
+
     for source in under_seed_target:
+        if cg.get_node(source["filename"]) is None:
+            continue
         logger.debug(f"starting iterator", start_timer=_start)
         opponents: Iterator[dict[str, Any]] = _find_unseen_candidates(
             source, seed_candidates, existing_pair_set
@@ -153,6 +172,8 @@ def phase_seed_coverage(
         chosen = None
         i = 0
         for opp in opponents:
+            if cg.get_node(opp["filename"]) is None:
+                continue
             i += 1
             if chosen is None:
                 chosen = opp
@@ -180,6 +201,9 @@ def phase_seed_coverage(
         result = (source["filename"], chosen["filename"])
         logger.debug(f"return result after {i} steps", start_timer=_start)
         return result
+    logger.debug(
+        f"not pairs found for seed coverage, under_seed_target/ready: {len(under_seed_target)}/{len(seed_candidates)}"
+    )
     return None
 
 
@@ -234,7 +258,13 @@ def phase_collapsible_pairs(
     if len(only_wins) == 1 and len(only_loses) == 1:
         return None
 
-    candidate_names = {img["filename"] for img in candidate_images}
+    insertion_target = int(config["ranking"]["insertion_target_comparisons"])
+
+    candidate_names = {
+        img["filename"]
+        for img in candidate_images
+        if img["comparison_count"] > insertion_target
+    }
 
     chains_list = cg.get_all_chains()
     chains: list[ChainProxy] = [c[0] for c in chains_list]
@@ -296,9 +326,7 @@ def phase_collapsible_pairs(
                 raise RuntimeError(f"top node {top_a} not present in only wins.")
             for top_b in sorted_tops[i + 1 :]:
                 if top_b not in only_wins:
-                    raise RuntimeError(
-                        f"top node {top_b} not present in only wins."
-                    )
+                    raise RuntimeError(f"top node {top_b} not present in only wins.")
 
                 result = (top_a, top_b)
 
@@ -325,8 +353,8 @@ def phase_chain_merge(
     _start = time.perf_counter()
     candidate_names = {img["filename"] for img in candidate_images}
 
-    chains_list: list[tuple[ChainProxy, list[NodeTuple]]] = (
-        cg.get_all_chains(min_length=1, sort_order="asc")
+    chains_list: list[tuple[ChainProxy, list[NodeTuple]]] = cg.get_all_chains(
+        min_length=1, sort_order="asc"
     )
     chains: list[list[NodeTuple]] = [c[1] for c in chains_list]
 
@@ -419,10 +447,13 @@ def phase_uncertainty_refine(
     candidate_nodes: list[NodeProxy] = []
     ready_nodes: list[NodeProxy] = []
     node_a: NodeProxy | None = None
+    insertion_target = int(config["ranking"]["insertion_target_comparisons"])
 
     for img in candidate_images:
         node: NodeProxy | None = cg.get_node(img["filename"])
         if not node:
+            continue
+        if node.comparison_count <= insertion_target:
             continue
 
         candidate_nodes.append(node)
@@ -431,6 +462,7 @@ def phase_uncertainty_refine(
         candidate_nodes,
         key=lambda node: (-float(node.sigma_uncertainty)),
     )
+
     for node in candidate_nodes:
         if node.filename in seed_filenames:
             seed_pool.append(node)

@@ -1,11 +1,11 @@
 {
     "subfolder_threshold": 1000,
     "transitive_depth": 5,
-    "lru_size": 200,
+    "lru_size": 100,
     "max_workers": 100,
     "batch_size": 1000,
     "default_score": 0.5,
-    "reserve_count": 30,
+    "reserve_count": 20,
     "parallel_requests": false,
     "timeout_ms": 30000,
     "seed_percentage": 5,

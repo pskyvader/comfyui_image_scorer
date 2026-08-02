@@ -51,9 +51,9 @@ const CompareView = (() => {
                 lines.push(`Chain ${node.chain_id}:${node.chain_length} (main-chain of ${node.chain_main_members})`);
             }
             if (node.is_top) {
-                lines.push(`Top`);
+                lines.push("Top");
             } else if (node.is_bottom) {
-                lines.push(`Bottom`);
+                lines.push("Bottom");
             }
         }
         if (phase && phase.show_mu_sigma) {
@@ -85,7 +85,8 @@ const CompareView = (() => {
     }
 
     function renderPhaseCards(leftCard, rightCard, phaseIndex) {
-        const allCardClasses = _phases.map(p => p.card_class).concat(["collapsible-card"]);
+        const allCardClasses = _phases.map(p => p.card_class)
+            .concat(["collapsible-card"]);
         leftCard.classList.remove(...allCardClasses);
         rightCard.classList.remove(...allCardClasses);
         const cls = phaseCardClass(phaseIndex);
@@ -137,7 +138,7 @@ const CompareView = (() => {
             }
             case "anchor": {
                 // Anchor insert: integrate low-count images up to insertion_target.
-                const remaining = countRemaining(pair.insertion_target_comparisons);
+                const remaining = countRemaining(pair.insertion_target_comparisons + 1); // target is <=n, or <n+1
                 const ready = countReady(pair.insertion_target_comparisons);
                 line = `Anchor insert - ${remaining.toLocaleString()} images below ${pair.insertion_target_comparisons} comparisons - ${ready.toLocaleString()} at \u2265${pair.insertion_target_comparisons} - ${pair.total_images.toLocaleString()} images - ${pair.total_comparisons.toLocaleString()} comparisons`;
                 break;
@@ -180,14 +181,16 @@ const CompareView = (() => {
         for (const [k, v] of Object.entries(pair.level)) {
             level[Number(k)] = v;
         }
-        const levels = Object.keys(level).map(Number).sort((a, b) => a - b);
+        const levels = Object.keys(level)
+            .map(Number)
+            .sort((a, b) => a - b);
 
         // Show the first N levels explicitly (seed target or 10), group the rest.
         const cap = Math.max(10, pair.seed_target_comparisons || 10);
-        const shown = levels.filter((lvl) => lvl <= cap);
-        const restLevels = levels.filter((lvl) => lvl > cap);
+        const shown = levels.filter(lvl => lvl <= cap);
+        const restLevels = levels.filter(lvl => lvl > cap);
         let levelRows = shown
-            .map((lvl) => `<tr class="h-5"><td class="text-gray-500 pr-4">Level ${lvl}</td><td class="text-white text-right">${level[lvl]}</td></tr>`)
+            .map(lvl => `<tr class="h-5"><td class="text-gray-500 pr-4">Level ${lvl}</td><td class="text-white text-right">${level[lvl]}</td></tr>`)
             .join("");
         if (restLevels.length > 0) {
             const restTotal = restLevels.reduce((sum, lvl) => sum + level[lvl], 0);
@@ -198,7 +201,7 @@ const CompareView = (() => {
             ? `yes (component ${left.component_id}, ${left.component_size} images)`
             : "no";
 
-        const nodeRows = (node) => `
+        const nodeRows = node => `
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Score</td><td class="text-white text-right font-mono">${Utils.formatScore(node.score)}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Skill (μ)</td><td class="text-white text-right">${node.rating_mu}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Uncertainty (σ)</td><td class="text-white text-right">${node.rating_sigma}</td></tr>
@@ -264,12 +267,13 @@ const CompareView = (() => {
     }
 
     function render(pair, left, right, elements) {
-        viewLogger.info("render payload:", null, {
-            pairKeys: pair ? Object.keys(pair) : null,
-            pairPhase: pair ? pair.phase : undefined,
-            leftKeys: left ? Object.keys(left) : null,
-            rightKeys: right ? Object.keys(right) : null,
-        });
+        // viewLogger.info("render payload:", null, {
+        //     pairKeys: pair ? Object.keys(pair) : null,
+        //     pairPhase: pair ? pair.phase : undefined,
+        //     leftKeys: left ? Object.keys(left) : null,
+        //     rightKeys: right ? Object.keys(right) : null,
+        // });
+
         if (!pair) {
             viewLogger.error("render called with undefined `pair` — backend payload missing `pair` envelope");
         }
@@ -295,12 +299,15 @@ const CompareView = (() => {
         if (!container || _phases.length === 0) {
             return;
         }
-        const fmt = (v) => (v != null ? Number(v).toLocaleString() : "\u2014");
+        const fmt = v => (v != null
+            ? Number(v)
+                .toLocaleString()
+            : "\u2014");
         const seedSize = fmt(labels?.seed_size);
         const seedTarget = fmt(labels?.seed_target);
         const insertionTarget = fmt(labels?.insertion_target);
         const sigmaThreshold = fmt(labels?.sigma_threshold);
-        const header = '<div class="text-[9px] uppercase tracking-widest font-bold mb-2 opacity-40">Pair Selection Strategy</div>';
+        const header = "<div class=\"text-[9px] uppercase tracking-widest font-bold mb-2 opacity-40\">Pair Selection Strategy</div>";
         const items = _phases.map((p) => {
             const cls = p.description_class || "text-gray-400";
             const label = p.phase_label || "";
@@ -310,7 +317,8 @@ const CompareView = (() => {
                 .replace(/\{insertion_target\}/g, insertionTarget)
                 .replace(/\{sigma_threshold\}/g, sigmaThreshold);
             return `<div><span class="${cls} font-bold">${label}</span> — ${desc}</div>`;
-        }).join("\n");
+        })
+            .join("\n");
         container.innerHTML = header + items;
     }
 

@@ -139,9 +139,12 @@ _comparison_repo = _ComparisonRepoAdapter()
 
 
 def _get_processor():
-    return getattr(current_app, "image_processor", None) or current_app.extensions.get(
+    attr = getattr(current_app, "image_processor", None) or current_app.extensions.get(
         "image_processor"
     )
+    if attr is None:
+        raise RuntimeError("image processor failed")
+    return attr
 
 
 def _get_level_progress_stats(
@@ -274,17 +277,20 @@ def get_next_pair():
         comparison_repo=_comparison_repo,
         all_images=all_images,
     )
+    logger.debug(f"phase {phase_index}")
     if not pair:
+        logger.warning(f"pair not found")
         result = "", 204
-
         return result
 
     filename_a, filename_b = pair
     node_a = crystal_graph.get_node(filename_a)
     node_b = crystal_graph.get_node(filename_b)
     if node_a is None or node_b is None:
+        logger.warning(
+            f"filename not in node: node a:{node_a} ({filename_a}), node b:{node_b} ({filename_b})"
+        )
         result = "", 204
-
         return result
 
     if processor:
@@ -332,8 +338,8 @@ def skip_image():
 
 @ranking_bp.route("/submit-comparison", methods=["POST"])
 def submit_comparison():
-    processor = _get_processor()
     _start = time.perf_counter()
+    processor = _get_processor()
 
     payload = request.get_json()
     if not payload:
@@ -369,19 +375,17 @@ def submit_comparison():
     success = recorder.record_comparison(filename_a, filename_b, winner, 1.0, 0)
     if not success:
         result = jsonify({"error": "Failed to record comparison"}), 500
-
         return result
+
+    # if crystal_graph.is_cache_stale():
+    #     crystal_graph.rebuild_from_database()
+    processor.clear_old_cache(force=False)
 
     data_a = state.get_cached_image(filename_a)
     data_b = state.get_cached_image(filename_b)
     if data_a is None or data_b is None:
         result = jsonify({"error": "Image not found"}), 404
-
         return result
-
-    if processor:
-        with processor.recent_lock:
-            processor.clear_old_cache(force=False)
 
     result = jsonify(
         {

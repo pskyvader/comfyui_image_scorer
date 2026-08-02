@@ -45,7 +45,7 @@ const CompareApi = {
         const resp = await fetchWithTimeout(
             `${api.apiBase}/ranking/next-pair`,
             {},
-            timeoutMs
+            timeoutMs,
         );
         if (resp.status === 204) {
             return null;
@@ -67,7 +67,7 @@ const CompareApi = {
                     winner: winner,
                 }),
             },
-            timeoutMs
+            timeoutMs,
         );
         if (!resp.ok) {
             throw new Error(`Server error ${resp.status}`);
@@ -86,7 +86,7 @@ const CompareApi = {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ filename }),
                 },
-                timeoutMs
+                timeoutMs,
             );
         } catch (e) {
             compareQueueLogger.error("Skip cache update failed", e);
@@ -94,13 +94,13 @@ const CompareApi = {
     },
     async getImage(filename) {
         const resp = await fetchWithTimeout(
-            `${api.apiBase}/gallery/image/${encodeURIComponent(filename)}`
+            `${api.apiBase}/gallery/image/${encodeURIComponent(filename)}`,
         );
         if (!resp.ok) {
             throw new Error("Failed to get image info");
         }
         return await resp.json();
-    }
+    },
 };
 
 // ── QueueManager ─────────────────────────────────────────────────────
@@ -127,11 +127,11 @@ class QueueManager {
         this._timeoutMs = DEFAULT_TIMEOUT_MS;
 
         // Callbacks — wired by consumer
-        this.onQueueChange = () => {};
-        this.onSubmissionComplete = () => {};
-        this.onError = () => {};
-        this.onUndoUIUpdate = () => {};
-        this.onDrained = () => {};
+        this.onQueueChange = () => { };
+        this.onSubmissionComplete = () => { };
+        this.onError = () => { };
+        this.onUndoUIUpdate = () => { };
+        this.onDrained = () => { };
     }
 
     get pendingCount() {
@@ -253,7 +253,7 @@ class PrefetchManager {
         this._timeoutMs = DEFAULT_TIMEOUT_MS;
 
         // Callbacks
-        this.onCacheChange = () => {};
+        this.onCacheChange = () => { };
     }
 
     get length() {
@@ -297,7 +297,7 @@ class PrefetchManager {
     }
 
     async _loop() {
-        compareQueueLogger.info("Prefetch loop started");
+        // compareQueueLogger.info("Prefetch loop started");
 
         while (this._prefetching && this._cache.length < this._targetSize) {
             // Wait if outgoing submissions are still in-flight

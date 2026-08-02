@@ -1,4 +1,11 @@
 from typing import Any
+from ....core.observability.logger import (
+    get_logger,
+    ModuleLogger,
+    configure_package_logging,
+)
+
+logger: ModuleLogger = get_logger(__name__)
 
 
 def run_server(host: str = "0.0.0.0", port: int = 5001, **kwargs: Any) -> int:
@@ -19,5 +26,6 @@ def run_server(host: str = "0.0.0.0", port: int = 5001, **kwargs: Any) -> int:
         init_ranking_system()
 
     debug = kwargs.get("debug", False)
+    configure_package_logging(10 if debug else 20)
     app.run(host=host, port=port, debug=debug)
     return 0

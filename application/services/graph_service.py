@@ -73,7 +73,9 @@ class CrystalGraph:
         if comparisons is None:
             if self._comparison_repo is None:
                 self._rebuilding = False
-                raise RuntimeError("No ComparisonRepository provided and no comparisons passed")
+                raise RuntimeError(
+                    "No ComparisonRepository provided and no comparisons passed"
+                )
             comparisons = self._comparison_repo.get_all_comparisons()
 
         self._images = {img["filename"]: img for img in images}
@@ -101,7 +103,15 @@ class CrystalGraph:
         if self._chain.get_built_at() is None:
             return True
         if self._comparison_repo is not None:
-            return self._comparison_repo.get_total_comparisons() != self._chain.get_db_comparison_count()
+            if (
+                self._comparison_repo.get_total_comparisons()
+                != self._chain.get_db_comparison_count()
+            ):
+                # logger.debug(
+                #     f"stale: total comparisons: {self._comparison_repo.get_total_comparisons()}"
+                #     f", db comparisons: {self._chain.get_db_comparison_count()}"
+                # )
+                return True
         return False
 
     # -- Node lookups ---------------------------------------------------
@@ -208,7 +218,8 @@ class CrystalGraph:
 
     def get_all_components(self) -> list[ComponentProxy]:
         return [
-            ComponentProxy(self._chain, component_id) for component_id in self._chain._component_members
+            ComponentProxy(self._chain, component_id)
+            for component_id in self._chain._component_members
         ]
 
     # -- Links ----------------------------------------------------------
@@ -220,7 +231,10 @@ class CrystalGraph:
         loser: str
         key: tuple[str, str]
         with tqdm(
-            self._chain.get_all_filenames(), desc="Collecting links", unit="node", delay=3.0
+            self._chain.get_all_filenames(),
+            desc="Collecting links",
+            unit="node",
+            delay=3.0,
         ) as pbar:
             for node_id in pbar:
                 for loser in self._chain.get_worse_than(node_id):
@@ -350,20 +364,28 @@ class CrystalGraph:
 class _LazyImageRepo:
     def get_all_images(self) -> list[dict[str, Any]]:
         from ...infrastructure.persistence.images_repository import get_all_images
+
         return get_all_images()
 
     def get_image(self, filename: str) -> dict[str, Any] | None:
         from ...infrastructure.persistence.images_repository import get_image
+
         return get_image(filename)
 
 
 class _LazyComparisonRepo:
     def get_all_comparisons(self) -> list[dict[str, Any]]:
-        from ...infrastructure.persistence.comparisons_repository import get_all_comparisons
+        from ...infrastructure.persistence.comparisons_repository import (
+            get_all_comparisons,
+        )
+
         return get_all_comparisons()
 
     def get_total_comparisons(self) -> int:
-        from ...infrastructure.persistence.comparisons_repository import get_total_comparisons
+        from ...infrastructure.persistence.comparisons_repository import (
+            get_total_comparisons,
+        )
+
         return get_total_comparisons()
 
 
@@ -371,3 +393,4 @@ crystal_graph: CrystalGraph = CrystalGraph(
     image_repo=_LazyImageRepo(),
     comparison_repo=_LazyComparisonRepo(),
 )
+crystal_graph.rebuild_from_database()

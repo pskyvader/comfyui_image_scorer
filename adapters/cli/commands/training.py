@@ -8,22 +8,23 @@ from ....infrastructure.ml_models.training.model_trainer import model_trainer
 logger = get_logger(__name__)
 
 
-def train_model(steps: int = 100, **kwargs: Any) -> int:
+def train_model() -> int:
+    from ....application.hyperparameters.hyperparameter_optimizer import (
+        load_training_data,
+    )
+
     logger.info("Loading training data...")
-    vectors = training_loader.load_vectors_array()
-    scores = training_loader.load_scores_array()
+    # vectors = training_loader.load_vectors_array()
+    # scores = training_loader.load_scores_array()
+    vectors, scores = load_training_data()
 
     logger.info(f"Loaded {len(vectors)} samples, {vectors.shape[1]} features")
 
-    try:
-        lgb_config = dict(config["training"]["top1"])
-    except KeyError:
-        lgb_config = {}
-    lgb_config["n_estimators"] = steps
+    lgb_config = dict(config["training"]["top1"])
 
     logger.info("Training model...")
     model, metrics = model_trainer.train_model(
-        config_dict=lgb_config, X=vectors, y=scores, enable_plotting=False
+        config_dict=lgb_config, X=vectors, y=scores, enable_plotting=True
     )
 
     logger.info(f"Training complete — score={metrics.get('score', 'N/A')}")
@@ -42,11 +43,21 @@ def run_hpo(**kwargs: Any) -> int:
     logger.info(
         "HPO options — cycles=%s, optimization_steps=%s, max_combos=%s",
         cycles if cycles is not None else f'{defaults["cycles"]} (config default)',
-        optimization_steps if optimization_steps is not None else f'{defaults["optimization_steps"]} (config default)',
-        max_combos if max_combos is not None else f'{defaults["max_combos"]} (config default)',
+        (
+            optimization_steps
+            if optimization_steps is not None
+            else f'{defaults["optimization_steps"]} (config default)'
+        ),
+        (
+            max_combos
+            if max_combos is not None
+            else f'{defaults["max_combos"]} (config default)'
+        ),
     )
 
-    result = run_hpo_cycles(cycles=cycles, optimization_steps=optimization_steps, max_combos=max_combos)
+    result = run_hpo_cycles(
+        cycles=cycles, optimization_steps=optimization_steps, max_combos=max_combos
+    )
     logger.info("HPO complete — %s cycles run", len(result))
     if result:
         logger.info("Best config: %s", result[-1]["configs"][0])

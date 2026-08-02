@@ -52,6 +52,10 @@ from ...infrastructure.persistence.path_handler import (
 from ...infrastructure.persistence.deduplicate_scored import deduplicate_scored
 from ...infrastructure.persistence.cleanup_orphans import cleanup_orphans
 
+
+from ...application.services.graph_service import crystal_graph
+from ...domain.comparison.algorithm.phase_order import reset_skip
+
 logger: ModuleLogger = get_logger(__name__)
 
 
@@ -96,8 +100,14 @@ class ImageProcessor:
         filename: str,
     ) -> dict[str, Any]:
         remove_fields = {
-            "score", "score_modifier", "volatility", "confidence",
-            "image", "comparison_count", "rating_mu", "rating_sigma",
+            "score",
+            "score_modifier",
+            "volatility",
+            "confidence",
+            "image",
+            "comparison_count",
+            "rating_mu",
+            "rating_sigma",
         }
 
         if not isinstance(json_data, dict) or not json_data:
@@ -111,7 +121,9 @@ class ImageProcessor:
             if not base:
                 for _, value in json_data.items():
                     if isinstance(value, dict):
-                        base = {k: v for k, v in value.items() if k not in remove_fields}
+                        base = {
+                            k: v for k, v in value.items() if k not in remove_fields
+                        }
                         break
 
         base["score"] = round(float(default_score), 3)
@@ -136,7 +148,14 @@ class ImageProcessor:
         if not json_path.exists():
             with self.processed_lock:
                 self.processed_images.add(filename)
-            return (False, f"Skipping {filename}: missing JSON companion", None, None, False, None)
+            return (
+                False,
+                f"Skipping {filename}: missing JSON companion",
+                None,
+                None,
+                False,
+                None,
+            )
 
         if filename in self.processed_images:
             return (False, "Already processed", None, None, False, None)
@@ -179,8 +198,12 @@ class ImageProcessor:
                 with self.processed_lock:
                     self.processed_images.add(dest_image.name)
                 return (
-                    True, f"Duplicate associated with existing file: {dest_image.name}",
-                    chosen_score, dest_image.name, bool(db_entry), cleaned_json["prompt_tags"],
+                    True,
+                    f"Duplicate associated with existing file: {dest_image.name}",
+                    chosen_score,
+                    dest_image.name,
+                    bool(db_entry),
+                    cleaned_json["prompt_tags"],
                 )
 
             stem = dest_image.stem
@@ -210,8 +233,12 @@ class ImageProcessor:
             self.processed_images.add(dest_image.name)
 
         return (
-            True, f"Processed successfully (score: {chosen_score:.3f})",
-            chosen_score, dest_image.name, bool(db_entry), cleaned_json["prompt_tags"],
+            True,
+            f"Processed successfully (score: {chosen_score:.3f})",
+            chosen_score,
+            dest_image.name,
+            bool(db_entry),
+            cleaned_json["prompt_tags"],
         )
 
     def sync_processed_images_from_db(self) -> None:
@@ -286,11 +313,17 @@ class ImageProcessor:
         system_total = db_count + total_goal
 
         with tqdm(
-            total=len(batch_files), desc="[SCANNER] Initializing...",
-            unit="img", leave=False, delay=3.0,
+            total=len(batch_files),
+            desc="[SCANNER] Initializing...",
+            unit="img",
+            leave=False,
+            delay=3.0,
         ) as pbar:
+
             def update_desc() -> None:
-                pbar.set_description(f"[SCANNER] Global: {current_global}/{system_total}")
+                pbar.set_description(
+                    f"[SCANNER] Global: {current_global}/{system_total}"
+                )
 
             update_desc()
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -300,14 +333,19 @@ class ImageProcessor:
                 }
                 for future in as_completed(future_to_file):
                     filename = future_to_file[future].name
-                    success, message, score, dest_name, db_exists, prompt_tags = future.result()
+                    success, message, score, dest_name, db_exists, prompt_tags = (
+                        future.result()
+                    )
                     if success:
                         stats["processed"] += 1
                         db_name = dest_name or filename
                         if score is not None and not db_exists:
                             if add_image(
-                                filename=db_name, score=score, comparison_count=0,
-                                prompt_tags=prompt_tags, rating_mu=INITIAL_MEAN,
+                                filename=db_name,
+                                score=score,
+                                comparison_count=0,
+                                prompt_tags=prompt_tags,
+                                rating_mu=INITIAL_MEAN,
                                 rating_sigma=INITIAL_UNCERTAINTY,
                             ):
                                 stats["added"] += 1
@@ -352,15 +390,21 @@ class ImageProcessor:
                 entry, default_score=self.default_score, filename=Path(img_path).name
             )
             add_image(
-                filename=Path(img_path).name, score=self.default_score, comparison_count=0,
-                prompt_tags=cleaned.get("prompt_tags"), rating_mu=INITIAL_MEAN,
+                filename=Path(img_path).name,
+                score=self.default_score,
+                comparison_count=0,
+                prompt_tags=cleaned.get("prompt_tags"),
+                rating_mu=INITIAL_MEAN,
                 rating_sigma=INITIAL_UNCERTAINTY,
             )
 
         valid_filenames = {img["filename"] for img in get_all_images()}
 
         with tqdm(
-            total=len(all_entries), desc="Adding histories from image", unit="img", delay=3.0
+            total=len(all_entries),
+            desc="Adding histories from image",
+            unit="img",
+            delay=3.0,
         ) as pbar:
             for img_path, entry, _timestamp, file_id in all_entries:
                 filename = Path(img_path).name
@@ -368,7 +412,9 @@ class ImageProcessor:
                 cleaned = self.clean_json_metadata(
                     entry, default_score=self.default_score, filename=filename
                 )
-                prompt_tags = cleaned["prompt_tags"] or self._extract_prompt_tags(cleaned)
+                prompt_tags = cleaned["prompt_tags"] or self._extract_prompt_tags(
+                    cleaned
+                )
                 existing = db_get_image(filename)
                 if existing and prompt_tags and existing["prompt_tags"] != prompt_tags:
                     update_image_tags(filename, prompt_tags)
@@ -387,8 +433,10 @@ class ImageProcessor:
                             if winner_file not in valid_filenames:
                                 continue
                             add_historical_comparison(
-                                filename_a=filename, filename_b=other,
-                                winner=winner_file, timestamp=str(timestamp),
+                                filename_a=filename,
+                                filename_b=other,
+                                winner=winner_file,
+                                timestamp=str(timestamp),
                                 weight=float(comp["weight"]),
                                 transitive_depth=int(comp["transitive_depth"]),
                             )
@@ -429,18 +477,23 @@ class ImageProcessor:
         )
         sync_args = [
             (
-                img["filename"], float(img["score"]), float(img["rating_mu"]),
-                float(img["rating_sigma"]), int(img["comparison_count"]),
+                img["filename"],
+                float(img["score"]),
+                float(img["rating_mu"]),
+                float(img["rating_sigma"]),
+                int(img["comparison_count"]),
             )
             for img in all_images
         ]
         prepare_conf = config["prepare"]
         logger.debug("sync json data...")
         parallel_for(
-            sync_worker, sync_args,
+            sync_worker,
+            sync_args,
             max_workers=int(prepare_conf["max_workers"]),
             batch_size=int(prepare_conf["batch_size"]),
-            desc="Syncing JSON metadata", unit="img",
+            desc="Syncing JSON metadata",
+            unit="img",
         )
 
         clear_folder_cache()
@@ -453,8 +506,11 @@ class ImageProcessor:
 
         updated = 0
         with tqdm(
-            total=len(replayed), desc="Updating scores",
-            unit="img", leave=False, delay=3.0,
+            total=len(replayed),
+            desc="Updating scores",
+            unit="img",
+            leave=False,
+            delay=3.0,
         ) as pbar:
             for filename, (rating, count) in replayed.items():
                 if update_image_rating_state(
@@ -508,8 +564,11 @@ class ImageProcessor:
 
         moved_count = 0
         with tqdm(
-            total=len(moves), desc="[SCANNER] Reorganizing files",
-            unit="file", leave=False, delay=3.0,
+            total=len(moves),
+            desc="[SCANNER] Reorganizing files",
+            unit="file",
+            leave=False,
+            delay=3.0,
         ) as pbar:
             for loose_file, target_path in moves:
                 json_path = loose_file.with_suffix(".json")
@@ -521,10 +580,12 @@ class ImageProcessor:
                 pbar.update(1)
 
         if moved_count:
-            logger.info("[SCANNER] Reorganized %s loose files into subfolders.", moved_count)
+            logger.info(
+                "[SCANNER] Reorganized %s loose files into subfolders.", moved_count
+            )
 
     def clear_old_cache(self, force: bool) -> None:
-        should_clear = (
+        should_clear: bool = (
             force
             or len(self.recent_images) >= self.lru_size
             or len(self.recent_chains) >= self.lru_size
@@ -535,10 +596,14 @@ class ImageProcessor:
         elif should_clear:
             num_to_remove = int(self.lru_size * 0.75)
             logger.info(
-                f"[PAIR-REFINE] LRU cache full (nodes: {len(self.recent_images)}, chains: {len(self.recent_chains)}). "
+                f"LRU cache full (nodes: {len(self.recent_images)}, chains: {len(self.recent_chains)}). "
                 f"Removing {num_to_remove} least recently used items."
             )
             for _ in range(min(len(self.recent_images), num_to_remove)):
                 self.recent_images.popleft()
             for _ in range(min(len(self.recent_chains), num_to_remove)):
                 self.recent_chains.popleft()
+
+        if should_clear:
+            crystal_graph.rebuild_from_database()
+            reset_skip()

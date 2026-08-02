@@ -197,7 +197,7 @@ class CompareMode {
         }
 
         btn.style.display = "block";
-        compareLogger.info("Updating undo UI for submission queue:", null, this._queue.submissionQueue);
+        // compareLogger.info("Updating undo UI for submission queue:", null, this._queue.submissionQueue);
 
         const last = this._queue.peekLast();
         const isLeftWinner = last.winnerFilename === last.filenameA;
@@ -341,10 +341,11 @@ class CompareMode {
         // Fetch config and phases in parallel
         const [serverConfig, phases] = await Promise.all([
             CompareApi.getRankingConfig(),
-            CompareApi.getPhases().catch(e => {
-                compareLogger.error("Failed to load phases", e);
-                return null;
-            }),
+            CompareApi.getPhases()
+                .catch((e) => {
+                    compareLogger.error("Failed to load phases", e);
+                    return null;
+                }),
         ]);
 
         this._config.reserve_count = serverConfig.reserve_count;
@@ -459,8 +460,8 @@ class CompareMode {
             this.showLoading(false);
             return;
         }
-        compareLogger.info("Loaded pair:", null, pair, { cached: cached !== null });
-        compareLogger.info("Loaded pair top-level keys:", null, pair ? Object.keys(pair) : null);
+        // compareLogger.info("Loaded pair:", null, pair, { cached: cached !== null });
+        // compareLogger.info("Loaded pair top-level keys:", null, pair ? Object.keys(pair) : null);
         if (pair && !pair.pair) {
             compareLogger.error("Backend response missing `pair` envelope; has keys:", null, Object.keys(pair));
         }
@@ -539,7 +540,7 @@ class CompareMode {
     // ── Vote submission ──────────────────────────────────────────────
 
     async submitVote(winner) {
-        compareLogger.info("Submitting vote for:", null, winner, this.currentPair);
+        // compareLogger.info("Submitting vote for:", null, winner, this.currentPair);
         const winnerFilename = winner === "left" ? this.currentPair.left.filename : this.currentPair.right.filename;
         const filenameA = this.currentPair.left.filename;
         const filenameB = this.currentPair.right.filename;

@@ -102,8 +102,6 @@ class ScoringService:
                 name,
                 model_key=model_key,
                 slot_size=entry["slot_size"],
-                model_loader=self._model_loader,
-                batch_sizer=self._batch_sizer(model_key=model_key),
             )
             images_dict = {str(i): image for i, image in enumerate(images_list)}
             rebuild = False

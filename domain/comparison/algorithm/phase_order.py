@@ -141,7 +141,7 @@ def select_pair(
 
     reserve_count = int(config["ranking"]["reserve_count"])
     total_comps: int = comparison_repo.get_total_comparisons()
-    logger.debug(f"total comps: {total_comps}, skip before:{_skip_before}")
+    # logger.debug(f"total comps: {total_comps}, skip before:{_skip_before}")
     if total_comps % reserve_count == 0:
         reset_skip()
 
@@ -155,7 +155,9 @@ def select_pair(
         if name == "seed":
             result = fn(seed_candidates, existing_pairs_set, cg, comparison_repo)
         elif name == "anchor":
-            result = fn(candidate_images, seed_pool, existing_pairs_set, cg, comparison_repo)
+            result = fn(
+                candidate_images, seed_pool, existing_pairs_set, cg, comparison_repo
+            )
         elif name == "collapsible":
             result = fn(candidate_images, existing_pairs_set, cg, comparison_repo)
         elif name == "refine":

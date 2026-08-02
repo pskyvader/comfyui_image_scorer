@@ -51,6 +51,7 @@ SECTION_FRONTENDS = {
     "comparison": Path(__file__).parent.parent / "comparison" / "frontend",
     "gallery": Path(__file__).parent.parent / "gallery" / "frontend",
     "maps": Path(__file__).parent.parent / "maps" / "frontend",
+    "maps2": Path(__file__).parent.parent / "maps2" / "frontend",
     "database": Path(__file__).parent.parent / "database_structure" / "frontend",
     "data": Path(__file__).parent.parent / "data_transform" / "frontend",
     "training": Path(__file__).parent.parent / "training_hyperparameters" / "frontend",
@@ -98,7 +99,9 @@ def serve_ranked_image(filepath: str):
     direct_path = ranked_root / filepath_decoded
     if direct_path.exists() and direct_path.is_file():
         response = send_file(str(direct_path))
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Cache-Control"] = (
+            "no-store, no-cache, must-revalidate, max-age=0"
+        )
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
         return response
@@ -107,7 +110,9 @@ def serve_ranked_image(filepath: str):
     found = find_image_path(filename)
     if found:
         response = send_file(str(Path(found)))
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Cache-Control"] = (
+            "no-store, no-cache, must-revalidate, max-age=0"
+        )
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
         return response
@@ -189,9 +194,13 @@ def scanner_task(img_root: str) -> None:
 def start_background_scanner(img_root: str) -> None:
     global scanner_thread
     if scanner_thread:
-        logger.info(f"[SCANNER] Scanner already running. Alive: {scanner_thread.is_alive()}")
+        logger.info(
+            f"[SCANNER] Scanner already running. Alive: {scanner_thread.is_alive()}"
+        )
         return
-    scanner_thread = threading.Thread(target=scanner_task, daemon=True, args=(img_root,))
+    scanner_thread = threading.Thread(
+        target=scanner_task, daemon=True, args=(img_root,)
+    )
     scanner_thread.start()
     logger.info("[SCANNER] Global image scanner started.")
 
@@ -204,17 +213,19 @@ def startup_worker() -> None:
 
 
 def init_ranking_system() -> bool:
-    threading.Thread(
-        target=startup_worker, daemon=True
-    ).start()
+    threading.Thread(target=startup_worker, daemon=True).start()
     logger.info("[OK] Background initialization triggered.")
     return True
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Ranking System Server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
-    parser.add_argument("--port", type=int, default=5001, help="Port to bind to (default: 5001)")
+    parser.add_argument(
+        "--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)"
+    )
+    parser.add_argument(
+        "--port", type=int, default=5001, help="Port to bind to (default: 5001)"
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
 
