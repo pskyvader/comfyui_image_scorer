@@ -143,6 +143,8 @@ class PlotManager:
         title: str = "Actual vs Predicted (continuous)",
         x_label: str = "Actual",
         y_label: str = "Predicted",
+        save_path: str | None = None,
+        show: bool = True,
     ) -> None:
         if not plot:
             return
@@ -185,7 +187,9 @@ class PlotManager:
         ax.set_title(title)
         ax.grid(True)
 
-        if plot:
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        if plot and show:
             plt.show()
 
     @staticmethod
@@ -233,10 +237,16 @@ class PlotManager:
 
     @staticmethod
     def compare_model_vs_data(
-        x: np.ndarray, y: np.ndarray, plot: bool = True, limit: int = 100
+        x: np.ndarray,
+        y: np.ndarray,
+        plot: bool = True,
+        limit: int = 100,
+        save_path: str | None = None,
+        show: bool = True,
     ) -> None:
         rng = np.random.default_rng()
-        indices = rng.choice(len(x), size=limit, replace=False)
+        size = min(limit, len(x))
+        indices = rng.choice(len(x), size=size, replace=False)
 
         x_sample = x[indices]
         y_sample = y[indices]
@@ -287,9 +297,13 @@ class PlotManager:
                     title="Actual vs Calibrated Predicted (ranking)",
                     x_label="Actual score",
                     y_label="Calibrated predicted score",
+                    save_path=save_path,
+                    show=show,
                 )
             else:
-                PlotManager.plot_scatter_comparison_continuous(y_plot, p_plot, plot)
+                PlotManager.plot_scatter_comparison_continuous(
+                    y_plot, p_plot, plot, save_path=save_path, show=show
+                )
 
     @staticmethod
     def _plot_metric_on_axes(
@@ -330,7 +344,11 @@ class PlotManager:
             )
 
     @staticmethod
-    def plot_loss_curve(result_metrics: dict[str, Any] | None = None) -> None:
+    def plot_loss_curve(
+        result_metrics: dict[str, Any] | None = None,
+        save_path: str | None = None,
+        show: bool = True,
+    ) -> None:
         try:
             curves = None
 
@@ -379,10 +397,46 @@ class PlotManager:
             plt.legend()
             plt.grid(True)
             plt.tight_layout()
-            plt.show()
+            if save_path:
+                plt.savefig(save_path, dpi=150, bbox_inches="tight")
+            if show:
+                plt.show()
 
         except Exception as e:
             print("Failed to plot curves:", e)
+
+    @staticmethod
+    def plot_score_distribution(
+        y: np.ndarray,
+        save_path: str | None = None,
+        show: bool = True,
+    ) -> None:
+        y_plot = np.asarray(y).ravel()
+        if y_plot.size == 0:
+            return
+
+        y_classes = np.digitize(y_plot, bins=np.arange(0, 1.01, 0.1), right=False)
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+        ax1.hist(y_plot, bins=50, alpha=0.7, edgecolor="black")
+        ax1.set_xlabel("Score")
+        ax1.set_ylabel("Frequency")
+        ax1.set_title("Score Distribution (0-1)")
+        ax1.grid(True)
+
+        ax2.hist(y_classes, bins=10, alpha=0.7, edgecolor="black", rwidth=0.8)
+        ax2.set_xlabel("Score Bucket")
+        ax2.set_ylabel("Frequency")
+        ax2.set_title("Score Bucket Distribution")
+        ax2.set_xticks(range(1, 11))
+        ax2.set_xticklabels([f"{i / 10:.1f}-{(i + 1) / 10:.1f}" for i in range(10)])
+        ax2.grid(True)
+
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        if show:
+            plt.show()
 
     @staticmethod
     def plot_continuous_analysis(

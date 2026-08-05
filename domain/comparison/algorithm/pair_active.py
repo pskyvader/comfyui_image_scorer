@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 import time
 from typing import Any, Protocol
 from collections.abc import Iterator
@@ -77,14 +76,6 @@ def existing_pairs(comparison_repo: ComparisonRepository) -> set[tuple[str, str]
         _pair_key(comp["filename_a"], comp["filename_b"])
         for comp in comparison_repo.get_all_comparisons(weight=1.0)
     }
-    return result
-
-
-def _component_id(filename: str, cg: CrystalGraph) -> int | None:
-    _start = time.perf_counter()
-    comp = cg.get_component(node_id=filename)
-    result = comp.id if comp else None
-
     return result
 
 
@@ -166,7 +157,7 @@ def phase_seed_coverage(
             continue
         logger.debug(f"starting iterator", start_timer=_start)
         opponents: Iterator[dict[str, Any]] = _find_unseen_candidates(
-            source, seed_candidates, existing_pair_set
+            source, under_seed_target, existing_pair_set
         )
 
         chosen = None
@@ -186,7 +177,7 @@ def phase_seed_coverage(
                 logger.debug(f"good candidate found st {i} steps", start_timer=_start)
                 break
 
-            if i > 10:
+            if i > 20:
                 break
 
             if int(opp["comparison_count"]) < chosen["comparison_count"]:
@@ -246,6 +237,76 @@ def phase_anchor_insert(
     return None
 
 
+def _collect_chain_extremes(
+    chains: list[ChainProxy],
+    candidate_names: set[str],
+    check_list: list[str],
+    use_bottom: bool,
+    cg: CrystalGraph,
+) -> list[NodeProxy]:
+    """Return up to 10 qualifying chain extremes, least-compared first."""
+    nodes: list[NodeProxy] = []
+    seen: set[str] = set()
+    for chain in chains:
+        chain_extreme = chain.last if use_bottom else chain.first
+        if not (
+            chain_extreme
+            and chain_extreme.filename in candidate_names
+            and chain_extreme.filename in check_list
+            and (chain_extreme.is_bottom() if use_bottom else chain_extreme.is_top())
+        ):
+            continue
+        filename = chain_extreme.filename
+        if filename in seen:
+            continue
+        seen.add(filename)
+        node = cg.get_node(filename)
+        if node is None:
+            continue
+        nodes.append(node)
+    nodes.sort(key=lambda node: node.comparison_count)
+    return nodes[:10]
+
+
+def _collapsible_extreme_pair(
+    chains: list[ChainProxy],
+    candidate_names: set[str],
+    comparison_repo: ComparisonRepository,
+    cg: CrystalGraph,
+) -> tuple[str, str] | None:
+    """Anchor on the least-compared node and return its most score-similar same-type partner."""
+
+    check_list = comparison_repo.get_images_with_only_losses()
+    use_bottom = True
+    nodes: list[NodeProxy] = _collect_chain_extremes(
+        chains, candidate_names, check_list, use_bottom, cg
+    )
+
+    if len(nodes) < 2:
+        check_list = comparison_repo.get_images_with_only_wins()
+        use_bottom = False
+        nodes: list[NodeProxy] = _collect_chain_extremes(
+            chains, candidate_names, check_list, use_bottom, cg
+        )
+
+    if len(nodes) < 2:
+        logger.info(
+            f"no candidates found, len:{len(nodes)}, bottom:{use_bottom}, checklist:{len(check_list)}"
+        )
+        return None
+
+    node_a: NodeProxy = nodes[0]
+    pair_list: list[tuple[NodeProxy, NodeProxy]] = [
+        (node_a, node_b) for node_b in nodes[1:]
+    ]
+    pair_list.sort(
+        key=lambda pair: abs(pair[0].score - pair[1].score),
+    )
+
+    node_a, node_b = pair_list[0]
+    return (node_a.filename, node_b.filename)
+
+
 def phase_collapsible_pairs(
     candidate_images: list[dict[str, Any]],
     pair_set: set[tuple[str, str]],
@@ -253,86 +314,25 @@ def phase_collapsible_pairs(
     comparison_repo: ComparisonRepository,
 ) -> tuple[str, str] | None:
     _start = time.perf_counter()
-    only_wins = comparison_repo.get_images_with_only_wins()
-    only_loses = comparison_repo.get_images_with_only_losses()
-    if len(only_wins) == 1 and len(only_loses) == 1:
-        return None
 
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
 
+    candidate_nodes = [cg.get_node(img["filename"]) for img in candidate_images]
+
     candidate_names = {
-        img["filename"]
-        for img in candidate_images
-        if img["comparison_count"] > insertion_target
+        node.filename
+        for node in candidate_nodes
+        if node is not None and node.comparison_count > insertion_target
     }
 
     chains_list = cg.get_all_chains()
     chains: list[ChainProxy] = [c[0] for c in chains_list]
-    tops_by_comp: dict[int | None, dict[str, int]] = defaultdict(dict)
-    bottoms_by_comp: dict[int | None, dict[str, int]] = defaultdict(dict)
 
-    for chain in chains:
-        if (
-            chain.first
-            and chain.first.filename in candidate_names
-            and chain.first.is_top()
-        ):
+    result = _collapsible_extreme_pair(chains, candidate_names, comparison_repo, cg)
+    if result:
+        logger.debug(f"collapsible pair: {result}", start_timer=_start)
 
-            comp = _component_id(chain.first.filename, cg)
-            if chain.first.filename not in tops_by_comp[comp]:
-                tops_by_comp[comp][chain.first.filename] = len(chain.first.get_links())
-        if (
-            chain.last
-            and chain.last.filename in candidate_names
-            and chain.last.is_bottom()
-        ):
-            comp = _component_id(chain.last.filename, cg)
-            if chain.last.filename not in bottoms_by_comp[comp]:
-                bottoms_by_comp[comp][chain.last.filename] = len(chain.last.get_links())
-    for comp_id, bottoms in bottoms_by_comp.items():
-
-        if len(bottoms) < 2:
-            continue
-
-        sorted_bottom_dict: list[tuple[str, int]] = list(bottoms.items())
-        sorted_bottom_dict.sort(key=lambda bottom: bottom[1], reverse=False)
-        sorted_bottoms: list[str] = [bottom[0] for bottom in sorted_bottom_dict]
-
-        for i, bottom_a in enumerate(sorted_bottoms):
-            if bottom_a not in only_loses:
-                raise RuntimeError(f"bottom node {bottom_a} not present in only loses.")
-
-            for bottom_b in sorted_bottoms[i + 1 :]:
-                if bottom_b not in only_loses:
-                    raise RuntimeError(
-                        f"bottom node {bottom_b} not present in only loses."
-                    )
-
-                result = (bottom_a, bottom_b)
-
-                return result
-
-    for comp_id, tops in tops_by_comp.items():
-        if len(tops.items()) < 2:
-            continue
-        logger.debug(f"id:{comp_id}, total extremes:{len(tops.items())}")
-
-        sorted_top_dict: list[tuple[str, int]] = list(tops.items())
-        sorted_top_dict.sort(key=lambda top: top[1], reverse=False)
-        sorted_tops: list[str] = [top[0] for top in sorted_top_dict]
-
-        for i, top_a in enumerate(sorted_tops):
-            if top_a not in only_wins:
-                raise RuntimeError(f"top node {top_a} not present in only wins.")
-            for top_b in sorted_tops[i + 1 :]:
-                if top_b not in only_wins:
-                    raise RuntimeError(f"top node {top_b} not present in only wins.")
-
-                result = (top_a, top_b)
-
-                return result
-
-    return None
+    return result
 
 
 _last_chains_index: list[int] = []

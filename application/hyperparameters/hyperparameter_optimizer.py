@@ -116,9 +116,11 @@ def reset_hyperparameters() -> dict[str, Any]:
     return state
 
 
-def load_training_data() -> tuple[np.ndarray, np.ndarray]:
-    """Load keyed vectors/scores, compress unused features, then keep only
-    files with enough comparisons (scores replayed on the kept subset)."""
+def load_training_data(filter_comparisons: bool) -> tuple[np.ndarray, np.ndarray]:
+    """Load keyed vectors/scores and compress unused features. When
+    filter_comparisons is True, keep only files with enough comparisons
+    (scores replayed on the kept subset); otherwise keep every scored file
+    with its full-history score."""
     transformer = DataTransformer(training_loader, model_trainer)
     vectors_keyed = training_loader.load_vectors()
     scores_keyed = training_loader.load_scores()
@@ -144,30 +146,35 @@ def load_training_data() -> tuple[np.ndarray, np.ndarray]:
     )
 
     threshold = config["training"]["min_comparisons_threshold"]
-    logger.info("filtering low comparison data (threshold=%s) ...", threshold)
-    rule = transformer.filter_low_comparisons(threshold=threshold)
-    kept_filenames = set(rule)
-    scores_subset = {fid: score for fid, (score, _count) in rule.items()}
+    kept_filenames: set[str] | None = None
+    scores_subset: dict[str, float] | None = None
+    if filter_comparisons:
+        logger.info("filtering low comparison data (threshold=%s) ...", threshold)
+        rule = transformer.filter_low_comparisons(threshold=threshold)
+        kept_filenames = set(rule)
+        scores_subset = {fid: score for fid, (score, _count) in rule.items()}
+        logger.info(
+            "Comparison filtering: kept %s filenames (threshold=%s), dropped %s.",
+            len(kept_filenames),
+            threshold,
+            len(scores_keyed) - len(kept_filenames),
+        )
 
     x_rows: list[np.ndarray] = []
     y_rows: list[float] = []
     for fid in scores_keyed:
-        if fid not in kept_filenames:
+        if kept_filenames is not None and fid not in kept_filenames:
             continue
         vec = vectors_keyed.get(fid)
         if vec is None:
             continue
         x_rows.append(vec[kept_feature_idx])
-        y_rows.append(scores_subset[fid])
+        y_rows.append(
+            scores_subset[fid] if scores_subset is not None else scores_keyed[fid]
+        )
 
     x = np.array(x_rows, dtype=np.float32)
     y = np.array(y_rows, dtype=np.float32)
-    logger.info(
-        "Comparison filtering: kept %s filenames (threshold=%s), dropped %s.",
-        len(kept_filenames),
-        threshold,
-        len(scores_keyed) - len(kept_filenames),
-    )
     logger.info("Training data ready: X=%s, Y=%s", x.shape, y.shape)
     return x, y
 
@@ -391,7 +398,7 @@ def run_hpo_cycles(
     if max_combos is None:
         max_combos = int(training_config["max_combos"])
 
-    X, y = load_training_data()
+    X, y = load_training_data(filter_comparisons=True)
 
     results = []
     for i in range(cycles):

@@ -18,9 +18,9 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 | Name | Description |
 |---|---|
-| `cleanup()` | CLI command that cleans stale comparisons and vacuums the database, returning the comparison count |
-| `rebuild()` | CLI command that rebuilds the database from ranked files via the ImageProcessor and returns 0 |
-| `recalculate()` | CLI command that resets ratings, replays all comparisons through TrueSkill, updates scores, and returns status code |
+| `cleanup(**kwargs)` | CLI command that cleans stale comparisons and vacuums the database, returning the comparison count |
+| `rebuild(**kwargs)` | CLI command that rebuilds the database from ranked files via the ImageProcessor and returns 0 |
+| `recalculate(**kwargs)` | CLI command that resets ratings, replays all comparisons through TrueSkill, updates scores, and returns status code |
 
 ---
 
@@ -30,7 +30,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 | Name | Description |
 |---|---|
-| `run_server(host, port)` | CLI command that initializes the database and ranking system, then starts the Flask app, returning 0 |
+| `run_server(host="0.0.0.0", port=5001, **kwargs)` | CLI command that initializes the database and ranking system, then starts the Flask app, returning 0; optional `debug` kwarg forwarded to Flask |
 
 ---
 
@@ -40,8 +40,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 | Name | Description |
 |---|---|
-| `train_model(steps)` | CLI command that loads vectors and scores, trains the model for the given steps, saves it, and returns 0 |
-| `run_hpo()` | CLI command that runs hyperparameter optimization cycles and logs the best result, returning 0 |
+| `train_model()` | CLI command that loads comparison-filtered training data, trains the LightGBM model with the `training.top1` config, saves it with its metrics, writes `training_curves.png`, `score_distribution.png`, and `prediction_accuracy.png` to `output/training/plots/`, and returns 0 |
+| `run_hpo(**kwargs)` | CLI command that runs hyperparameter optimization cycles with optional `cycles` / `optimization_steps` / `max_combos` overrides (config defaults otherwise), logs the best result, and returns 0 |
 
 ---
 
@@ -51,10 +51,10 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 | Name | Description |
 |---|---|
-| `run_split_vectors(limit, batch)` | CLI command that builds split vector files, optionally in looping batch mode, and removes derived caches when new data was added |
-| `run_full_vectors()` | CLI command that builds full vector and text data from existing splits and returns 0 |
-| `run_scores()` | CLI command that rebuilds scores and comparisons and returns 0 |
-| `run_all(limit, batch)` | CLI command that runs the full build pipeline with optional limit and batch flags and returns 0 |
+| `run_split_vectors(limit=0, batch=False)` | CLI command that builds split vector files, optionally in looping batch mode, and removes derived caches when new data was added |
+| `run_full_vectors(**kwargs)` | CLI command that builds full vector and text data from existing splits and returns 0 |
+| `run_scores(**kwargs)` | CLI command that rebuilds scores and comparisons and returns 0 |
+| `run_all(limit=0, batch=False, **kwargs)` | CLI command that runs the full build pipeline with optional limit and batch flags and returns 0 |
 
 ---
 
@@ -257,6 +257,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Main server - Flask application for ranking system
 
+> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `start_background_scanner` is dead — defined but never invoked.
+
 ### Module-level functions
 
 | Name | Description |
@@ -371,10 +373,14 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 | Name | Description |
 |---|---|
-| `load_training_data()` | Loads the training vectors and scores arrays from the training loader |
-| `_sample_combinations(base_config, max_combos)` | Builds hyperparameter combinations around base config values, randomly sampling when the count exceeds max_combos |
-| `hpo_cycle(config_dict, X, y, cycle)` | Trains a model with the given config and returns the config, metrics, and cycle number |
-| `run_hpo_cycles(cycles, optimization_steps, max_combos)` | Runs hyperparameter optimization cycles over the top1..top5 configs, breeding the next generation after each cycle |
+| `generate_random_config()` | Builds a random hyperparameter config dict for the current training objective |
+| `generate_fastest_setup()` | Builds a config targeting the fastest training setup for the objective |
+| `generate_slowest_setup()` | Builds a config targeting the highest-quality (slowest) setup for the objective |
+| `crossover_config(cfg1, cfg2)` | Merges two configs into a new child by picking each key from one parent |
+| `reset_hyperparameters()` | Resets the HPO state to the initial 5-config population (random, random, slowest, fastest, random) and persists it |
+| `load_training_data(filter_comparisons)` | Loads keyed vectors and scores, filters unused features, and returns aligned X/y arrays; when `filter_comparisons` is True keeps only files with enough comparisons (scores replayed on the kept subset), otherwise keeps every scored file with its full-history score |
+| `hpo_cycle(X, y, optimization_steps=100, max_combos=4, cycle=0)` | Runs one HPO cycle: optimizes each population config with per-key variation steps, sorts configs by score, breeds the next generation (top 2 parents + 2 crossover children + 1 random), persists state, and returns the new state dict |
+| `run_hpo_cycles(cycles=None, optimization_steps=None, max_combos=None)` | Runs multiple HPO cycles over the top1..top5 configs, breeding the next generation after each cycle; `None` values fall back to `config["training"]` defaults; returns the per-cycle results list |
 
 ---
 
@@ -513,6 +519,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 ## `core/filesystem/paths.py`
 
+> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `hyperparameters_statistics` is a dead constant — no callers (the legacy HPO ledger was dropped in the rewrite).
+
 ### Module-level functions
 
 | Name | Description |
@@ -539,7 +547,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 | `index_file` | Path to `output/vectors/index.jsonl` |
 | `text_data_file` | Path to `output/vectors/text_data.jsonl` |
 | `models_dir` | Path to `output/models/` |
-| `mediapipe_models_dir` | Path to `downloaded_models/` |
+| `mediapipe_models_dir` | Path to `output/downloaded_models/` |
+| `training_plots_dir` | Path to `output/training/plots/` |
 | `training_model` | Path to `output/models/model.npz` |
 | `vectors_data` | Path to `output/models/vectors.npz` |
 | `scores_data` | Path to `output/models/scores.npz` |
@@ -551,6 +560,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 ---
 
 ## `core/io/serialization.py`
+
+> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `load_single_entry_mapping` is dead — no callers anywhere.
 
 ### Module-level functions
 
@@ -571,6 +582,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 ## `core/observability/logger.py`
 
 > Shared backend logging utilities
+
+> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `set_log_filter_hook` and `log_message` are dead (no callers; `set_log_filter_hook` is also a dead import at `adapters/server/main.py:19`), and the `TaskLogHandler` class is never instantiated.
 
 ### Module-level functions
 
@@ -716,6 +729,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Background task infrastructure shared across sections
 
+> **Scheduled move (REORGANIZATION_PLAN §0.3):** `start_task`, `set_task_output`, `get_task_status`, and `cancel_task` are server-only orchestration used solely by `adapters/server/endpoints/`; they move to `adapters/server/tasks.py`.
+
 ### Module-level functions
 
 | Name | Description |
@@ -731,6 +746,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 ## `core/utilities/utils.py`
 
 > Small shared utilities used across the project
+
+> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** the whole module is dead — `parse_custom_text` is a legacy feature moved into `_recursive_parse_json` (`core/io/serialization.py`), and `first_present` was replaced by `get_value_from_entry` (`domain/vectors/helpers.py`).
 
 ### Module-level functions
 
@@ -786,6 +803,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 ## `domain/analysis/helpers.py`
 
 > Analysis helpers - utility functions for analysis endpoints
+
+> **Scheduled move (REORGANIZATION_PLAN §0.4):** `distribute` is a pure stateless bucket-counting helper with zero domain knowledge, called only by `adapters/server/endpoints/analysis.py` (6 sites); it moves to `core/utilities/analysis.py`.
 
 ### Module-level functions
 
@@ -898,6 +917,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 ## `domain/comparison/algorithm/graph_helpers.py`
 
 > Reusable graph-query helpers for the ranking algorithm
+
+> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `get_chain_length`, `group_nodes_by_extreme`, and `find_lowest_confidence_images` are dead — module-level helpers never imported.
 
 ### Module-level functions
 
@@ -1418,13 +1439,14 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 | `_calculate_scatter_sizes(counts, min_size_px, max_size_px, power)` (staticmethod) | Maps point counts to pixel sizes with power scaling |
 | `_setup_scatter_axes(ax, y_min, y_max)` (staticmethod) | Draws the perfect-prediction diagonal and sets equal axes limits |
 | `plot_scatter_comparison(y_plot, p_plot, plot, min_size_px, max_size_px, power, label_threshold, title, x_label, y_label)` (staticmethod) | Plots a sized scatter of actual vs predicted with count labels |
-| `plot_scatter_comparison_continuous(y_plot, p_plot, plot, min_size_px, max_size_px, power, label_threshold, title, x_label, y_label)` (staticmethod) | Plots a scatter of actual vs predicted with value labels |
+| `plot_scatter_comparison_continuous(y_plot, p_plot, plot, min_size_px, max_size_px, power, label_threshold, title, x_label, y_label, save_path=None, show=True)` (staticmethod) | Plots a scatter of actual vs predicted with value labels, optionally saving to `save_path` |
 | `prepare_plot_data(y, preds)` (staticmethod) | Returns the finite sample pairs to plot |
 | `print_comparison_metrics(y, preds, metrics, objective, calibrated)` (staticmethod) | Prints sample and stored R2 and pairwise accuracy metrics |
-| `compare_model_vs_data(x, y, plot, limit)` (staticmethod) | Samples data, predicts with the trained model, calibrates ranking scores, and plots the comparison |
+| `compare_model_vs_data(x, y, plot, limit=100, save_path=None, show=True)` (staticmethod) | Samples data, predicts with the trained model, calibrates ranking scores, and plots the comparison, optionally saving to `save_path` |
 | `_plot_metric_on_axes(ax, metric_name, values, label, direction_higher)` (staticmethod) | Plots one metric series with a direction annotation on the axis |
 | `plot_metric(axes, current_metric, label)` (staticmethod) | Plots each current metric series on the given axes |
-| `plot_loss_curve(result_metrics)` (staticmethod) | Plots the validation curves from result metrics or saved diagnostics |
+| `plot_loss_curve(result_metrics=None, save_path=None, show=True)` (staticmethod) | Plots the validation curves from result metrics or saved diagnostics, optionally saving to `save_path` |
+| `plot_score_distribution(y, save_path=None, show=True)` (staticmethod) | Plots the score distribution as binned bars over the [0, 1] score range, optionally saving to `save_path` |
 | `plot_continuous_analysis(data_dict, group_name, x_label, y_label, cols, share_axes)` (staticmethod) | Plots a grid of scatter subplots for continuous point groups |
 | `plot_discrete_analysis(data_dict, group_name, x_label, y_label, cols)` (staticmethod) | Plots a grid of scatter subplots for discrete value groups |
 | `plot_aggregate_summary(data_dict, group_name, value_label, top_percent, limit, ascending)` (staticmethod) | Plots a bar chart of group means with error bars for the most-used groups |
@@ -1829,6 +1851,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Comparisons table operations
 
+> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `get_recent_comparisons`, `get_comparison_count`, `delete_comparisons_for_image`, `delete_comparison_by_id`, and `delete_comparison` are dead — none are in the `ComparisonRepository` protocol and none have callers.
+
 ### Module-level functions
 
 | Name | Description |
@@ -1856,6 +1880,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 ## `infrastructure/persistence/database.py`
 
 > Database schema definitions and connection management
+
+> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `get_meta_value` is dead — no callers.
 
 ### Module-level functions
 
@@ -1910,6 +1936,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Images table operations
 
+> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `update_image_score`, `get_scored_images`, `get_images_by_tier`, and `delete_image` are dead — none are in the `ImageRepository` protocol and none have callers.
+
 ### Module-level functions
 
 | Name | Description |
@@ -1933,6 +1961,8 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Path handler - compute tier structure from scores and sync companion JSON
 
+> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `append_comparison_history_to_json` is dead — no callers (and it has 3 unused args per §6b).
+
 ### Module-level functions
 
 | Name | Description |
@@ -1953,7 +1983,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 | Name | Description |
 |---|---|
-| *(module-level script)* | Imports `main` from `adapters.cli.main` and exits with its return code (flagged for deletion in REORGANIZATION_PLAN §4, Phase 1) |
+| *(module-level script)* | **Main CLI entry point** — imports `main` from `adapters.cli.main` and exits with its return code; run as `python scorer.py <command>` from the module root (kept — see REORGANIZATION_PLAN §2.3 item 6) |
 
 ---
 
@@ -1969,5 +1999,5 @@ The README and REORGANIZATION_PLAN describe the following paths that do not exis
 | `infrastructure/persistence/` `SQLiteImagesRepository` / `SQLiteComparisonsRepository` | REORGANIZATION_PLAN Phase 2b: thin classes implementing `ImageRepository` / `ComparisonRepository` (defined in `domain/database/ports/repository_ports.py`) that delegate to the existing free functions in `images_repository.py` / `comparisons_repository.py` |
 | `application/data_transform/__init__.py`, `application/hyperparameters/__init__.py` | Exist as **directories** (namespace packages), not files; REORGANIZATION_PLAN Phase 1 defect (`§2.3` item 1) replaces them with real `__init__.py` files |
 | Empty shells (only `__init__.py`): `application/dto/`, `application/ports/`, `adapters/server/middleware/`, `adapters/server/tests/`, `domain/database/tests/` | REORGANIZATION_PLAN `§2.3` item 8; documented layout (README `application/dto` + `ports`, `adapters/server/middleware` + tests) awaiting content |
-| `setup.py` | Legacy packaging flagged for deletion in REORGANIZATION_PLAN Phase 1 (`§4` item 4); still present on disk, not indexed (no symbols) |
+| `pyrightconfig.json` | Static type checker config referenced by README/REORGANIZATION_PLAN — **missing on disk** (deleted in commit `7397304`); must be recreated (strict mode, exclude `comfyui_image_scorer_old/`) before the `pyright` gate can run (plan `§2.3` item 9) |
 | `comfyui_image_scorer_old/` | Legacy reference copy of the pre-reorganization codebase; REORGANIZATION_PLAN states it is removed manually by the user and is **excluded** from this index |
