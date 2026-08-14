@@ -21,6 +21,7 @@ from ...core.filesystem.paths import image_root
 # Initialize core config before any core filesystem imports
 if config["image_root"] == "":
     from folder_paths import get_output_directory
+
     config["image_root"] = get_output_directory()
 from ...infrastructure.persistence.folder_organizer import ensure_tier_structure
 from ...infrastructure.persistence.path_handler import (
@@ -295,7 +296,15 @@ def main() -> int:
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
 
-    configure_package_logging(10 if args.debug else 20)
+    fmt = "[%(levelname)s] [%(name)s] [%(funcName)s] %(asctime)s \n%(message)s"
+
+    configure_package_logging(
+        10 if args.debug else 20,
+        fmt=fmt,
+        trim_level_len=None,
+        trim_module_len=None,
+        trim_func_len=None,
+    )
 
     should_init = True
     if args.debug and (

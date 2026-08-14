@@ -123,6 +123,10 @@ def select_pair(
 ) -> tuple[tuple[str, str] | None, int | None]:
     global _skip_before
 
+    logger.debug(
+        f"skip before: {_skip_before}, candidate count: {len(candidate_images)}"
+    )
+
     if len(candidate_images) < 2:
         logger.warning(
             "select_pair: only %d candidates, need >=2", len(candidate_images)

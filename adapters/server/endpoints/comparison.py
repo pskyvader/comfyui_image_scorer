@@ -157,13 +157,15 @@ def get_next_pair():
     full_exclude = set(recent_files_ordered)
     all_images = deps.image_repo.get_all_images()
 
+    logger.debug(f"all images: {len(all_images)}", start_timer=_start)
+
     pair, phase_index = merge_sort_ranker.select_pair_for_comparison(
         exclude_set=full_exclude,
         crystal_graph=deps.graph,
         comparison_repo=deps.comparison_repo,
         all_images=all_images,
     )
-    logger.debug(f"phase {phase_index}")
+    logger.debug(f"phase {phase_index}", start_timer=_start)
     if not pair:
         logger.warning("pair not found")
         result = "", 204

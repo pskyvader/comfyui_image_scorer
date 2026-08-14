@@ -12,7 +12,7 @@ import time
 from contextlib import redirect_stdout, redirect_stderr
 from typing import Any, Callable
 
-from ....core.observability.logger import (
+from ...core.observability.logger import (
     CaptureStream,
     SharedLogger,
     _TaskOutput,

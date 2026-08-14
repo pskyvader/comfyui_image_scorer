@@ -245,6 +245,62 @@ server-only features — out of scope, unchanged.
     files/classes/actions; dropped task-system symbols).
 36. **`REORGANIZATION_PLAN.md`:** mark v4 complete when all gates pass.
 
+### 3.10 Rules audit — compliance tasks (2026-08)
+
+AST scan of the current tree (all layers, excluding
+`comfyui_image_scorer_old/`) against the module rules. The same clusters
+exist at `21570f4` / `c231460` / `003449d` — each commit reduced them
+(try/except 55→56→51, inline imports 35→35→25, defaults 131→134→115);
+none of them introduced a rule. Fix per the rules — never by relaxing one.
+`comfyui_image_scorer_old/` stays read-only reference material.
+
+37. **No `try`/`except` — 51 blocks.** Only sanctioned exception: the batch
+    sizer profiler (`infrastructure/ml_models/batch_sizer.py`), clean.
+    - `infrastructure` (26): `training_loader.py` 6, `model_loader.py` 6,
+      `images_repository.py` 5, `path_handler.py` 4, `model_trainer.py` 3,
+      `folder_organizer.py` 1, `mediapipe_models.py` 1 (partial-download
+      cleanup must stay, but surface the error clearly).
+    - `domain` (13): `plot.py` 5, `parameter_analysis.py` 3, one each in
+      `image_analysis.py`, `data_transformer.py`, `matrix_analysis.py`,
+      `image_vector.py`, `chain_manager.py` (try/finally).
+    - `adapters` (9): `analysis.py` 3, `database.py` 3, `data_transform.py` 1,
+      `maps.py` 1, `tasks.py` 1 (try/finally — delete with §3.1).
+    - `application` (2): `hyperparameter_optimizer.py` 1 (try/finally),
+      `scoring_service.py` 1.
+    - `core` (1): `utilities/helpers.py`.
+38. **No `print()` — 97 calls.** Replace with `get_logger(__name__)`
+    (`core/observability/logger.py`): `run_stats.py` 25, `parameter_analysis.py`
+    22, `plot.py` 14, `matrix_analysis.py` 13, `data_transformer.py` 11,
+    `model_loader.py` 5, `endpoints/database.py` 3, `training_loader.py` 2,
+    `model_trainer.py` 1, `logger.py:728` debug leftover (also remove the
+    commented-out debug prints at `logger.py:394-397, 554-564`). `run_stats.py`
+    prints the CLI report table — that is the command's output; keep it as
+    report output and document the choice.
+39. **Module-scope imports — 25 inline imports** outside the established CLI
+    lazy pattern (`adapters/cli/`, `scorer.py`). The lazy heavy-dep imports
+    in `plot.py` (3) and `application/analysis/run_*_analysis.py` (2) match
+    the CLI justification and may stay. Move everything else to module scope:
+    `domain/graph/` proxy modules (9 — break the import cycle),
+    `domain/comparison/algorithm/view.py` 2, `domain/data_transformation/
+    data_transformer.py` 1, `infrastructure/persistence/deduplicate_scored.py`
+    1, `core/observability/logger.py` 1, server endpoints
+    (`comparison.py` 1, `data_transform.py` 1, `training.py` 2, `main.py` 1,
+    `adapters/comfyui/services.py` 1).
+40. **Function-arg defaults — 115** ("always try to avoid"): 93 in
+    core/domain/application, 22 in infrastructure/adapters. `plot.py` 44
+    display params dominate (`show`, `cols`, `title` etc.), then
+    `comparisons_repository.py` 8, `images_repository.py` 7, `logger.py` 6,
+    `repository_ports.py` 5. Remove defaults where all call sites pass the
+    value; keep only defaults that are semantically required, with a comment.
+41. **Global mutable state — 7 module-level containers** in
+    core/domain/application, all constant tables that are never mutated:
+    `AGE_LABELS`/`GENDER_LABELS`/`RACE_LABELS`
+    (`domain/analysis/attribute_analysis.py`), `POSE_LANDMARK_NAMES`
+    (`domain/analysis/mediapipe_analysis.py`), `_PROGRESS_INDICATORS`
+    (`core/observability/logger.py`), two `__all__`
+    (`domain/database/ports/__init__.py`, `domain/loading/__init__.py`).
+    Convert to tuples/frozensets.
+
 ---
 
 ## 4. Verification (in order, ComfyUI venv)

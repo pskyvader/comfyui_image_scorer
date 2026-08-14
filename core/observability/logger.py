@@ -728,8 +728,15 @@ def configure_package_logging(
     print(f"cleared:{_cleared}")
 
     # Suppress verbose logging from noisy external libraries
-    # for logger_name in ["mediapipe", "PIL", "matplotlib", "urllib3", "onnxruntime"]:
-    #     logging.getLogger(logger_name).setLevel(logging.WARNING)
+    for logger_name in [
+        "werkzeug",
+        "mediapipe",
+        "PIL",
+        "matplotlib",
+        "urllib3",
+        "onnxruntime",
+    ]:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
 
     # Frontend logging (task buffer + SSE) disabled by default.
     # Set to True to also route logs to frontend clients.
