@@ -1,0 +1,13 @@
+{
+    "typeCheckingMode": "strict",
+    "reportMissingTypeStubs": false,
+    "reportPrivateImportUsage": false,
+    "exclude": [
+        "comfyui_image_scorer_old",
+        "infrastructure/**/*.pyi"
+    ],
+    "extraPaths": [
+        "E:\\ComfyUI",
+        "E:\\ComfyUI\\custom_nodes"
+    ]
+}
