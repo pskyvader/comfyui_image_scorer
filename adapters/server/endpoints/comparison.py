@@ -9,133 +9,17 @@ from flask import Blueprint, current_app, jsonify, request
 
 from ....core.observability.logger import get_logger, ModuleLogger
 from ....core.configuration.settings import config
-from ....application.services.graph_service import crystal_graph
 from ....domain.comparison.algorithm import merge_sort_ranker
 from ....domain.comparison import state
-from ....domain.comparison import comparison_recorder
 from ....domain.comparison.algorithm.view import (
     describe_image,
     describe_pair,
 )
 from ....domain.comparison.algorithm.phase_order import get_phases
-from ....infrastructure.persistence.comparisons_repository import (
-    get_all_comparisons,
-    get_skipped_comparison_count,
-    get_total_comparisons,
-)
-from ....infrastructure.persistence.images_repository import (
-    get_all_images,
-    get_image_count,
-)
-from ....infrastructure.persistence.path_handler import sync_image_metadata_to_json
+from ..deps import ServerDeps, get_server_deps
 
 ranking_bp = Blueprint("ranking_v2", __name__, url_prefix="/api/ranking")
 logger: ModuleLogger = get_logger(__name__)
-
-
-class _ComparisonRepoAdapter:
-    def get_all_comparisons(self, weight=None):
-        return (
-            get_all_comparisons(weight=weight)
-            if weight is not None
-            else get_all_comparisons()
-        )
-
-    def get_total_comparisons(self):
-        return get_total_comparisons()
-
-    def comparison_exists_for_pair(self, a, b):
-        from ....infrastructure.persistence.comparisons_repository import (
-            comparison_exists_for_pair,
-        )
-
-        return comparison_exists_for_pair(a, b)
-
-    def add_comparison(
-        self,
-        filename_a,
-        filename_b,
-        winner,
-        weight=1.0,
-        transitive_depth=0,
-        timestamp=None,
-    ):
-        from ....infrastructure.persistence.comparisons_repository import (
-            add_comparison,
-        )
-
-        return add_comparison(
-            filename_a, filename_b, winner, weight, transitive_depth, timestamp
-        )
-
-    def get_images_with_only_wins(self):
-        from ....infrastructure.persistence.comparisons_repository import (
-            get_images_with_only_wins,
-        )
-
-        return get_images_with_only_wins()
-
-    def get_images_with_only_losses(self):
-        from ....infrastructure.persistence.comparisons_repository import (
-            get_images_with_only_losses,
-        )
-
-        return get_images_with_only_losses()
-
-
-class _ImageRepoAdapter:
-    def get_image(self, filename):
-        from ....infrastructure.persistence.images_repository import get_image
-
-        return get_image(filename)
-
-    def get_all_images(self):
-        return get_all_images()
-
-    def update_image_rating_state(
-        self,
-        filename,
-        score,
-        rating_mu,
-        rating_sigma,
-        comparison_count,
-        touch_timestamp=True,
-    ):
-        from ....infrastructure.persistence.images_repository import (
-            update_image_rating_state,
-        )
-
-        return update_image_rating_state(
-            filename,
-            score,
-            rating_mu,
-            rating_sigma,
-            comparison_count,
-            touch_timestamp=touch_timestamp,
-        )
-
-
-class _PathSyncerAdapter:
-    def sync_image_metadata_to_json(
-        self,
-        filename,
-        score,
-        rating_mu,
-        rating_sigma,
-        comparison_count,
-        all_comparisons=None,
-    ):
-        return sync_image_metadata_to_json(
-            filename,
-            score,
-            rating_mu,
-            rating_sigma,
-            comparison_count,
-            all_comparisons=all_comparisons,
-        )
-
-
-_comparison_repo = _ComparisonRepoAdapter()
 
 
 def _get_processor():
@@ -155,7 +39,7 @@ def _get_level_progress_stats(
     base_level = min(comp_counts)
     active_nodes = sum(1 for count in comp_counts if count == base_level)
     next_level_count = sum(1 for count in comp_counts if count == base_level + 1)
-    stats = crystal_graph.get_graph_stats()
+    stats = get_server_deps().graph.get_graph_stats()
     result = {
         "base_level": base_level,
         "current_target": base_level + 1,
@@ -172,7 +56,7 @@ def _get_level_progress_stats(
 def get_ranking_config():
     _start = time.perf_counter()
     ranking_conf = config["ranking"]
-    all_images = get_all_images()
+    all_images = get_server_deps().image_repo.get_all_images()
     seed_percentage = int(ranking_conf["seed_percentage"])
     seed_size = max(1, len(all_images) * seed_percentage // 100)
     result = jsonify(
@@ -200,7 +84,8 @@ def get_ranking_phases():
 @ranking_bp.route("/status", methods=["GET"])
 def get_status():
     _start = time.perf_counter()
-    all_images = get_all_images()
+    deps = get_server_deps()
+    all_images = deps.image_repo.get_all_images()
     total = len(all_images)
     if total == 0:
         result = jsonify(
@@ -230,8 +115,8 @@ def get_status():
             "total_images": total,
             "ranked_images": ranked,
             "unranked_images": total - ranked,
-            "total_comparisons": get_total_comparisons(),
-            "skipped_comparisons": get_skipped_comparison_count(),
+            "total_comparisons": deps.comparison_repo.get_total_comparisons(),
+            "skipped_comparisons": deps.comparison_repo.get_skipped_comparison_count(),
             "min_images": 2,
             "current_target": level_stats["current_target"],
             "baseline_comparisons": level_stats["base_level"],
@@ -249,13 +134,14 @@ def get_status():
 @ranking_bp.route("/next-pair", methods=["GET"])
 def get_next_pair():
     _start = time.perf_counter()
+    deps = get_server_deps()
     processor = _get_processor()
     recent_files_ordered: list[str] = []
     if processor:
         with processor.recent_lock:
             recent_files_ordered = list(processor.recent_images)
 
-    total_images = get_image_count()
+    total_images = deps.image_repo.get_image_count()
     if total_images < 2:
         result = (
             jsonify(
@@ -269,23 +155,23 @@ def get_next_pair():
         return result
 
     full_exclude = set(recent_files_ordered)
-    all_images = get_all_images()
+    all_images = deps.image_repo.get_all_images()
 
     pair, phase_index = merge_sort_ranker.select_pair_for_comparison(
         exclude_set=full_exclude,
-        crystal_graph=crystal_graph,
-        comparison_repo=_comparison_repo,
+        crystal_graph=deps.graph,
+        comparison_repo=deps.comparison_repo,
         all_images=all_images,
     )
     logger.debug(f"phase {phase_index}")
     if not pair:
-        logger.warning(f"pair not found")
+        logger.warning("pair not found")
         result = "", 204
         return result
 
     filename_a, filename_b = pair
-    node_a = crystal_graph.get_node(filename_a)
-    node_b = crystal_graph.get_node(filename_b)
+    node_a = deps.graph.get_node(filename_a)
+    node_b = deps.graph.get_node(filename_b)
     if node_a is None or node_b is None:
         logger.warning(
             f"filename not in node: node a:{node_a} ({filename_a}), node b:{node_b} ({filename_b})"
@@ -298,9 +184,9 @@ def get_next_pair():
             processor.recent_images.append(filename_a)
             processor.recent_images.append(filename_b)
 
-    left = describe_image(node_a, crystal_graph)
-    right = describe_image(node_b, crystal_graph)
-    pair_payload = describe_pair(node_a, node_b, phase_index, crystal_graph)
+    left = describe_image(node_a, deps.graph)
+    right = describe_image(node_b, deps.graph)
+    pair_payload = describe_pair(node_a, node_b, phase_index, deps.graph)
 
     response_data = {
         "left": left,
@@ -339,6 +225,7 @@ def skip_image():
 @ranking_bp.route("/submit-comparison", methods=["POST"])
 def submit_comparison():
     _start = time.perf_counter()
+    deps = get_server_deps()
     processor = _get_processor()
 
     payload = request.get_json()
@@ -364,25 +251,22 @@ def submit_comparison():
 
     from ....domain.comparison.comparison_recorder import ComparisonRecorder
 
-    _image_repo_adapter = _ImageRepoAdapter()
-    _path_syncer_adapter = _PathSyncerAdapter()
     recorder = ComparisonRecorder(
-        comparison_repo=_comparison_repo,
-        image_repo=_image_repo_adapter,
-        path_syncer=_path_syncer_adapter,
-        graph_service=crystal_graph,
+        comparison_repo=deps.comparison_repo,
+        image_repo=deps.image_repo,
+        path_syncer=deps.path_resolver,
+        graph_service=deps.graph,
     )
     success = recorder.record_comparison(filename_a, filename_b, winner, 1.0, 0)
     if not success:
         result = jsonify({"error": "Failed to record comparison"}), 500
         return result
 
-    # if crystal_graph.is_cache_stale():
-    #     crystal_graph.rebuild_from_database()
     processor.clear_old_cache(force=False)
 
-    data_a = state.get_cached_image(filename_a)
-    data_b = state.get_cached_image(filename_b)
+    all_images = deps.image_repo.get_all_images()
+    data_a = state.get_cached_image(filename_a, all_images)
+    data_b = state.get_cached_image(filename_b, all_images)
     if data_a is None or data_b is None:
         result = jsonify({"error": "Image not found"}), 404
         return result
@@ -408,12 +292,13 @@ def submit_comparison():
 @ranking_bp.route("/sync-all", methods=["POST"])
 def sync_all_to_json():
     _start = time.perf_counter()
-    images = get_all_images()
-    all_comparisons = get_all_comparisons()
+    deps = get_server_deps()
+    images = deps.image_repo.get_all_images()
+    all_comparisons = deps.comparison_repo.get_all_comparisons()
     count = 0
     errors = 0
     for img in images:
-        success = sync_image_metadata_to_json(
+        success = deps.path_resolver.sync_image_metadata_to_json(
             filename=img["filename"],
             score=float(img["score"]),
             rating_mu=float(img["rating_mu"]),
@@ -431,5 +316,6 @@ def sync_all_to_json():
     return result
 
 
-def register_ranking_routes(app) -> None:
+def register_ranking_routes(app, deps: ServerDeps) -> None:
+    app.extensions["server_deps"] = deps
     app.register_blueprint(ranking_bp)

@@ -11,11 +11,10 @@ import numpy as np
 
 from ...core.observability.logger import get_logger
 from ...core.configuration.settings import config
-from ...infrastructure.ml_models.model_loader import model_loader
+from ...domain.loading import BatchSizerFactory, ModelLoader
 from .helpers import l2_normalize_batch
 from ...core.io.serialization import load_json
 from ...core.filesystem.paths import vectors_size_file
-from ...infrastructure.ml_models.batch_sizer import BatchSizer
 
 logger = get_logger(__name__)
 
@@ -34,7 +33,14 @@ def probe_bound_for_failed(failed_batch_size: int) -> int:
 
 
 class ImageVector:
-    def __init__(self, name: str, model_key: str, slot_size: int) -> None:
+    def __init__(
+        self,
+        name: str,
+        model_key: str,
+        slot_size: int,
+        model_loader: ModelLoader,
+        batch_sizer_factory: BatchSizerFactory,
+    ) -> None:
         self.name = name
         self.model_key = model_key
         self.slot_size = slot_size
@@ -46,7 +52,8 @@ class ImageVector:
         self._transform: transforms.Compose | None = None
         self.variable_input: bool = True
         self.model_input_size: sizeTuple | None = None
-        self.batch_sizer = BatchSizer(model_key=model_key)
+        self.model_loader = model_loader
+        self.batch_sizer = batch_sizer_factory(model_key)
 
         self.vector_sizes, _ = load_json(vectors_size_file, expect=dict)
 
@@ -173,9 +180,9 @@ class ImageVector:
             result: vectorDict = {}
             return result
         self.model, self.vector_length, _, self._transform = (
-            model_loader.load_vision_model(self.model_key)
+            self.model_loader.load_vision_model(self.model_key)
         )
-        model_info = model_loader.get_model_info(self.model_key)
+        model_info = self.model_loader.get_model_info(self.model_key)
         self.variable_input = model_info["variable_input"]
         self.model_input_size = sizeTuple(
             model_info["input_size"]
@@ -206,9 +213,9 @@ class ImageVector:
         )
 
         self.model, self.vector_length, total_memory, self._transform = (
-            model_loader.load_vision_model(self.model_key)
+            self.model_loader.load_vision_model(self.model_key)
         )
-        model_info = model_loader.get_model_info(self.model_key)
+        model_info = self.model_loader.get_model_info(self.model_key)
         self.variable_input = model_info["variable_input"]
         self.model_input_size = sizeTuple(model_info["input_size"])
 

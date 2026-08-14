@@ -14,6 +14,7 @@ from .attribute_analysis import FaceAttributeAnalyzer, NSFWAnalyzer
 from ...core.configuration.settings import config
 from ...core.io.serialization import atomic_write_json
 from ...core.observability.logger import get_logger, ModuleLogger
+from ...domain.loading import BatchSizerFactory, ModelLoader
 from ..vectors.image_vector import ImageVector
 
 logger: ModuleLogger = get_logger(__name__)
@@ -68,13 +69,24 @@ def process_single_batch(
 
 
 class ImageAnalysis(ImageVector):
-    def __init__(self, raw_data: list[ImageEntry], model_loader: Any, batch_sizer: Any) -> None:
+    def __init__(
+        self,
+        raw_data: list[ImageEntry],
+        model_loader: ModelLoader,
+        batch_sizer_factory: BatchSizerFactory,
+    ) -> None:
         image_entries = [v for v in config["vector"]["vectors"] if v["type"] == "image"]
         if not image_entries:
             raise KeyError("No image-type entries found in vector_config")
         model_key = image_entries[0]["model_key"]
         slot_size = image_entries[0]["slot_size"]
-        super().__init__("tmp_image", model_key=model_key, slot_size=slot_size)
+        super().__init__(
+            "tmp_image",
+            model_key=model_key,
+            slot_size=slot_size,
+            model_loader=model_loader,
+            batch_sizer_factory=batch_sizer_factory,
+        )
         self.raw_data: list[ImageEntry] = raw_data
         self.processed_data: list[ImageEntry] = []
         self._mediapipe = MediaPipeAnalyzer()

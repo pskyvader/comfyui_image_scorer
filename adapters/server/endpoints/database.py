@@ -6,18 +6,9 @@ from typing import Any
 from flask import Blueprint, Flask, jsonify, request, current_app
 
 from ....core.observability.logger import get_logger, ModuleLogger
-from ....infrastructure.persistence.images_repository import get_all_images, get_image_count
-from ....infrastructure.persistence.comparisons_repository import (
-    get_all_comparisons,
-    get_total_comparisons,
-    clean_comparisons,
-)
-from ....infrastructure.persistence.cleanup_orphans import cleanup_orphans
-from ....infrastructure.persistence.deduplicate_scored import deduplicate_scored
-from ....infrastructure.persistence.path_handler import sync_image_metadata_to_json
 from ....core.filesystem.paths import image_root_processed
-from ....application.services.graph_service import crystal_graph
-from ....core.utilities.tasks import start_task, get_task_status, set_task_output
+from ..tasks import start_task, get_task_status, set_task_output
+from ..deps import ServerDeps, get_server_deps
 
 logger: ModuleLogger = get_logger(__name__)
 database_bp = Blueprint("database", __name__, url_prefix="/api/database")
@@ -31,11 +22,12 @@ def _get_processor():
 
 @database_bp.route("/status", methods=["GET"])
 def get_status():
+    deps = get_server_deps()
     result = jsonify(
         {
             "status": "ok",
-            "images": get_image_count(),
-            "comparisons": get_total_comparisons(),
+            "images": deps.image_repo.get_image_count(),
+            "comparisons": deps.comparison_repo.get_total_comparisons(),
         }
     )
     return result
@@ -43,9 +35,10 @@ def get_status():
 
 @database_bp.route("/normalize-comparisons", methods=["POST"])
 def normalize():
+    deps = get_server_deps()
     try:
-        stats = clean_comparisons()
-        crystal_graph.rebuild_from_database()
+        stats = deps.comparison_repo.clean_comparisons()
+        deps.graph.rebuild_from_database()
         result = jsonify({"status": "success", "stats": stats})
         return result
     except Exception as exc:
@@ -55,6 +48,7 @@ def normalize():
 
 @database_bp.route("/rebuild-db", methods=["POST"])
 def rebuild_database():
+    deps = get_server_deps()
     processor = _get_processor()
     if processor is None:
         return (
@@ -64,7 +58,7 @@ def rebuild_database():
 
     def _run(tid: str):
         processor.rebuild_database_from_ranked()
-        crystal_graph.rebuild_from_database()
+        deps.graph.rebuild_from_database()
         set_task_output(
             tid,
             {
@@ -78,15 +72,18 @@ def rebuild_database():
 
 @database_bp.route("/sync-all", methods=["POST"])
 def sync_all():
+    deps = get_server_deps()
+
     def _run(tid: str):
-        images = get_all_images()
-        all_comparisons = get_all_comparisons()
+        _deps = deps
+        images = _deps.image_repo.get_all_images()
+        all_comparisons = _deps.comparison_repo.get_all_comparisons()
         count = 0
         errors = 0
         total = len(images)
         print(f"Syncing {total} images...")
         for img in images:
-            ok = sync_image_metadata_to_json(
+            ok = _deps.path_resolver.sync_image_metadata_to_json(
                 filename=img["filename"],
                 score=float(img["score"]),
                 rating_mu=float(img["rating_mu"]),
@@ -116,10 +113,13 @@ def sync_all():
 
 @database_bp.route("/cleanup-orphans", methods=["POST"])
 def run_cleanup_orphans():
+    deps = get_server_deps()
     data: dict[str, Any] = request.json if isinstance(request.json, dict) else {}
     dry_run: bool = bool(data.get("dry_run", True))
     try:
-        result = cleanup_orphans(root=None, dry_run=dry_run, delete_enabled=not dry_run)
+        result = deps.cleanup_orphans(
+            root=None, dry_run=dry_run, delete_enabled=not dry_run
+        )
         result = jsonify({"status": "success", "result": result})
         return result
     except Exception as exc:
@@ -129,11 +129,12 @@ def run_cleanup_orphans():
 
 @database_bp.route("/deduplicate", methods=["POST"])
 def run_deduplicate():
+    deps = get_server_deps()
     data: dict[str, Any] = request.json if isinstance(request.json, dict) else {}
     dry_run: bool = bool(data.get("dry_run", True))
     limit: int = int(data.get("limit", 0))
     try:
-        result = deduplicate_scored(
+        result = deps.deduplicate_scored(
             root=Path(image_root_processed), dry_run=dry_run, limit=limit
         )
         result = jsonify({"status": "success", "result": result})
@@ -154,5 +155,6 @@ def get_task(task_id: str):
     return result
 
 
-def register_database_routes(app: Flask):
+def register_database_routes(app: Flask, deps: ServerDeps) -> None:
+    app.extensions["server_deps"] = deps
     app.register_blueprint(database_bp)

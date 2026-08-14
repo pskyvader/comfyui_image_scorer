@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-import time
 from pathlib import Path
 
 from ...core.filesystem.paths import cache_file
@@ -122,12 +121,6 @@ def _set_meta_value(key: str, value: str) -> None:
             (key, value),
         )
         conn.commit()
-
-
-def get_meta_value(key: str) -> str | None:
-    with get_db_connection() as conn:
-        row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
-        return row["value"] if row else None
 
 
 def vacuum_database() -> None:

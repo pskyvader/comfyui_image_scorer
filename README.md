@@ -12,6 +12,8 @@ No layer may import from a layer to its right. The **ComfyUI node integration is
 
 The codebase still violates parts of this documented architecture. The known violations (layer imports, `core` purity, structural defects) are enumerated in `REORGANIZATION_PLAN.md`, which is the live remediation roadmap and the source of truth for what must change.
 
+The pending revision (v4) targets `adapters/server/` only: strict CLI parity (every endpoint maps to a CLI command, the rest are removed), a rename cascade to CLI command names (`build`, `analyze`, `database`, `training`, `files`), removal of the server task system, and the synchronous log-capture backend. Nothing in this document's current layout changes until that work is done — see `REORGANIZATION_PLAN.md` for the full task list.
+
 ---
 
 ## Project Root Layout
@@ -25,8 +27,8 @@ The codebase still violates parts of this documented architecture. The known vio
 | `AGENTS.md` | Module rules — governs all work in this folder (overrides the ComfyUI root `AGENTS.md` for this module) |
 | `comfyui_image_scorer_old/` | Legacy pre-reorganization copy (git-ignored). **Read-only reference material** — never edit; the user removes it manually. |
 | `scorer.py` | **Main CLI entry point** — `python scorer.py <command>` (run from this folder in the ComfyUI venv) |
-| `typings/` | Stale stubs from the old structure — cleanup pending (REORGANIZATION_PLAN §2.3) |
-| `pyrightconfig.json` | Static type checker configuration — **currently missing on disk**, must be restored (strict mode) before `pyright` can run; see Development Conventions |
+| `typings/` | Stale stubs from the old structure — cleanup pending (see REORGANIZATION_PLAN) |
+| `pyrightconfig.json` | Static type checker configuration (strict mode); see Development Conventions |
 
 ---
 
@@ -51,7 +53,7 @@ rule: a box may import every box that contains it (inner builds on outer)
 ┌────────────────────────────┐
 │            core            │
 │  utilities, config, paths  │
-│  stdlib only               │
+│  no other layers, no ComfyUI
 │ ┌────────────────────────┐ │
 │ │         domain         │ │
 │ │  business logic,       │ │
@@ -83,7 +85,7 @@ dependency injection; `adapters` depends on everything above it.
 ```
 comfyui_image_scorer/
 ├── __init__.py                            lazy node exports for ComfyUI discovery
-├── core/                                  ← imports: stdlib only
+├── core/                                  ← imports: no other layers, no ComfyUI
 │   ├── configuration/                     settings loading, validation, defaults
 │   ├── filesystem/                        path registry, resolution, runtime dirs
 │   ├── observability/                     structured logging, correlation IDs
@@ -99,15 +101,14 @@ comfyui_image_scorer/
 │   ├── graph/                             crystal graph, chain management, proxy objects
 │   ├── training/                          HPO orchestration, calibration, parameter analysis
 │   ├── vectors/                           embedding, keypoint, position, person-map vectors
-│   └── loading/                           loader port interfaces (planned — not yet on disk)
+│   └── loading/                           loader port interfaces (`ports.py`)
 │
 ├── application/                           ← imports: core, domain
 │   ├── analysis/                          run_stats, run_matrix/run_parameter_analysis
 │   ├── data_transform/                    data preparation, map configs
 │   ├── hyperparameters/                   hyperparameter optimizer
 │   ├── services/                          scoring service, vector list, crystal graph
-│   ├── dto/                               empty shell (no symbols yet)
-│   └── ports/                             empty shell (no symbols yet)
+│   │
 │
 ├── adapters/                              ← imports: core, domain, application
 │   ├── __init__.py                        lazy node exports
@@ -138,7 +139,7 @@ comfyui_image_scorer/
 - `analysis/` — Image/attribute analysis, MediaPipe integration
 - `graph/` — Crystal graph, chain management, proxy objects
 - `vectors/` — Embedding, keypoint, position, person-map vectors
-- `loading/` — Loader **port interfaces** (planned — not on disk yet; implementations live in `infrastructure/loading/`)
+- `loading/` — Loader **port interfaces** (`ports.py`); implementations live in `infrastructure/loading/` and `infrastructure/ml_models/`
 
 **Rule:** `domain` defines **ports** (interfaces) for persistence, external APIs, and ML runtimes. Implementations live in `infrastructure/`.
 
@@ -150,7 +151,6 @@ comfyui_image_scorer/
 - `analysis/` — `run_stats.py`, `run_matrix_analysis.py`, `run_parameter_analysis.py`
 - `data_transform/` — `prepare_data.py`, `config/maps.py`
 - `hyperparameters/` — `hyperparameter_optimizer.py`
-- `dto/`, `ports/` — empty shells (only `__init__.py`), awaiting content
 
 **Rule:** No Flask, no ComfyUI, no SQL. Pure orchestration.
 
@@ -162,7 +162,6 @@ comfyui_image_scorer/
 #### `adapters/server/` — Flask REST API
 - `routing/` — Blueprint registration, URL prefixes
 - `endpoints/` — Thin request/response handlers (validation → service call → JSON)
-- `middleware/` — Error handling, CORS, request logging
 
 #### `adapters/comfyui/` — ComfyUI Node Integration (Primary Deliverable)
 - `__init__.py` — Exports `NODE_CLASS_MAPPINGS`, `NODE_DISPLAY_NAME_MAPPINGS`
@@ -197,7 +196,7 @@ python scorer.py build split-vectors --limit 100
 ## `infrastructure/` — Infrastructure Implementations
 **Depends on `core` + `domain` (implements domain ports).** Concrete adapters for external systems.
 - `persistence/` — SQLite repositories implementing `domain.database` ports
-- `loading/` — Training data / maps loaders (implement the `domain.loading` ports once Phase 2a creates them)
+- `loading/` — Training data / maps loaders (implement the `domain.loading` ports)
 - `ml_models/` — Model loader, batch sizer, LightGBM model trainer
 - `external_services/` — MediaPipe model downloads
 
@@ -207,7 +206,7 @@ python scorer.py build split-vectors --limit 100
 
 | Layer | May Import From | Must Not Import From |
 |---|---|---|
-| `core` | (stdlib only) | `domain`, `application`, `adapters`, `infrastructure` |
+| `core` | (no other layers, no ComfyUI) | `domain`, `application`, `adapters`, `infrastructure` |
 | `domain` | `core` | `application`, `adapters`, `infrastructure` |
 | `application` | `core`, `domain` | `adapters`, `infrastructure` |
 | `adapters/*` | `core`, `domain`, `application` | other `adapters/*`, `infrastructure` |
@@ -252,18 +251,16 @@ def test_no_architectural_violations():
 ```
 
 **Current status:** the root `tests/` directory does not exist yet, so the
-enforcement script in `REORGANIZATION_PLAN.md` §6 is the gate today (run
-manually). It currently reports **66 layer violations across 26 files**
-(`domain → infrastructure` 8, `domain → application` 1, `application →
-infrastructure` 17, `adapters → infrastructure` 40) plus 2 cross-adapter edges —
-all enumerated in REORGANIZATION_PLAN §2.1 with per-file line numbers.
+AST layer scan in `REORGANIZATION_PLAN.md` §4 is the gate today (run
+manually). The previous plan revision closed the enumerated violations: the
+only `infrastructure` imports that remain are the 28 adapter-wiring
+statements in the three composition roots, and `pytest` passes (30 tests).
 
 Existing violations must be fixed by moving code across the boundary — never by
 relaxing the rule or deleting the check. The `core` row has an empty allowed
-set on purpose: `core` imports only stdlib. Note that AGENTS.md documents the
+set on purpose: `core` imports no other layers and no ComfyUI internals. Note that AGENTS.md documents the
 one sanctioned exception: **nothing imports `infrastructure`**, except the
-wiring at the composition roots in `adapters` (`adapters/server/main.py`,
-`adapters/cli/main.py`, `adapters/comfyui/`), where infra singletons are
+wiring at the composition roots in `adapters`, where infra singletons are
 constructed and injected.
 
 ---
@@ -298,13 +295,13 @@ constructed and injected.
 1. **Imports:** always relative, otherwise comfyui will struggle. At module scope. The CLI command modules use lazy inline imports for heavy dependencies — that established pattern is allowed, but do not spread it to new code.
 2. **No `try`/`except` blocks:** let failures surface with clear errors; no fallbacks. The only exception is the batch size profiler (`infrastructure/ml_models/batch_sizer.py`), where it is part of the function's working.
 3. **Tests:** Colocated `tests/` subdirectory next to tested module (e.g., `domain/comparison/tests/test_trueskill.py`).
-4. **Typing:** Full type hints on public APIs. `pyright` must pass in strict mode (`"typeCheckingMode": "strict"` in `pyrightconfig.json`). Note: `pyrightconfig.json` is currently missing on disk and the stale `typings/` folder interferes with analysis — recreating the config is tracked in REORGANIZATION_PLAN Phase 1.
+4. **Typing:** Full type hints on public APIs. `pyright` must pass in strict mode (`"typeCheckingMode": "strict"` in `pyrightconfig.json`). The stale `typings/` folder interferes with analysis — its cleanup is tracked in REORGANIZATION_PLAN.
 5. **No global mutable state** in `core`/`domain`/`application`. State lives in `adapters` or `infrastructure`.
 6. **Configuration** enters only via `core.configuration` — no `os.getenv` scattered in domain code.
 7. **No defaults:** `.get(..., default)` is highly discouraged and strictly forbidden for config objects; avoid default function arguments. When a parameter's default is ambiguous, state it explicitly at every call site.
-8. **Verification order** after a change: `pytest` → `pyright` → AST layer scan (REORGANIZATION_PLAN §6) → unused-arguments check (§6b) → installable-module check (§6c) → node registration smoke check.
-9. **Never install the module itself:** no `setup.py`, no `pip install .`/`pip install -e .` — only its dependencies via `pip install -r requirements.txt` (REORGANIZATION_PLAN §6c).
-10. **No unused arguments:** remove them from the signature and fix all callers. Framework callbacks that must keep a positional slot (Flask error handlers, monkey-patched stdlib hooks) keep the slot with an underscore-prefixed name (`_e`). Gate: `ruff check --select ARG --target-version py313 --exclude comfyui_image_scorer_old --exclude typings .` (REORGANIZATION_PLAN §6b).
+8. **Verification order** after a change: `pytest` → `ruff` (ARG/F401) → `pyright` → AST layer scan (REORGANIZATION_PLAN §4) → node registration smoke check.
+9. **Never install the module itself:** no `setup.py`, no `pip install .`/`pip install -e .` — only its dependencies via `pip install -r requirements.txt`.
+10. **No unused arguments:** remove them from the signature and fix all callers. Framework callbacks that must keep a positional slot (Flask error handlers, monkey-patched stdlib hooks) keep the slot with an underscore-prefixed name (`_e`). Gate: `ruff check --select ARG --target-version py313 --exclude comfyui_image_scorer_old --exclude typings .` (REORGANIZATION_PLAN §4).
 
 ---
 
@@ -470,9 +467,7 @@ pip install -r requirements.txt
 # Run tests
 pytest
 
-# Run type checks (strict). pyrightconfig.json is currently missing on disk —
-# recreate it (typeCheckingMode: "strict", exclude comfyui_image_scorer_old/)
-# until it is restored (REORGANIZATION_PLAN Phase 1):
+# Run type checks (strict)
 pyright
 
 # Node registration smoke check

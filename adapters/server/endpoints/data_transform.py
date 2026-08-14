@@ -7,12 +7,17 @@ import time
 
 from flask import Blueprint, current_app, jsonify, request
 
-from ....core.configuration.settings import config
 from ....core.filesystem.paths import image_root
-from ....core.utilities.tasks import start_task, get_task_status, set_task_output
-from ....core.filesystem.paths import vectors_file, scores_file, index_file, text_data_file
+from ..tasks import start_task, get_task_status, set_task_output
+from ....core.filesystem.paths import (
+    vectors_file,
+    scores_file,
+    index_file,
+    text_data_file,
+)
 from ....core.observability.logger import get_logger, ModuleLogger
 from ....core.utilities.helpers import delete_full_vectors
+from ..deps import ServerDeps, get_server_deps
 
 data_bp = Blueprint("data_v2", __name__, url_prefix="/api/data")
 logger: ModuleLogger = get_logger(__name__)
@@ -36,6 +41,7 @@ def prepare_data():
         "rebuild_missing_vectors": data.get("rebuild_missing_vectors", False),
         "test_run": data.get("test_run", False),
     }
+    deps = get_server_deps()
 
     def _run(tid):
         _start = time.perf_counter()
@@ -51,16 +57,29 @@ def prepare_data():
             summary = run_rebuild_missing_vectors(limit=flags["limit"])
             result = {"type": "rebuild_missing_vectors", "summary": summary}
         elif flags["rebuild_scores"]:
-            summary = run_rebuild_scores_only()
+            summary = run_rebuild_scores_only(
+                comparison_repo=deps.comparison_repo
+            )
             result = {"type": "rebuild_scores", "summary": summary}
         elif flags["text_only"]:
             summary = run_text_only()
             result = {"type": "text_only", "summary": summary}
         else:
             summary = {
-                "split": build_split_files(limit=flags["limit"]),
-                "full": build_full_files(),
-                "scores": run_rebuild_scores_only(),
+                "split": build_split_files(
+                    limit=flags["limit"],
+                    model_loader=deps.model_loader,
+                    batch_sizer_factory=deps.batch_sizer_factory,
+                    maps_provider=deps.maps_provider,
+                ),
+                "full": build_full_files(
+                    model_loader=deps.model_loader,
+                    batch_sizer_factory=deps.batch_sizer_factory,
+                    maps_provider=deps.maps_provider,
+                ),
+                "scores": run_rebuild_scores_only(
+                    comparison_repo=deps.comparison_repo
+                ),
             }
             result = {"type": "full", "summary": summary}
 
@@ -141,5 +160,6 @@ def get_task(task_id: str):
     return result
 
 
-def register_data_transform_routes(app) -> None:
+def register_data_transform_routes(app, deps: ServerDeps) -> None:
+    app.extensions["server_deps"] = deps
     app.register_blueprint(data_bp)

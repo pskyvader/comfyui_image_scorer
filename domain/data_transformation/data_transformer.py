@@ -119,7 +119,6 @@ class DataTransformer:
         vectors_keyed: dict[str, npt.NDArray[np.float32]],
         scores_keyed: dict[str, float],
         steps: int,
-        verbose: bool = True,
     ) -> npt.NDArray[np.intp]:
         """
         Trains a fast LightGBM model on the keyed vectors/scores to identify and

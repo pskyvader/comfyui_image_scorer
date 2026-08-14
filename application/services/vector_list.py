@@ -17,7 +17,7 @@ from ...domain.vectors.person_map_vector import PersonMapVector
 
 from ...core.filesystem.paths import split_dir
 from ...core.io.serialization import load_single_jsonl, write_single_jsonl
-from ...infrastructure.loading.maps_loader import maps_list
+from ...domain.loading import BatchSizerFactory, MapsProvider, ModelLoader
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -38,6 +38,9 @@ class VectorList:
         self,
         raw_data: list[tuple[str, dict[str, Any], str, str]],
         read_only: bool,
+        model_loader: ModelLoader,
+        batch_sizer_factory: BatchSizerFactory,
+        maps_provider: MapsProvider,
     ) -> None:
 
         self.image_paths: dict[str, str] = {}
@@ -47,6 +50,9 @@ class VectorList:
         self.sorted_vectors: dict[str, Any] = {}
         self.read_only = read_only
         self.add_new_to_map = not self.read_only
+        self._model_loader = model_loader
+        self._batch_sizer_factory = batch_sizer_factory
+        self._maps_provider = maps_provider
 
         self.configure_sorted_vectors()
 
@@ -81,24 +87,32 @@ class VectorList:
             name = current_type["name"]
 
             if v_type == self._MAP:
-                vec = MapVector(name)
+                vec = MapVector(name, maps_provider=self._maps_provider)
             elif v_type == self._INT:
                 vec = IntVector(name, current_type["max_normalization"])
             elif v_type == self._FLOAT:
                 vec = FloatVector(name, current_type["max_normalization"])
             elif v_type == self._EMBEDDING:
                 slot_size = current_type["slot_size"]
-                vec = EmbeddingVector(name, slot_size=slot_size)
+                vec = EmbeddingVector(
+                    name, slot_size=slot_size, model_loader=self._model_loader
+                )
             elif v_type == self._IMAGE:
                 model_key = current_type["model_key"]
                 slot_size = current_type["slot_size"]
-                vec = ImageVector(name, model_key=model_key, slot_size=slot_size)
+                vec = ImageVector(
+                    name,
+                    model_key=model_key,
+                    slot_size=slot_size,
+                    model_loader=self._model_loader,
+                    batch_sizer_factory=self._batch_sizer_factory,
+                )
             elif v_type == self._POSITION:
                 vec = PositionVector(name)
             elif v_type == self._KEYPOINT:
                 vec = KeypointVector(name)
             elif v_type == self._PERSON_MAP:
-                vec = PersonMapVector(name)
+                vec = PersonMapVector(name, maps_provider=self._maps_provider)
             else:
                 raise ValueError(f"Unknown vector type: {v_type}")
 
@@ -328,7 +342,9 @@ class VectorList:
 
     def update_lists(self) -> None:
         logger.info("updating vector lists...")
-        self.vectors_list = [{fid: vec} for fid, vec in zip(self.unique_ids, self.final_vector)]
+        self.vectors_list = [
+            {fid: vec} for fid, vec in zip(self.unique_ids, self.final_vector)
+        ]
         self.text_list = self.final_text_data
 
     def load_split_files(self) -> None:
@@ -336,6 +352,7 @@ class VectorList:
 
         global cache_split_data
         invalid_entries: dict[str, list[Any]] = {}
+        maps_provider = self._maps_provider
         with tqdm(
             total=len(self.sorted_vectors),
             desc="loading split files",
@@ -368,7 +385,7 @@ class VectorList:
                         raw_vals[obj["id"]] = obj["raw"]
                         vec_vals[obj["id"]] = obj["vector"]
                         if v_type in (self._MAP, self._PERSON_MAP):
-                            maps_list.register_value(name, obj["raw"])
+                            maps_provider.register_value(name, obj["raw"])
                     else:
                         invalid.append(obj)
 
@@ -402,8 +419,12 @@ class VectorList:
                 f"invalid ids: {[(name,len(value)) for name,value in invalid_entries.items()]}"
             )
             example = list(invalid_entries.items())[0]
+            example = list(invalid_entries.items())[0]
+            # Avoid nested quote usage in f-strings for Python 3.10 compatibility
+            cond = "raw ok" if example[1][0]["raw"] else "raw missing"
+            vec_status = "vector ok" if example[1][0]["vector"] else "vector missing"
             logger.debug(
-                f"example clip skip: {example}, conditions: {"raw ok" if example[1][0]["raw"] else "raw missing"} , {"vector ok" if example[1][0]["vector"] else "vector missing"}"
+                f"example clip skip: {example}, conditions: {cond} , {vec_status}"
             )
 
     def export_split_files(self) -> None:

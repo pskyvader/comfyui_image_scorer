@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import math
 import os
-import time
 from pathlib import Path
 from typing import Any
 
@@ -227,29 +225,3 @@ def sync_image_metadata_to_json(
     except Exception as exc:
         logger.error("Failed to sync JSON metadata for %s: %s", filename, exc)
         return False
-
-
-def append_comparison_history_to_json(
-    filename: str,
-    comparison_data: dict[str, Any],
-    new_score: float | None = None,
-    new_rating_mu: float | None = None,
-    new_rating_sigma: float | None = None,
-) -> bool:
-    """Compatibility wrapper that performs a full DB-backed JSON sync."""
-
-    img = get_image_data(filename)
-    if img is None:
-        return False
-    return sync_image_metadata_to_json(
-        filename=filename,
-        score=float(new_score if new_score is not None else img["score"]),
-        rating_mu=float(
-            new_rating_mu if new_rating_mu is not None else img["rating_mu"]
-        ),
-        rating_sigma=float(
-            new_rating_sigma if new_rating_sigma is not None else img["rating_sigma"]
-        ),
-        comparison_count=int(img["comparison_count"]),
-        all_comparisons=get_all_comparisons(),
-    )

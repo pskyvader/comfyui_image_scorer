@@ -202,13 +202,18 @@ def main() -> int:
 
         return run_server(host=args.host, port=args.port, debug=args.debug)
 
-    elif args.command == "training":
+    from .deps import build_cli_deps
+
+    deps = build_cli_deps()
+
+    if args.command == "training":
         from .commands.training import train_model, run_hpo
 
         if args.training_command == "train-model":
-            return train_model()
+            return train_model(deps=deps)
         elif args.training_command == "hpo":
             return run_hpo(
+                deps=deps,
                 cycles=args.cycles,
                 optimization_steps=args.optimization_steps,
                 max_combos=args.max_combos,
@@ -226,13 +231,13 @@ def main() -> int:
         )
 
         if args.build_command == "split-vectors":
-            return run_split_vectors(limit=args.limit, batch=args.batch)
+            return run_split_vectors(limit=args.limit, batch=args.batch, deps=deps)
         elif args.build_command == "full-vectors":
-            return run_full_vectors()
+            return run_full_vectors(deps=deps)
         elif args.build_command == "scores":
-            return run_scores()
+            return run_scores(deps=deps)
         elif args.build_command == "all":
-            return run_all(limit=args.limit, batch=args.batch)
+            return run_all(limit=args.limit, batch=args.batch, deps=deps)
         else:
             build_parser.print_help()
             return 1
@@ -241,11 +246,11 @@ def main() -> int:
         from .commands.database import cleanup, rebuild, recalculate
 
         if args.database_command == "cleanup":
-            return cleanup(limit=args.limit)
+            return cleanup(deps=deps)
         elif args.database_command == "rebuild":
-            return rebuild()
+            return rebuild(deps=deps)
         elif args.database_command == "recalculate":
-            return recalculate()
+            return recalculate(deps=deps)
         else:
             database_parser.print_help()
             return 1
@@ -278,32 +283,20 @@ def main() -> int:
         elif args.files_command == "download":
             if args.download_command == "models":
                 os.environ["HF_HUB_OFFLINE"] = "0"
-                from ...infrastructure.ml_models.model_loader import (
-                    download_configured_models,
-                )
-                from ...infrastructure.external_services.mediapipe_models import (
-                    download_mediapipe_models,
-                )
-
-                download_configured_models()
-                download_mediapipe_models()
+                deps.download_configured_models()
+                deps.download_mediapipe_models()
                 return 0
             else:
                 files_download_parser.print_help()
                 return 1
         elif args.files_command == "cleanup":
-            from ...infrastructure.persistence.cleanup_orphans import cleanup_orphans
-            from ...infrastructure.persistence.deduplicate_scored import (
-                deduplicate_scored,
-            )
-
-            dedup_count = deduplicate_scored(
+            dedup_count = deps.deduplicate_scored(
                 root=None,
                 dry_run=args.dry_run,
                 limit=args.limit,
             )
             logger.info("Duplicates removed: %s", dedup_count)
-            orphan_count = cleanup_orphans(
+            orphan_count = deps.cleanup_orphans(
                 root=None,
                 dry_run=args.dry_run,
                 delete_enabled=not args.dry_run,
@@ -328,7 +321,9 @@ def main() -> int:
         elif args.analyze_command == "stats":
             from ...application.analysis.run_stats import run_stats
 
-            return run_stats()
+            return run_stats(
+                image_repo=deps.image_repo, comparison_repo=deps.comparison_repo
+            )
         else:
             analyze_parser.print_help()
             return 1

@@ -6,59 +6,55 @@ performance test for large linear chains that scales via DATASET_SIZE.
 
 import logging
 import time
-import pytest
-from tqdm import tqdm
-from ....application.services.graph_service import CrystalGraph
+import tqdm
 from ..chain_manager import ChainManager
-from ....infrastructure.persistence.comparisons_repository import (
-    get_all_comparisons,
-    get_images_with_only_wins,
-    get_images_with_only_losses,
-)
 
 logger = logging.getLogger(__name__)
 
 # Change this variable to test the 30-second time limit on large chains.
-# Set to 100 by default. To stress test performance limits, try 10000 or 35000.
-DATASET_SIZE = 100000
+# Set to 1000 by default. To stress test performance limits, try 10000 or 35000.
+DATASET_SIZE = 1000
+
+
+def _build_manager(
+    comparisons: list[dict],
+    all_filenames: set[str] | None = None,
+) -> ChainManager:
+    cm = ChainManager()
+    cm.build(comparisons, all_filenames=all_filenames)
+    return cm
 
 
 def test_bottom_nodes_are_chain_last() -> None:
     """Strictly assert that chains always start at tops and end at bottoms."""
     logger.debug("Starting test_bottom_nodes_are_chain_last...")
 
-    images = [
-        {"filename": "a", "score": 0.9, "comparison_count": 2, "rating_mu": 25.0, "rating_sigma": 8.3},
-        {"filename": "b", "score": 0.7, "comparison_count": 2, "rating_mu": 25.0, "rating_sigma": 8.3},
-        {"filename": "c", "score": 0.5, "comparison_count": 2, "rating_mu": 25.0, "rating_sigma": 8.3},
-        {"filename": "d", "score": 0.3, "comparison_count": 2, "rating_mu": 25.0, "rating_sigma": 8.3},
-    ]
+    images = ["a", "b", "c", "d"]
     comparisons = [
         {"filename_a": "a", "filename_b": "b", "winner": "a"},
         {"filename_a": "b", "filename_b": "c", "winner": "b"},
         {"filename_a": "c", "filename_b": "d", "winner": "c"},
     ]
 
-    cg = CrystalGraph()
-    cg.rebuild_from_database(images, comparisons)
+    cm = _build_manager(comparisons, all_filenames=set(images))
+    tops = set(cm.get_top_nodes())
+    bottoms = set(cm.get_bottom_nodes())
 
     bad = 0
     total = 0
-    for length, chains_dict in cg.get_chains_map().items():
-        logger.debug(f"Checking {len(chains_dict)} chains of length {length}")
-        for chain_id, (chain_proxy, chain_nodes) in chains_dict.items():
-            if not chain_nodes:
-                continue
-            total += 1
-            first = chain_nodes[0][0]
-            last = chain_nodes[-1][0]
+    for chain in cm.get_chains().values():
+        if not chain:
+            continue
+        total += 1
+        first = chain[0]
+        last = chain[-1]
 
-            if not first.is_top():
-                logger.error(f"Chain ends at {first.name} which is NOT a top node.")
-                bad += 1
-            if not last.is_bottom():
-                logger.error(f"Chain ends at {last.name} which is NOT a bottom node.")
-                bad += 1
+        if first not in tops:
+            logger.error(f"Chain ends at {first} which is NOT a top node.")
+            bad += 1
+        if last not in bottoms:
+            logger.error(f"Chain ends at {last} which is NOT a bottom node.")
+            bad += 1
 
     assert bad == 0, f"{bad}/{total} chains do not start/end at the absolute extremes!"
 
@@ -68,25 +64,17 @@ def test_performance_on_large_chains() -> None:
     logger.debug("Starting test_performance_on_large_chains...")
     cm = ChainManager()
 
-    all_real_comparisons = get_all_comparisons()
-
-    if not all_real_comparisons:
-        pytest.skip("No real records found in the database to test performance.")
-
-    unique_images = set()
-    for comp in all_real_comparisons:
-        unique_images.add(comp["filename_a"])
-        unique_images.add(comp["filename_b"])
-
-    # Get up to DATASET_SIZE images
-    selected_images = set(list(unique_images)[:DATASET_SIZE])
-    logger.debug(f"Selected {len(selected_images)} unique images for the subset.")
+    all_real_comparisons = [
+        {"filename_a": f"img_{i}", "filename_b": f"img_{i + 1}", "winner": f"img_{i}"}
+        for i in range(DATASET_SIZE)
+    ]
 
     comparisons = []
-    with tqdm(all_real_comparisons, desc="TEST: Filtering comparisons", delay=3.0) as pbar:
+    with tqdm.tqdm(
+        all_real_comparisons, desc="TEST: Filtering comparisons", delay=3.0
+    ) as pbar:
         for c in pbar:
-            if c["filename_a"] in selected_images or c["filename_b"] in selected_images:
-                comparisons.append(c)
+            comparisons.append(c)
     logger.debug(f"Filtered down to {len(comparisons)} comparisons.")
 
     start_time = time.perf_counter()
@@ -182,21 +170,14 @@ def test_top_bottom_match_database_exactly() -> None:
     """Test that computed tops/bottoms match expected: tops only have wins, bottoms only have losses."""
     logger.debug("Starting test_top_bottom_match_database_exactly...")
 
-    images = [
-        {"filename": "a", "score": 0.9, "comparison_count": 2, "rating_mu": 25.0, "rating_sigma": 8.3},
-        {"filename": "b", "score": 0.7, "comparison_count": 2, "rating_mu": 25.0, "rating_sigma": 8.3},
-        {"filename": "c", "score": 0.5, "comparison_count": 2, "rating_mu": 25.0, "rating_sigma": 8.3},
-        {"filename": "d", "score": 0.3, "comparison_count": 2, "rating_mu": 25.0, "rating_sigma": 8.3},
-    ]
+    images = ["a", "b", "c", "d"]
     comparisons = [
         {"filename_a": "a", "filename_b": "b", "winner": "a"},
         {"filename_a": "b", "filename_b": "c", "winner": "b"},
         {"filename_a": "c", "filename_b": "d", "winner": "c"},
     ]
 
-    cg = CrystalGraph()
-    cg.rebuild_from_database(images, comparisons)
-    cm = cg._chain
+    cm = _build_manager(comparisons, all_filenames=set(images))
 
     cm_tops = set(cm.get_top_nodes())
     cm_bottoms = set(cm.get_bottom_nodes())

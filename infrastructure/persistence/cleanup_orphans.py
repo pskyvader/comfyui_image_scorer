@@ -79,7 +79,7 @@ def cleanup_orphans(
         for f in files:
             dirs[f.parent].append(f)
 
-        for d, d_files in dirs.items():
+        for _d, d_files in dirs.items():
             has_img = any(f.suffix.lower() in IMAGE_EXTENSIONS for f in d_files)
             has_json = any(f.suffix.lower() == ".json" for f in d_files)
             if not (has_img and has_json):

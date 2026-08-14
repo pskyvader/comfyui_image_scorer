@@ -4,57 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Protocol
-import time
 
 from ...core.observability.logger import get_logger, ModuleLogger
 from .state import invalidate_images_cache
 from ..analysis.trueskill import (
-    Rating,
     public_score_from_rating,
     rating_from_row,
     update_ratings,
 )
+from ..database.ports import ComparisonRepository, ImageRepository, PathResolver
 
 logger: ModuleLogger = get_logger(__name__)
-
-
-class ComparisonRepository(Protocol):
-    def add_comparison(
-        self,
-        filename_a: str,
-        filename_b: str,
-        winner: str,
-        weight: float,
-        transitive_depth: int,
-        timestamp: str,
-    ) -> int | None: ...
-    def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool: ...
-    def get_all_comparisons(self) -> list[dict[str, Any]]: ...
-
-
-class ImageRepository(Protocol):
-    def get_image(self, filename: str) -> dict[str, Any] | None: ...
-    def update_image_rating_state(
-        self,
-        filename: str,
-        score: float,
-        rating_mu: float,
-        rating_sigma: float,
-        comparison_count: int,
-        touch_timestamp: bool = True,
-    ) -> bool: ...
-
-
-class PathSyncer(Protocol):
-    def sync_image_metadata_to_json(
-        self,
-        filename: str,
-        score: float,
-        rating_mu: float,
-        rating_sigma: float,
-        comparison_count: int,
-        all_comparisons: list[dict[str, Any]] | None = None,
-    ) -> bool: ...
 
 
 class GraphService(Protocol):
@@ -62,11 +22,8 @@ class GraphService(Protocol):
 
 
 def update_scores_after_comparison(
-    winner_filename: str,
-    loser_filename: str,
     winner_data: dict[str, Any],
     loser_data: dict[str, Any],
-    impact_factor: float,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     winner_rating, loser_rating = update_ratings(
         rating_from_row(winner_data), rating_from_row(loser_data)
@@ -89,7 +46,7 @@ class ComparisonRecorder:
         self,
         comparison_repo: ComparisonRepository,
         image_repo: ImageRepository,
-        path_syncer: PathSyncer,
+        path_syncer: PathResolver,
         graph_service: GraphService,
     ) -> None:
         self._comparison_repo = comparison_repo
@@ -136,7 +93,7 @@ class ComparisonRecorder:
             winner_data, loser_data = data_b, data_a
 
         winner_data, loser_data = update_scores_after_comparison(
-            winner_filename, loser_filename, winner_data, loser_data, impact_factor
+            winner_data, loser_data
         )
 
         ts = datetime.now(timezone.utc).isoformat()

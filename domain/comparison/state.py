@@ -1,25 +1,17 @@
 """Centralised mutable state for the ranking algorithm."""
 
 from typing import Any
-from collections import deque
 import time
 
 from ...core.observability.logger import get_logger, ModuleLogger
 from .constants import IMAGES_CACHE_TTL
-from ...core.configuration.settings import config
-from ...infrastructure.persistence.images_repository import (
-    get_all_images,
-    get_image_count,
-)
 
 logger: ModuleLogger = get_logger(__name__)
 
 _images_cache: dict[str, Any] = {"data": None, "timestamp": 0.0}
 
 
-def get_cached_all_images(
-    images: list[dict[str, Any]] | None = None,
-) -> list[dict[str, Any]]:
+def get_cached_all_images(images: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return cached all_images list, refreshing if stale."""
     global _images_cache
     now = time.time()
@@ -29,20 +21,15 @@ def get_cached_all_images(
     ):
         return _images_cache["data"]
 
-    if images is None:
-        images = get_all_images()
-        # raise ValueError("images must be provided when no cached data is available")
-
     _images_cache = {"data": images, "timestamp": now}
     return images
 
 
 def get_cached_image(
-    filename: str, images: list[dict[str, Any]] | None = None
+    filename: str, images: list[dict[str, Any]]
 ) -> dict[str, Any] | None:
-    """Return a single image from the cached full list, or None."""
-    data = images if images is not None else get_cached_all_images()
-    for img in data:
+    """Return a single image from the cached list, or None."""
+    for img in get_cached_all_images(images):
         if img["filename"] == filename:
             return img
     return None

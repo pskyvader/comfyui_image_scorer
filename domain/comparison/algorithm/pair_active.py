@@ -13,19 +13,13 @@ from ...graph.node_proxy import NodeProxy
 
 from ....core.configuration.settings import config
 
+from ...database.ports import ComparisonRepository
+
 from ..constants import MIN_CHAIN_THRESHOLD
 
 logger: ModuleLogger = get_logger(__name__)
 
 NodeTuple = tuple[NodeProxy, bool]
-
-
-class ComparisonRepository(Protocol):
-    def get_all_comparisons(
-        self, weight: float | None = None
-    ) -> list[dict[str, Any]]: ...
-    def get_images_with_only_wins(self) -> list[str]: ...
-    def get_images_with_only_losses(self) -> list[str]: ...
 
 
 class CrystalGraph(Protocol):
@@ -136,7 +130,6 @@ def phase_seed_coverage(
     seed_candidates: list[dict[str, Any]],
     existing_pair_set: set[tuple[str, str]],
     cg: CrystalGraph,
-    comparison_repo: ComparisonRepository,
 ) -> tuple[str, str] | None:
     _start = time.perf_counter()
     seed_target = int(config["ranking"]["seed_target_comparisons"])
@@ -203,32 +196,38 @@ def phase_anchor_insert(
     seed_pool: set[str],
     existing_pair_set: set[tuple[str, str]],
     cg: CrystalGraph,
-    comparison_repo: ComparisonRepository,
 ) -> tuple[str, str] | None:
     _start = time.perf_counter()
     pool = _build_low_count_pool(
         [img for img in candidate_images if img["filename"] not in seed_pool]
     )
     reserve_count = config["ranking"]["reserve_count"]
-    if len(pool) < reserve_count:
+
+    pool_nodes = [
+        cg.get_node(img["filename"])
+        for img in pool
+        if cg.get_node(img["filename"]) is not None
+    ]
+    if len(pool_nodes) < reserve_count:
         logger.warning(
             f"phase_anchor_insert: pool too small ({len(pool)} < {reserve_count})",
             start_timer=_start,
         )
         return None
-
     pool.sort(key=lambda img: (int(img["comparison_count"]), float(img["score"])))
-    source = pool[0]
-    source_name = source["filename"]
-    source_mu_skill = float(source["rating_mu"])
+    source_node = pool_nodes[0]
+    source_name = source_node.filename
+    source_mu_skill = source_node.mu_skill
 
-    remaining = [img for img in pool if img["filename"] != source_name]
-    remaining.sort(key=lambda opp: (abs(float(opp["rating_mu"]) - source_mu_skill),))
-    opponents = _find_unseen_candidates(source, remaining, existing_pair_set)
+    remaining = [img for img in pool_nodes if img.filename != source_name]
+    remaining.sort(key=lambda opp: (abs(float(opp.mu_skill) - source_mu_skill),))
+
     seen_opponents = 0
-    for opponent in opponents:
+    for opponent in remaining:
+        if _pair_key(source_name, opponent.filename) in existing_pair_set:
+            continue
         seen_opponents += 1
-        opp_name = opponent["filename"]
+        opp_name = opponent.filename
         if not _are_in_different_paths(source_name, opp_name, cg):
             continue
         result = (source_name, opp_name)
@@ -309,7 +308,6 @@ def _collapsible_extreme_pair(
 
 def phase_collapsible_pairs(
     candidate_images: list[dict[str, Any]],
-    pair_set: set[tuple[str, str]],
     cg: CrystalGraph,
     comparison_repo: ComparisonRepository,
 ) -> tuple[str, str] | None:
@@ -341,7 +339,6 @@ _last_chains_index: list[int] = []
 def phase_chain_merge(
     candidate_images: list[dict[str, Any]],
     cg: CrystalGraph,
-    comparison_repo: ComparisonRepository,
 ) -> tuple[str, str] | None:
     global _last_chains_index
     score_threshold = 0.01
@@ -436,7 +433,6 @@ def phase_uncertainty_refine(
     candidate_images: list[dict[str, Any]],
     pair_set: set[tuple[str, str]],
     cg: CrystalGraph,
-    comparison_repo: ComparisonRepository,
 ) -> tuple[str, str] | None:
     _start = time.perf_counter()
 
@@ -522,8 +518,6 @@ def phase_uncertainty_refine(
 def phase_fallback(
     candidate_images: list[dict[str, Any]],
     pair_set: set[tuple[str, str]],
-    cg: CrystalGraph,
-    comparison_repo: ComparisonRepository,
 ) -> tuple[str, str] | None:
     _start = time.perf_counter()
     ordered = sorted(

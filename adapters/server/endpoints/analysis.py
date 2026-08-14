@@ -10,14 +10,8 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from ....core.observability.logger import get_logger, ModuleLogger
-from ....infrastructure.persistence.comparisons_repository import (
-    get_all_comparisons,
-    get_total_comparisons,
-)
-from ....infrastructure.persistence.images_repository import get_all_images
-from ....domain.analysis.helpers import distribute
-from ....application.services.graph_service import crystal_graph
-from ....core.utilities.tasks import (
+from ....core.utilities.analysis import distribute
+from ..tasks import (
     start_task,
     get_task_status,
     set_task_output,
@@ -27,7 +21,7 @@ from ....core.io.serialization import load_single_jsonl
 from ....core.filesystem.paths import vectors_file, text_data_file, scores_file
 from ....domain.training.matrix_analysis import MatrixAnalyzer
 from ....domain.training.parameter_analysis import ParameterAnalyzer
-
+from ..deps import ServerDeps, get_server_deps
 
 analysis_bp = Blueprint("analysis_v2", __name__, url_prefix="/api/analysis")
 logger: ModuleLogger = get_logger(__name__)
@@ -36,7 +30,8 @@ logger: ModuleLogger = get_logger(__name__)
 @analysis_bp.route("/stats", methods=["GET"])
 def get_stats():
     _start = time.perf_counter()
-    all_images = get_all_images()
+    deps = get_server_deps()
+    all_images = deps.image_repo.get_all_images()
     total = len(all_images)
     if total == 0:
         result = jsonify(
@@ -65,20 +60,22 @@ def get_stats():
     chain_lengths: list[int] = []
     for img in all_images:
         try:
-            cl = crystal_graph.get_node_chain_length(img["filename"])
+            cl = deps.graph.get_node_chain_length(img["filename"])
             chain_lengths.append(cl if cl is not None else 0)
         except Exception:
             chain_lengths.append(0)
 
-    graph_stats = crystal_graph.get_graph_stats()
+    graph_stats = deps.graph.get_graph_stats()
 
     sorted_by_score = sorted(all_images, key=lambda x: float(x.get("score", 0.5)))
-    sorted_by_comp = sorted(all_images, key=lambda x: int(x.get("comparison_count", 0)))
+    sorted_by_comp = sorted(
+        all_images, key=lambda x: int(x.get("comparison_count", 0))
+    )
 
     result = jsonify(
         {
             "total_images": total,
-            "total_comparisons": get_total_comparisons(),
+            "total_comparisons": deps.comparison_repo.get_total_comparisons(),
             "total_chains": graph_stats.get("total_chains", 0),
             "mu_buckets": distribute(
                 mus,
@@ -307,7 +304,9 @@ def get_report_file():
                             pass
                     if len(items) >= max_items:
                         break
-                total_count = sum(1 for _ in open(path, encoding="utf-8") if _.strip())
+                total_count = sum(
+                    1 for _ in open(path, encoding="utf-8") if _.strip()
+                )
                 result = jsonify(
                     {
                         "status": "ok",
@@ -363,5 +362,6 @@ def cancel_task(task_id: str):
     return result
 
 
-def register_analysis_routes(app) -> None:
+def register_analysis_routes(app, deps: ServerDeps) -> None:
+    app.extensions["server_deps"] = deps
     app.register_blueprint(analysis_bp)

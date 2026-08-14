@@ -33,7 +33,7 @@ class ComponentProxy:
     def size(self) -> int:
         return len(self._chain.get_component_members(self._id))
 
-    def get_chains(self, minimal_required: bool = True) -> list[ChainProxy]:
+    def get_chains(self) -> list[ChainProxy]:
         all_chains: list[list[str]] = list(self._chain.get_chains().values())
         comp_nodes: set[str] = set(self._chain.get_component_members(self._id))
         matching: list[tuple[int, list[str]]] = []

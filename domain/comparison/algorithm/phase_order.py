@@ -9,12 +9,10 @@ execution order — the list index IS the phase number.
 from __future__ import annotations
 
 import random
-import time
 from typing import Any
 
 from ....core.observability.logger import SharedLogger
 from ....core.configuration.settings import config
-from ..constants import MIN_CHAIN_THRESHOLD
 from .pair_active import (
     phase_seed_coverage,
     phase_anchor_insert,
@@ -153,19 +151,17 @@ def select_pair(
             continue
 
         if name == "seed":
-            result = fn(seed_candidates, existing_pairs_set, cg, comparison_repo)
+            result = fn(seed_candidates, existing_pairs_set, cg)
         elif name == "anchor":
-            result = fn(
-                candidate_images, seed_pool, existing_pairs_set, cg, comparison_repo
-            )
+            result = fn(candidate_images, seed_pool, existing_pairs_set, cg)
         elif name == "collapsible":
-            result = fn(candidate_images, existing_pairs_set, cg, comparison_repo)
-        elif name == "refine":
-            result = fn(candidate_images, existing_pairs_set, cg, comparison_repo)
-        elif name == "chain_merge":
             result = fn(candidate_images, cg, comparison_repo)
+        elif name == "refine":
+            result = fn(candidate_images, existing_pairs_set, cg)
+        elif name == "chain_merge":
+            result = fn(candidate_images, cg)
         elif name == "fallback":
-            result = fn(candidate_images, existing_pairs_set, cg, comparison_repo)
+            result = fn(candidate_images, existing_pairs_set)
         else:
             result = None
 

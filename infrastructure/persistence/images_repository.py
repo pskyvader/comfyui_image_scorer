@@ -102,20 +102,6 @@ def update_image_tags(filename: str, prompt_tags: str) -> bool:
         return False
 
 
-def update_image_score(filename: str, score: float) -> bool:
-    try:
-        with get_db_connection() as conn:
-            conn.execute(
-                "UPDATE images SET score=?, last_compared_at=CURRENT_TIMESTAMP WHERE filename=?",
-                (float(score), filename),
-            )
-            conn.commit()
-        return True
-    except Exception as exc:
-        logger.error("Failed to update score for %s: %s", filename, exc)
-        return False
-
-
 def get_image_count() -> int:
     try:
         with get_db_connection() as conn:
@@ -124,49 +110,6 @@ def get_image_count() -> int:
     except Exception as exc:
         logger.error("Failed to count images: %s", exc)
         return 0
-
-
-def get_scored_images(limit: int = 100, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
-    try:
-        with get_db_connection() as conn:
-            total_row = conn.execute(
-                "SELECT COUNT(*) as cnt FROM images WHERE score IS NOT NULL"
-            ).fetchone()
-            total = total_row["cnt"] if total_row else 0
-            rows = conn.execute(
-                "SELECT * FROM images WHERE score IS NOT NULL ORDER BY score DESC LIMIT ? OFFSET ?",
-                (limit, offset),
-            ).fetchall()
-            return [dict(row) for row in rows], total
-    except Exception as exc:
-        logger.error("Failed to fetch scored images: %s", exc)
-        return [], 0
-
-
-def get_images_by_tier(tier: int) -> list[dict[str, Any]]:
-    tier_min = tier / 10.0
-    tier_max = (tier + 1) / 10.0
-    try:
-        with get_db_connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM images WHERE score >= ? AND score < ? ORDER BY score",
-                (tier_min, tier_max),
-            ).fetchall()
-            return [dict(row) for row in rows]
-    except Exception as exc:
-        logger.error("Failed to fetch tier %s: %s", tier, exc)
-        return []
-
-
-def delete_image(filename: str) -> bool:
-    try:
-        with get_db_connection() as conn:
-            cur = conn.execute("DELETE FROM images WHERE filename=?", (filename,))
-            conn.commit()
-        return cur.rowcount > 0
-    except Exception as exc:
-        logger.error("Failed to delete image %s: %s", filename, exc)
-        return False
 
 
 def clear_all_images() -> int:
@@ -197,3 +140,62 @@ def reset_all_image_ratings(score: float = 0.5) -> bool:
     except Exception as exc:
         logger.error("Failed to reset ratings: %s", exc)
         return False
+
+
+class SQLiteImagesRepository:
+    """Injected implementation of the ImageRepository port."""
+
+    def get_image(self, filename: str) -> dict[str, Any] | None:
+        return get_image(filename)
+
+    def get_all_images(self) -> list[dict[str, Any]]:
+        return get_all_images()
+
+    def get_image_count(self) -> int:
+        return get_image_count()
+
+    def add_image(
+        self,
+        filename: str,
+        score: float,
+        comparison_count: int,
+        prompt_tags: str | None,
+        rating_mu: float,
+        rating_sigma: float,
+    ) -> bool:
+        add_image(
+            filename=filename,
+            score=score,
+            comparison_count=comparison_count,
+            prompt_tags=prompt_tags,
+            rating_mu=rating_mu,
+            rating_sigma=rating_sigma,
+        )
+        return True
+
+    def update_image_rating_state(
+        self,
+        filename: str,
+        score: float,
+        rating_mu: float,
+        rating_sigma: float,
+        comparison_count: int,
+        touch_timestamp: bool = True,
+    ) -> bool:
+        return update_image_rating_state(
+            filename=filename,
+            score=score,
+            rating_mu=rating_mu,
+            rating_sigma=rating_sigma,
+            comparison_count=comparison_count,
+            touch_timestamp=touch_timestamp,
+        )
+
+    def update_image_tags(self, filename: str, prompt_tags: str) -> bool:
+        return update_image_tags(filename, prompt_tags)
+
+    def clear_all_images(self) -> int:
+        return clear_all_images()
+
+    def reset_all_image_ratings(self, score: float) -> bool:
+        return reset_all_image_ratings(score=score)

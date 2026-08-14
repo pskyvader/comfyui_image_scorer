@@ -179,21 +179,4 @@ def atomic_write_json(path: str, data: Any, *, indent: int | None) -> None:
     os.replace(tmp, p)
 
 
-def load_single_entry_mapping(
-    path: str,
-) -> tuple[dict[str, Any] | None, str | None, str | None]:
-    _start = time.perf_counter()
-    data, err = load_json(path, expect=dict)
-    result: tuple[dict[str, Any] | None, str | None, str | None]
-    if err:
-        result = (None, None, err)
-    elif data is None or len(data.keys()) != 1:
-        result = (None, None, "invalid_keys")
-    else:
-        key = next(iter(data.keys()))
-        payload = data[key]
-        if not isinstance(payload, dict):
-            result = (None, None, "invalid_payload")
-        else:
-            result = (payload, str(key), None)
-    return result
+

@@ -6,7 +6,6 @@ from ..terms import (
     filter_terms,
     deduplicate_terms,
     extract_terms,
-    ExtractionResult,
 )
 
 # =================================================================

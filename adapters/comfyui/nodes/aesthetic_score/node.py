@@ -1,12 +1,14 @@
 import torch
 from typing import Any
 from .....application.services.scoring_service import ScoringService
-from .....infrastructure.ml_models.model_loader import verify_models_present
+from ...services import get_scoring_service
+from ...services import verify_models_present
 
 
 class AestheticScoreNode:
     def __init__(self):
-        self._scoring_service = ScoringService()
+        # Construct ScoringService from the adapter wiring module (composition root)
+        self._scoring_service: ScoringService = get_scoring_service()
 
     @classmethod
     def INPUT_TYPES(cls) -> dict[str, dict[str, Any]]:

@@ -1,31 +1,37 @@
-from typing import Any
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from ....core.observability.logger import (
     get_logger,
     ModuleLogger,
-    configure_package_logging,
 )
 
 logger: ModuleLogger = get_logger(__name__)
 
+_MODULE_ROOT = Path(__file__).resolve().parents[3]
+_SERVER_ENTRY = "comfyui_image_scorer.adapters.server.main"
 
-def run_server(host: str = "0.0.0.0", port: int = 5001, **kwargs: Any) -> int:
-    from ....infrastructure.persistence.database import init_database
 
-    init_database()
-    from ...server.main import app, init_ranking_system
-    import os
+def run_server(host: str, port: int, debug: bool) -> int:
+    env = dict(os.environ)
+    pypath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(_MODULE_ROOT.parent)] + ([pypath] if pypath else [])
+    )
 
-    should_init = True
-    if kwargs.get("debug") and (
-        "WERKZEUG_RUN_MAIN" not in os.environ
-        or os.environ["WERKZEUG_RUN_MAIN"] != "true"
-    ):
-        should_init = False
+    cmd = [
+        sys.executable,
+        "-m",
+        _SERVER_ENTRY,
+        "--host",
+        host,
+        "--port",
+        str(port),
+    ]
+    if debug:
+        cmd.append("--debug")
 
-    if should_init:
-        init_ranking_system()
-
-    debug = kwargs.get("debug", False)
-    configure_package_logging(10 if debug else 20)
-    app.run(host=host, port=port, debug=debug)
-    return 0
+    logger.info("Starting ranking server (pid %s)...", os.getpid())
+    return subprocess.call(cmd, env=env)

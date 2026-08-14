@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Any
+import sys
 import time
 from tqdm import tqdm
 
@@ -236,9 +237,17 @@ def tarjan_scc(
             scc_members[scc_count] = component
             scc_count += 1
 
-    for v in sorted(nodes):
-        if v not in indices:
-            strongconnect(v)
+    # Recursion depth of strongconnect is bounded by the longest chain,
+    # which can exceed the default limit on large datasets.
+    prev_limit = sys.getrecursionlimit()
+    if len(nodes) + 100 > prev_limit:
+        sys.setrecursionlimit(len(nodes) + 100)
+    try:
+        for v in sorted(nodes):
+            if v not in indices:
+                strongconnect(v)
+    finally:
+        sys.setrecursionlimit(prev_limit)
 
     return scc_id_of, scc_members
 

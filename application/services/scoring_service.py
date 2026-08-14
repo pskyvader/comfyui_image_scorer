@@ -16,20 +16,34 @@ from ...domain.training.calibration import (
     apply_score_calibration,
     extract_score_calibration,
 )
-from ...infrastructure.loading.training_loader import training_loader
-from ...infrastructure.ml_models.model_loader import model_loader
-from ...infrastructure.ml_models.batch_sizer import BatchSizer
-from ...infrastructure.ml_models.training.model_trainer import model_trainer
+from ...domain.loading.ports import (
+    BatchSizer,
+    ModelLoader,
+    MapsProvider,
+    TrainingLoader,
+)
 from .vector_list import VectorList
 
 
 class ScoringService:
     """Application service that encapsulates the full scoring workflow."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        model_loader: ModelLoader,
+        batch_sizer: BatchSizer,
+        training_loader: TrainingLoader,
+        model_trainer: Any,
+        maps_provider: MapsProvider,
+        *,
+        batch_size: int = 10,
+    ) -> None:
         self._model_loader = model_loader
-        self._batch_sizer = BatchSizer
-        self._batch_size = 10
+        self._batch_sizer = batch_sizer
+        self._training_loader = training_loader
+        self._model_trainer = model_trainer
+        self._maps_provider = maps_provider
+        self._batch_size = int(batch_size)
 
     def score(
         self,
@@ -76,7 +90,9 @@ class ScoringService:
         }
 
         image_analysis = ImageAnalysis(
-            [], model_loader=self._model_loader, batch_sizer=self._batch_sizer(model_key="")
+            [],
+            model_loader=self._model_loader,
+            batch_sizer_factory=self._batch_sizer,
         )
         images_list: list[Image] = image_analysis.prepare_image_batch(image)
         data_list = [("", entry, "", str(i)) for i, _img in enumerate(images_list)]
@@ -91,6 +107,9 @@ class ScoringService:
         vector_list = VectorList(
             processed_data,
             read_only=True,
+            model_loader=self._model_loader,
+            batch_sizer_factory=self._batch_sizer,
+            maps_provider=self._maps_provider,
         )
         vector_list.create_vectors()
 
@@ -102,6 +121,8 @@ class ScoringService:
                 name,
                 model_key=model_key,
                 slot_size=entry["slot_size"],
+                model_loader=self._model_loader,
+                batch_sizer_factory=self._batch_sizer,
             )
             images_dict = {str(i): image for i, image in enumerate(images_list)}
             rebuild = False
@@ -118,10 +139,10 @@ class ScoringService:
         final_vectors = vector_list.join_vectors()
         matrix = np.array(final_vectors, dtype=np.float32)
 
-        data_transformer = DataTransformer(training_loader, model_trainer)
+        data_transformer = DataTransformer(self._training_loader, self._model_trainer)
         filtered_vectors = data_transformer.apply_feature_filter(list(matrix))
 
-        model = training_loader.load_training_model()
+        model = self._training_loader.load_training_model()
         all_scores = self._predict_scores(model, filtered_vectors)
 
         n_images = len(images_list)
@@ -183,9 +204,9 @@ class ScoringService:
                 if probabilities.ndim == 2 and probabilities.shape[1] >= 2:
                     scores = probabilities[:, 1]
                 else:
-                    scores = np.asarray(model.predict(features), dtype=np.float32).reshape(
-                        -1
-                    )
+                    scores = np.asarray(
+                        model.predict(features), dtype=np.float32
+                    ).reshape(-1)
             elif objective == "multiclass" and hasattr(model, "predict_proba"):
                 probabilities = np.asarray(
                     model.predict_proba(features), dtype=np.float32
@@ -206,23 +227,23 @@ class ScoringService:
                         class_min = float(np.min(class_values))
                         class_max = float(np.max(class_values))
                         if class_max > class_min:
-                            scores = (expected - class_min) / (
-                                class_max - class_min
-                            )
+                            scores = (expected - class_min) / (class_max - class_min)
                         else:
                             scores = expected
                     else:
                         scores = np.max(probabilities, axis=1)
                 else:
-                    scores = np.asarray(model.predict(features), dtype=np.float32).reshape(
-                        -1
-                    )
+                    scores = np.asarray(
+                        model.predict(features), dtype=np.float32
+                    ).reshape(-1)
             else:
                 scores = np.asarray(model.predict(features), dtype=np.float32).reshape(
                     -1
                 )
                 if objective == "lambdarank":
-                    diagnostics = training_loader.load_training_model_diagnostics()
+                    diagnostics = (
+                        self._training_loader.load_training_model_diagnostics()
+                    )
                     calibration = extract_score_calibration(diagnostics)
                     if calibration is not None:
                         scores = apply_score_calibration(scores, calibration)

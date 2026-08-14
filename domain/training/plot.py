@@ -6,17 +6,16 @@ import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
 plt: Any = plt
 from sklearn.metrics import r2_score
 from statistics import mean, stdev
-from scipy.special import softmax
 
 import math
 
-from ...infrastructure.loading.training_loader import training_loader
+from ...domain.loading import TrainingLoader
 from ...core.configuration.settings import config
 from .calibration import apply_score_calibration, extract_score_calibration
-
 
 
 class PlotManager:
@@ -239,6 +238,7 @@ class PlotManager:
     def compare_model_vs_data(
         x: np.ndarray,
         y: np.ndarray,
+        training_loader: TrainingLoader,
         plot: bool = True,
         limit: int = 100,
         save_path: str | None = None,
@@ -348,6 +348,7 @@ class PlotManager:
         result_metrics: dict[str, Any] | None = None,
         save_path: str | None = None,
         show: bool = True,
+        training_loader: TrainingLoader | None = None,
     ) -> None:
         try:
             curves = None
@@ -359,7 +360,7 @@ class PlotManager:
             ):
                 curves = result_metrics["curves"]
 
-            if curves is None:
+            if curves is None and training_loader is not None:
                 data = training_loader.load_training_model_diagnostics()
                 if data is not None and "curves" in data:
                     curves = data["curves"]
@@ -440,7 +441,9 @@ class PlotManager:
 
     @staticmethod
     def plot_continuous_analysis(
-        data_dict: Mapping[str, Sequence[tuple[float, float] | tuple[float, float, int]]],
+        data_dict: Mapping[
+            str, Sequence[tuple[float, float] | tuple[float, float, int]]
+        ],
         group_name: str,
         x_label: str,
         y_label: str,
@@ -452,15 +455,22 @@ class PlotManager:
             return
         n = len(titles)
         rows = (n + cols - 1) // cols
-        fig, axes = plt.subplots(rows, cols, figsize=(cols * 4, rows * 3.5),
-                                 sharex=share_axes, sharey=share_axes,
-                                 squeeze=False)
+        fig, axes = plt.subplots(
+            rows,
+            cols,
+            figsize=(cols * 4, rows * 3.5),
+            sharex=share_axes,
+            sharey=share_axes,
+            squeeze=False,
+        )
         for i, title in enumerate(titles):
             ax = axes.flat[i]
             points = data_dict[title]
             x_coords = [p[0] for p in points]
             y_coords = [p[1] for p in points]
-            ax.scatter(x_coords, y_coords, color="blue", alpha=0.3, s=3, edgecolors="none")
+            ax.scatter(
+                x_coords, y_coords, color="blue", alpha=0.3, s=3, edgecolors="none"
+            )
             ax.set_title(title, fontsize=9)
             ax.grid(True, linestyle="--", alpha=0.3)
             if not share_axes:
@@ -489,8 +499,9 @@ class PlotManager:
             return
         n = len(titles)
         rows = (n + cols - 1) // cols
-        fig, axes = plt.subplots(rows, cols, figsize=(cols * 5, rows * 4),
-                                 sharey=True, squeeze=False)
+        fig, axes = plt.subplots(
+            rows, cols, figsize=(cols * 5, rows * 4), sharey=True, squeeze=False
+        )
         for i, title in enumerate(titles):
             ax = axes.flat[i]
             inner_dict = data_dict[title]
@@ -499,7 +510,9 @@ class PlotManager:
                 for y_val in y_list:
                     x_coords.append(x_val)
                     y_coords.append(y_val)
-            ax.scatter(x_coords, y_coords, color="orange", alpha=0.3, s=3, edgecolors="none")
+            ax.scatter(
+                x_coords, y_coords, color="orange", alpha=0.3, s=3, edgecolors="none"
+            )
             ax.set_title(title, fontsize=9)
             ax.grid(True, linestyle="--", alpha=0.3)
         for j in range(n, rows * cols):
@@ -512,7 +525,9 @@ class PlotManager:
 
     @staticmethod
     def plot_aggregate_summary(
-        data_dict: Mapping[str, Sequence[tuple[float, float] | tuple[float, float, int]]],
+        data_dict: Mapping[
+            str, Sequence[tuple[float, float] | tuple[float, float, int]]
+        ],
         group_name: str,
         value_label: str,
         top_percent: float = 0.10,
@@ -616,8 +631,7 @@ class PlotManager:
             return
 
         rows = math.ceil(num_plots / cols)
-        fig, axes = plt.subplots(rows, cols, figsize=(cols * 5, rows * 4),
-                                 sharey=True)
+        fig, axes = plt.subplots(rows, cols, figsize=(cols * 5, rows * 4), sharey=True)
         axes = np.array(axes).flatten()
 
         i = 0
@@ -692,8 +706,9 @@ class PlotManager:
             return
         n = len(metrics)
         rows = (n + cols - 1) // cols
-        fig, axes = plt.subplots(rows, cols, figsize=(cols * 5, rows * 4),
-                                 sharey=True, squeeze=False)
+        fig, axes = plt.subplots(
+            rows, cols, figsize=(cols * 5, rows * 4), sharey=True, squeeze=False
+        )
         for i, (metric_name, categories) in enumerate(metrics):
             ax = axes.flat[i]
             labels: list[str] = []
@@ -717,14 +732,29 @@ class PlotManager:
             counts_array = np.array(counts)
             widths = (counts_array / counts_array.max()) * 0.8
             colors = plt.cm.get_cmap("plasma")(np.linspace(0.2, 0.6, len(labels)))
-            bars = ax.bar(labels, means, yerr=errors, width=widths,
-                          capsize=4, color=colors, edgecolor="black", alpha=0.8)
+            bars = ax.bar(
+                labels,
+                means,
+                yerr=errors,
+                width=widths,
+                capsize=4,
+                color=colors,
+                edgecolor="black",
+                alpha=0.8,
+            )
             ax.set_title(metric_name, fontsize=9)
             ax.grid(axis="y", linestyle=":", alpha=0.3)
             for bar, count in zip(bars, counts):
-                ax.text(bar.get_x() + bar.get_width() / 2, 0.02,
-                        f"n={count}", ha="center", va="bottom",
-                        fontsize=7, color="white", fontweight="bold")
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    0.02,
+                    f"n={count}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    color="white",
+                    fontweight="bold",
+                )
         for j in range(n, rows * cols):
             axes.flat[j].axis("off")
         fig.supylabel("Average Score (± Std Dev)")
@@ -736,10 +766,38 @@ class PlotManager:
     def prepare_face_data(
         text_data: list[dict[str, Any]],
         scores: Sequence[float],
-    ) -> tuple[pd.DataFrame, pd.DataFrame, list[float], list[float], list[float], list[float], list[float], list[float], int]:
-        AGE_LABELS = ["0-2", "3-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70+"]
+    ) -> tuple[
+        pd.DataFrame,
+        pd.DataFrame,
+        list[float],
+        list[float],
+        list[float],
+        list[float],
+        list[float],
+        list[float],
+        int,
+    ]:
+        AGE_LABELS = [
+            "0-2",
+            "3-9",
+            "10-19",
+            "20-29",
+            "30-39",
+            "40-49",
+            "50-59",
+            "60-69",
+            "70+",
+        ]
         GENDER_LABELS = ["Female", "Male"]
-        RACE_LABELS = ["Black", "East Asian", "Indian", "Latino_Hispanic", "Middle Eastern", "Southeast Asian", "White"]
+        RACE_LABELS = [
+            "Black",
+            "East Asian",
+            "Indian",
+            "Latino_Hispanic",
+            "Middle Eastern",
+            "Southeast Asian",
+            "White",
+        ]
 
         face_logit_rows: list[dict[str, Any]] = []
         bbox_rows: list[dict[str, Any]] = []
@@ -774,14 +832,16 @@ class PlotManager:
             bbox = d.get("bbox") or []
             if bbox:
                 b = bbox[0]
-                bbox_rows.append({
-                    "x": b.get("x", 0.0),
-                    "y": b.get("y", 0.0),
-                    "w": b.get("width", 0.0),
-                    "h": b.get("height", 0.0),
-                    "conf": b.get("confidence", 1.0),
-                    "score": s,
-                })
+                bbox_rows.append(
+                    {
+                        "x": b.get("x", 0.0),
+                        "y": b.get("y", 0.0),
+                        "w": b.get("width", 0.0),
+                        "h": b.get("height", 0.0),
+                        "conf": b.get("confidence", 1.0),
+                        "score": s,
+                    }
+                )
 
             if d.get("nose"):
                 pose_score.append(s)
@@ -791,7 +851,17 @@ class PlotManager:
         df_face = pd.DataFrame(face_logit_rows)
         df_bbox = pd.DataFrame(bbox_rows)
         n = len(text_data)
-        return df_face, df_bbox, pose_score, no_pose_score, lh_score, no_lh_score, rh_score, no_rh_score, n
+        return (
+            df_face,
+            df_bbox,
+            pose_score,
+            no_pose_score,
+            lh_score,
+            no_lh_score,
+            rh_score,
+            no_rh_score,
+            n,
+        )
 
     @staticmethod
     def plot_face_bbox(df_bbox: pd.DataFrame) -> None:
@@ -799,9 +869,16 @@ class PlotManager:
             print("No face bbox data")
             return
         _, ax = plt.subplots(figsize=(6, 6))
-        sc = ax.scatter(df_bbox["x"], df_bbox["y"], c=df_bbox["score"],
-                        s=5, alpha=0.5, cmap="RdYlGn")
-        ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+        sc = ax.scatter(
+            df_bbox["x"],
+            df_bbox["y"],
+            c=df_bbox["score"],
+            s=5,
+            alpha=0.5,
+            cmap="RdYlGn",
+        )
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
         ax.invert_yaxis()
         ax.set_xlabel("Face x (fraction of image width, 0=left, 1=right)")
         ax.set_ylabel("Face y (fraction of image height, 0=top, 1=bottom)")
@@ -835,17 +912,18 @@ class PlotManager:
             return
         n_pos = len(names)
         rows = (n_pos + cols - 1) // cols
-        fig, axes = plt.subplots(rows, cols, figsize=(cols * 5, rows * 4.5),
-                                 squeeze=False)
+        fig, axes = plt.subplots(
+            rows, cols, figsize=(cols * 5, rows * 4.5), squeeze=False
+        )
         for i, name in enumerate(names):
             ax = axes.flat[i]
             d = pos_data[name]
-            sc = ax.scatter(d["x"], d["y"], c=d["score"], s=5, alpha=0.5,
-                            cmap="RdYlGn")
+            sc = ax.scatter(d["x"], d["y"], c=d["score"], s=5, alpha=0.5, cmap="RdYlGn")
             if invert_y:
                 ax.invert_yaxis()
             ax.set_title(name, fontsize=9)
-            ax.set_xlabel("x"); ax.set_ylabel("y")
+            ax.set_xlabel("x")
+            ax.set_ylabel("y")
             plt.colorbar(sc, ax=ax, label="Score")
         for j in range(n_pos, rows * cols):
             axes.flat[j].axis("off")
@@ -859,31 +937,42 @@ class PlotManager:
         group_name: str = "Bounding Boxes",
         cols: int = 4,
         invert_y: bool = True,
-        alpha: float = 0.3,
     ) -> None:
         from matplotlib.patches import Rectangle
         from matplotlib.colors import Normalize
 
-        names = [k for k, v in pos_data.items()
-                 if len(v.get("x", [])) > 0 and "w" in v and "h" in v]
+        names = [
+            k
+            for k, v in pos_data.items()
+            if len(v.get("x", [])) > 0 and "w" in v and "h" in v
+        ]
         if not names:
             return
         n_pos = len(names)
         rows = (n_pos + cols - 1) // cols
-        fig, axes = plt.subplots(rows, cols, figsize=(cols * 5, rows * 4.5),
-                                 squeeze=False)
+        fig, axes = plt.subplots(
+            rows, cols, figsize=(cols * 5, rows * 4.5), squeeze=False
+        )
         for i, name in enumerate(names):
             ax = axes.flat[i]
             d = pos_data[name]
             scores = d["score"]
             vmin, vmax = min(scores), max(scores)
-            norm = Normalize(vmin=vmin, vmax=vmax) if vmax > vmin else Normalize(vmin=0, vmax=1)
+            norm = (
+                Normalize(vmin=vmin, vmax=vmax)
+                if vmax > vmin
+                else Normalize(vmin=0, vmax=1)
+            )
             color_cmap = plt.get_cmap("RdYlGn")
             for j in range(len(d["x"])):
                 color = color_cmap(norm(scores[j]))
                 rect = Rectangle(
-                    (d["x"][j], d["y"][j]), d["w"][j], d["h"][j],
-                    linewidth=1.0, edgecolor=color, facecolor="none",
+                    (d["x"][j], d["y"][j]),
+                    d["w"][j],
+                    d["h"][j],
+                    linewidth=1.0,
+                    edgecolor=color,
+                    facecolor="none",
                 )
                 ax.add_patch(rect)
             ax.set_xlim(0, 1)
@@ -891,9 +980,10 @@ class PlotManager:
                 ax.set_ylim(1, 0)
             else:
                 ax.set_ylim(0, 1)
-            ax.set_aspect('equal')
+            ax.set_aspect("equal")
             ax.set_title(name, fontsize=9)
-            ax.set_xlabel("x"); ax.set_ylabel("y")
+            ax.set_xlabel("x")
+            ax.set_ylabel("y")
             sm = plt.cm.ScalarMappable(norm=norm, cmap="RdYlGn")
             sm.set_array([])
             plt.colorbar(sm, ax=ax, label="Score")
@@ -905,12 +995,15 @@ class PlotManager:
 
     @staticmethod
     def plot_detection_presence(
-        pose_score: list[float], no_pose_score: list[float],
-        lh_score: list[float], no_lh_score: list[float],
-        rh_score: list[float], no_rh_score: list[float],
-        n: int,
+        pose_score: list[float],
+        no_pose_score: list[float],
+        lh_score: list[float],
+        no_lh_score: list[float],
+        rh_score: list[float],
+        no_rh_score: list[float],
     ) -> None:
         from scipy.stats import mannwhitneyu
+
         fig, axes = plt.subplots(1, 3, figsize=(14, 5), sharey=True)
         detect_pairs = [
             ("Body Pose", pose_score, no_pose_score),
@@ -918,16 +1011,26 @@ class PlotManager:
             ("Right Hand", rh_score, no_rh_score),
         ]
         for ax, (name, yes, no) in zip(axes, detect_pairs):
-            bp = ax.boxplot([yes, no], labels=[f"Detected\n(n={len(yes)})", f"Not\n(n={len(no)})"],
-                            patch_artist=True)
+            bp = ax.boxplot(
+                [yes, no],
+                labels=[f"Detected\n(n={len(yes)})", f"Not\n(n={len(no)})"],
+                patch_artist=True,
+            )
             bp["boxes"][0].set_facecolor("steelblue")
             bp["boxes"][1].set_facecolor("lightcoral")
             ax.set_title(f"{name}")
             ax.axhline(0, color="gray", ls=":", alpha=0.3)
             if len(yes) > 0 and len(no) > 0:
                 _, p = mannwhitneyu(yes, no, alternative="two-sided")
-                ax.text(0.5, 0.95, f"MW p={p:.4f}", transform=ax.transAxes,
-                        ha="center", fontsize=9, style="italic")
+                ax.text(
+                    0.5,
+                    0.95,
+                    f"MW p={p:.4f}",
+                    transform=ax.transAxes,
+                    ha="center",
+                    fontsize=9,
+                    style="italic",
+                )
         axes[0].set_ylabel("Score")
         fig.suptitle("Detection Presence vs Score")
         plt.tight_layout()

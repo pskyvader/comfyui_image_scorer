@@ -257,7 +257,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Main server - Flask application for ranking system
 
-> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `start_background_scanner` is dead — defined but never invoked.
+> **Dead code:** `start_background_scanner` is dead — defined but never invoked.
 
 ### Module-level functions
 
@@ -519,7 +519,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 ## `core/filesystem/paths.py`
 
-> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `hyperparameters_statistics` is a dead constant — no callers (the legacy HPO ledger was dropped in the rewrite).
+> **Dead code:** `hyperparameters_statistics` is a dead constant — no callers (the legacy HPO ledger was dropped in the rewrite).
 
 ### Module-level functions
 
@@ -561,7 +561,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 ## `core/io/serialization.py`
 
-> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `load_single_entry_mapping` is dead — no callers anywhere.
+> **Dead code:** `load_single_entry_mapping` is dead — no callers anywhere.
 
 ### Module-level functions
 
@@ -583,7 +583,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Shared backend logging utilities
 
-> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `set_log_filter_hook` and `log_message` are dead (no callers; `set_log_filter_hook` is also a dead import at `adapters/server/main.py:19`), and the `TaskLogHandler` class is never instantiated.
+> **Scheduled deletion (REORGANIZATION_PLAN §3.2):** `set_log_filter_hook` and `log_message` are dead (no callers; `set_log_filter_hook` is also a dead import at `adapters/server/main.py:19`), and the `TaskLogHandler` class is never instantiated.
 
 ### Module-level functions
 
@@ -725,11 +725,13 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 ---
 
-## `core/utilities/tasks.py`
+## `core/utilities/tasks.py` → `adapters/server/tasks.py` (moved in v2)
 
-> Background task infrastructure shared across sections
+> Background task infrastructure shared across sections. The file now lives at
+> `adapters/server/tasks.py`; this section tracks it under its old path for
+> continuity.
 
-> **Scheduled move (REORGANIZATION_PLAN §0.3):** `start_task`, `set_task_output`, `get_task_status`, and `cancel_task` are server-only orchestration used solely by `adapters/server/endpoints/`; they move to `adapters/server/tasks.py`.
+> **Scheduled deletion (REORGANIZATION_PLAN §3.1):** the whole task system is removed — `tasks.py` (moved here from `core/utilities/tasks.py` in v2) is deleted, command endpoints become synchronous, and every `/task/<task_id>` route goes with it.
 
 ### Module-level functions
 
@@ -747,7 +749,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Small shared utilities used across the project
 
-> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** the whole module is dead — `parse_custom_text` is a legacy feature moved into `_recursive_parse_json` (`core/io/serialization.py`), and `first_present` was replaced by `get_value_from_entry` (`domain/vectors/helpers.py`).
+> **Dead code:** the whole module is dead — `parse_custom_text` is a legacy feature moved into `_recursive_parse_json` (`core/io/serialization.py`), and `first_present` was replaced by `get_value_from_entry` (`domain/vectors/helpers.py`).
 
 ### Module-level functions
 
@@ -804,7 +806,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Analysis helpers - utility functions for analysis endpoints
 
-> **Scheduled move (REORGANIZATION_PLAN §0.4):** `distribute` is a pure stateless bucket-counting helper with zero domain knowledge, called only by `adapters/server/endpoints/analysis.py` (6 sites); it moves to `core/utilities/analysis.py`.
+> **Moved (v2, in place):** `distribute` is a pure stateless bucket-counting helper with zero domain knowledge, called only by `adapters/server/endpoints/analysis.py` (6 sites); it now lives in `core/utilities/analysis.py`.
 
 ### Module-level functions
 
@@ -918,21 +920,12 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Reusable graph-query helpers for the ranking algorithm
 
-> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `get_chain_length`, `group_nodes_by_extreme`, and `find_lowest_confidence_images` are dead — module-level helpers never imported.
-
 ### Module-level functions
 
 | Name | Description |
 |---|---|
-| `is_top_node(node, cg)` | Returns True if the node has no better-than links |
-| `is_bottom_node(node, cg)` | Returns True if the node has no worse-than links |
-| `get_node_component(node, cg)` | Returns the component id of the node, or None |
-| `get_component_members(comp_id, cg)` | Returns the member filename list for a component id |
-| `get_chain_length(node, cg)` | Returns the chain-length metric for the node |
-| `group_nodes_by_extreme(nodes, cg)` | Groups nodes into top-by-component and bottom-by-component dicts |
 | `is_collapsable_pair(filename_a, filename_b, cg)` | Returns True when both nodes are same-component extremes not sharing a path |
 | `filter_excluded_images(images, exclude_set)` | Removes images whose filename is in the exclude set |
-| `find_lowest_confidence_images(images)` | Selects a diverse subset of high-uncertainty images for fallback pairing |
 
 ### Class `CrystalGraph` (Protocol)
 
@@ -1851,7 +1844,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Comparisons table operations
 
-> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `get_recent_comparisons`, `get_comparison_count`, `delete_comparisons_for_image`, `delete_comparison_by_id`, and `delete_comparison` are dead — none are in the `ComparisonRepository` protocol and none have callers.
+> **Dead code:** `get_recent_comparisons`, `get_comparison_count`, `delete_comparisons_for_image`, `delete_comparison_by_id`, and `delete_comparison` are dead — none are in the `ComparisonRepository` protocol and none have callers.
 
 ### Module-level functions
 
@@ -1881,7 +1874,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Database schema definitions and connection management
 
-> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `get_meta_value` is dead — no callers.
+> **Dead code:** `get_meta_value` is dead — no callers.
 
 ### Module-level functions
 
@@ -1936,7 +1929,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Images table operations
 
-> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `update_image_score`, `get_scored_images`, `get_images_by_tier`, and `delete_image` are dead — none are in the `ImageRepository` protocol and none have callers.
+> **Dead code:** `update_image_score`, `get_scored_images`, `get_images_by_tier`, and `delete_image` are dead — none are in the `ImageRepository` protocol and none have callers.
 
 ### Module-level functions
 
@@ -1961,7 +1954,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 > Path handler - compute tier structure from scores and sync companion JSON
 
-> **Scheduled deletion (REORGANIZATION_PLAN §0.1):** `append_comparison_history_to_json` is dead — no callers (and it has 3 unused args per §6b).
+> **Dead code:** `append_comparison_history_to_json` is dead — no callers (and it has 3 unused args).
 
 ### Module-level functions
 
@@ -1983,7 +1976,7 @@ All functions, methods, and classes grouped by file (paths relative to `comfyui_
 
 | Name | Description |
 |---|---|
-| *(module-level script)* | **Main CLI entry point** — imports `main` from `adapters.cli.main` and exits with its return code; run as `python scorer.py <command>` from the module root (kept — see REORGANIZATION_PLAN §2.3 item 6) |
+| *(module-level script)* | **Main CLI entry point** — imports `main` from `adapters.cli.main` and exits with its return code; run as `python scorer.py <command>` from the module root (kept — see REORGANIZATION_PLAN §5) |
 
 ---
 
@@ -1993,11 +1986,5 @@ The README and REORGANIZATION_PLAN describe the following paths that do not exis
 
 | Path | Documented intent |
 |---|---|
-| `domain/loading/` | README `domain/` section: loader **port interfaces** (aesthetic, MediaPipe, maps). REORGANIZATION_PLAN Phase 2a creates `domain/loading/ports.py` with protocols `ModelLoader`, `BatchSizer`, `MapsProvider`, `TrainingLoader`. Loader implementations live in `infrastructure/loading/` and `infrastructure/ml_models/` |
-| `tests/test_architecture.py` | README “Dependency Violation Test”; REORGANIZATION_PLAN Phase 5. AST-based layer-import scan; not created while test authoring is on hold |
-| `adapters/comfyui/services.py` | REORGANIZATION_PLAN Phase 2e: wiring module that builds `ScoringService` with infrastructure singletons; the node (`adapters/comfyui/nodes/aesthetic_score/node.py`) currently imports `ScoringService` and `verify_models_present` directly |
-| `infrastructure/persistence/` `SQLiteImagesRepository` / `SQLiteComparisonsRepository` | REORGANIZATION_PLAN Phase 2b: thin classes implementing `ImageRepository` / `ComparisonRepository` (defined in `domain/database/ports/repository_ports.py`) that delegate to the existing free functions in `images_repository.py` / `comparisons_repository.py` |
-| `application/data_transform/__init__.py`, `application/hyperparameters/__init__.py` | Exist as **directories** (namespace packages), not files; REORGANIZATION_PLAN Phase 1 defect (`§2.3` item 1) replaces them with real `__init__.py` files |
-| Empty shells (only `__init__.py`): `application/dto/`, `application/ports/`, `adapters/server/middleware/`, `adapters/server/tests/`, `domain/database/tests/` | REORGANIZATION_PLAN `§2.3` item 8; documented layout (README `application/dto` + `ports`, `adapters/server/middleware` + tests) awaiting content |
-| `pyrightconfig.json` | Static type checker config referenced by README/REORGANIZATION_PLAN — **missing on disk** (deleted in commit `7397304`); must be recreated (strict mode, exclude `comfyui_image_scorer_old/`) before the `pyright` gate can run (plan `§2.3` item 9) |
+| `tests/test_architecture.py` | README “Dependency Violation Test”. AST-based layer-import scan; not created while test authoring is on hold |
 | `comfyui_image_scorer_old/` | Legacy reference copy of the pre-reorganization codebase; REORGANIZATION_PLAN states it is removed manually by the user and is **excluded** from this index |

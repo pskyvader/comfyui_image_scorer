@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request
 from ....core.observability.logger import get_logger, ModuleLogger
 from ....core.configuration.settings import config
 from ....core.utilities.helpers import remove_models
-from ....core.utilities.tasks import get_task_status, set_task_output, start_task
+from ..tasks import get_task_status, set_task_output, start_task
 
 training_bp = Blueprint("training_v2", __name__, url_prefix="/api/training")
 logger: ModuleLogger = get_logger(__name__)
@@ -20,6 +20,7 @@ def reset_configs():
     from ....application.hyperparameters.hyperparameter_optimizer import (
         reset_hyperparameters,
     )
+
     reset_hyperparameters()
     result = jsonify({"status": "success"})
     return result
@@ -37,7 +38,10 @@ def run_hpo():
         from ....application.hyperparameters.hyperparameter_optimizer import (
             run_hpo_cycles,
         )
-        res = run_hpo_cycles(cycles=cycles, optimization_steps=optimization_steps, max_combos=max_combos)
+
+        res = run_hpo_cycles(
+            cycles=cycles, optimization_steps=optimization_steps, max_combos=max_combos
+        )
         set_task_output(
             tid,
             {
@@ -107,5 +111,6 @@ def update_training_config():
     return result
 
 
-def register_training_routes(app) -> None:
+def register_training_routes(app, deps) -> None:
+    app.extensions["server_deps"] = deps
     app.register_blueprint(training_bp)

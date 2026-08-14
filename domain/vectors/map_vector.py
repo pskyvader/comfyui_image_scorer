@@ -1,6 +1,6 @@
 from typing import Any
 
-from ...infrastructure.loading.maps_loader import maps_list
+from ...domain.loading import MapsProvider
 from ...core.configuration.settings import config
 from .helpers import get_value_from_entry
 
@@ -18,11 +18,12 @@ class MapVector:
     and the grown ``slot_size`` is persisted to disk via the AutoSave config.
     """
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, maps_provider: MapsProvider) -> None:
         self.name: str = name
         self.value_list: dict[str, dict[str, float]] = {}
         self.vector_list: dict[str, list[float]] = {}
         self.vector_config = config["vector"]["vectors"]
+        self.maps_provider = maps_provider
 
     def _config_index(self) -> int:
         return next(
@@ -59,10 +60,10 @@ class MapVector:
             current_value = get_value_from_entry(entry, self.name, alias)
             norm = self._normalize(current_value)
             for cat in norm:
-                index, size = maps_list.get_value(self.name, cat)
+                index, size = self.maps_provider.get_value(self.name, cat)
                 if index == -1:
                     if add_new_values:
-                        index, size = maps_list.add_value(self.name, cat)
+                        index, size = self.maps_provider.add_value(self.name, cat)
                     else:
                         continue
                 self._maybe_grow(size)
@@ -70,13 +71,13 @@ class MapVector:
         return self.value_list
 
     def create_vector_list(self) -> dict[str, list[float]]:
-        cats = maps_list.get_all_categories(self.name)
+        cats = self.maps_provider.get_all_categories(self.name)
         size = len(cats)
         target = self.vector_config[self._config_index()]["slot_size"]
         for id, norm in self.value_list.items():
             vec = [0.0] * size
             for cat, weight in norm.items():
-                index, _ = maps_list.get_value(self.name, cat)
+                index, _ = self.maps_provider.get_value(self.name, cat)
                 if index != -1:
                     vec[index] = weight
             if len(vec) > target:

@@ -1,8 +1,5 @@
-from collections import defaultdict
-
 from ...core.observability.logger import get_logger
-from ...infrastructure.persistence.images_repository import get_all_images
-from ...infrastructure.persistence.comparisons_repository import get_all_comparisons
+from ...domain.database.ports import ComparisonRepository, ImageRepository
 
 logger = get_logger(__name__)
 
@@ -26,9 +23,11 @@ def _distribute(values: list[float], bins: int) -> dict[str, int]:
     return buckets
 
 
-def run_stats() -> int:
-    images = get_all_images()
-    comparisons = get_all_comparisons()
+def run_stats(
+    image_repo: ImageRepository, comparison_repo: ComparisonRepository
+) -> int:
+    images = image_repo.get_all_images()
+    comparisons = comparison_repo.get_all_comparisons()
 
     scores = [img.get("score", 0) for img in images]
     mus = [img.get("rating_mu", 0) for img in images]
@@ -69,14 +68,18 @@ def run_stats() -> int:
     print()
     print("Top 10 images:")
     for img in top:
-        print(f"  {img['filename']:<40s} score={img.get('score', 0):.4f}  "
-              f"mu={img.get('rating_mu', 0):.2f}  sigma={img.get('rating_sigma', 0):.2f}  "
-              f"comps={img.get('comparison_count', 0)}")
+        print(
+            f"  {img['filename']:<40s} score={img.get('score', 0):.4f}  "
+            f"mu={img.get('rating_mu', 0):.2f}  sigma={img.get('rating_sigma', 0):.2f}  "
+            f"comps={img.get('comparison_count', 0)}"
+        )
     print()
     print("Bottom 10 images:")
     for img in bottom:
-        print(f"  {img['filename']:<40s} score={img.get('score', 0):.4f}  "
-              f"mu={img.get('rating_mu', 0):.2f}  sigma={img.get('rating_sigma', 0):.2f}  "
-              f"comps={img.get('comparison_count', 0)}")
+        print(
+            f"  {img['filename']:<40s} score={img.get('score', 0):.4f}  "
+            f"mu={img.get('rating_mu', 0):.2f}  sigma={img.get('rating_sigma', 0):.2f}  "
+            f"comps={img.get('comparison_count', 0)}"
+        )
 
     return 0

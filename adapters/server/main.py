@@ -5,9 +5,8 @@ import threading
 import time
 import os
 from pathlib import Path
-from typing import Any, Callable
 import argparse
-import logging
+from typing import Any
 
 from flask import Flask, send_from_directory, request, send_file, Response
 from urllib.parse import unquote
@@ -15,27 +14,106 @@ from urllib.parse import unquote
 from ...core.observability.logger import (
     get_logger,
     configure_package_logging,
-    SharedLogger,
-    set_log_filter_hook,
 )
 from ...core.configuration.settings import config
-from ...core.filesystem.paths import image_root, output_dir
+from ...core.filesystem.paths import image_root
+
+# Initialize core config before any core filesystem imports
+if config["image_root"] == "":
+    from folder_paths import get_output_directory
+    config["image_root"] = get_output_directory()
 from ...infrastructure.persistence.folder_organizer import ensure_tier_structure
 from ...infrastructure.persistence.path_handler import (
     get_ranked_root,
     compute_path_from_filename,
     find_image_path,
+    sync_image_metadata_to_json,
+    clear_folder_cache,
+    prewarm_folder_cache,
 )
-from ...infrastructure.persistence.images_repository import get_image as get_db_image
-from .processor import ImageProcessor
+from ...infrastructure.persistence.images_repository import (
+    SQLiteImagesRepository,
+    get_image as get_db_image,
+)
+from ...infrastructure.persistence.comparisons_repository import (
+    SQLiteComparisonsRepository,
+)
+from ...infrastructure.persistence.deduplicate_scored import deduplicate_scored
+from ...infrastructure.persistence.cleanup_orphans import cleanup_orphans
+from ...application.services.graph_service import CrystalGraph
+from ...application.services.image_processor import ImageProcessor, PathOps
+from ...infrastructure.ml_models.model_loader import model_loader
+from ...infrastructure.ml_models.batch_sizer import BatchSizer
+from ...infrastructure.loading.training_loader import training_loader
+from ...infrastructure.ml_models.training.model_trainer import model_trainer
+from ...infrastructure.loading.maps_loader import maps_list
+from .deps import ServerDeps
 
 logger = get_logger(__name__)
 
-image_processor = ImageProcessor(max_workers=int(config["ranking"]["max_workers"]))
+image_repo = SQLiteImagesRepository()
+comparison_repo = SQLiteComparisonsRepository()
+graph = CrystalGraph(image_repo=image_repo, comparison_repo=comparison_repo)
+
+
+class _PathResolverAdapter:
+    def sync_image_metadata_to_json(
+        self,
+        filename: str,
+        score: float,
+        rating_mu: float,
+        rating_sigma: float,
+        comparison_count: int,
+        all_comparisons: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        return sync_image_metadata_to_json(
+            filename=filename,
+            score=score,
+            rating_mu=rating_mu,
+            rating_sigma=rating_sigma,
+            comparison_count=comparison_count,
+            all_comparisons=all_comparisons,
+        )
+
+
+path_ops = PathOps(
+    ranked_root=get_ranked_root,
+    compute_path=compute_path_from_filename,
+    sync_metadata=sync_image_metadata_to_json,
+    clear_folder_cache=clear_folder_cache,
+    prewarm_folder_cache=prewarm_folder_cache,
+    deduplicate_scored=deduplicate_scored,
+    cleanup_orphans=cleanup_orphans,
+)
+
+image_processor = ImageProcessor(
+    max_workers=int(config["ranking"]["max_workers"]),
+    image_repo=image_repo,
+    comparison_repo=comparison_repo,
+    graph=graph,
+    path_ops=path_ops,
+)
+
+deps = ServerDeps(
+    image_repo=image_repo,
+    comparison_repo=comparison_repo,
+    path_resolver=_PathResolverAdapter(),
+    path_ops=path_ops,
+    graph=graph,
+    processor=image_processor,
+    model_loader=model_loader,
+    batch_sizer_factory=BatchSizer,
+    maps_provider=maps_list,
+    training_loader=training_loader,
+    model_trainer=model_trainer,
+    cleanup_orphans=cleanup_orphans,
+    deduplicate_scored=deduplicate_scored,
+)
 
 app = Flask(__name__, static_folder=None)
 app.extensions["image_processor"] = image_processor
 setattr(app, "image_processor", image_processor)
+app.extensions["server_deps"] = deps
 
 app.config["JSON_SORT_KEYS"] = False
 
@@ -60,13 +138,16 @@ SECTION_FRONTENDS = {
 
 SERVER_FRONTEND = Path(__file__).parent / "frontend"
 
-register_ranking_routes(app)
-register_gallery_routes(app)
-register_maps_routes(app)
-register_database_routes(app)
-register_data_transform_routes(app)
-register_training_routes(app)
-register_analysis_routes(app)
+register_ranking_routes(app, deps)
+register_gallery_routes(app, deps)
+register_maps_routes(app, deps)
+register_database_routes(app, deps)
+register_data_transform_routes(app, deps)
+register_training_routes(app, deps)
+register_analysis_routes(app, deps)
+
+# Rebuild graph once at startup (adapter composition root owns wiring)
+graph.rebuild_from_database()
 
 
 @app.route("/")
@@ -123,7 +204,6 @@ def serve_ranked_image(filepath: str):
 
 @app.route("/images/<path:filename>")
 def serve_image_by_name(filename: str):
-    ranked_root = get_ranked_root()
     fname = Path(unquote(filename)).name
 
     score_q = float(request.args["score"]) if "score" in request.args else None
@@ -163,7 +243,7 @@ def serve_html(filename: str) -> Response:
 
 
 @app.errorhandler(404)
-def not_found(e: Exception):
+def not_found(_e: Exception):
     return {"error": "Not found"}, 404
 
 
@@ -189,20 +269,6 @@ def scanner_task(img_root: str) -> None:
 
         logger.info(f"Added:{added}, Sleeping {sleep_time}s...")
         time.sleep(sleep_time)
-
-
-def start_background_scanner(img_root: str) -> None:
-    global scanner_thread
-    if scanner_thread:
-        logger.info(
-            f"[SCANNER] Scanner already running. Alive: {scanner_thread.is_alive()}"
-        )
-        return
-    scanner_thread = threading.Thread(
-        target=scanner_task, daemon=True, args=(img_root,)
-    )
-    scanner_thread.start()
-    logger.info("[SCANNER] Global image scanner started.")
 
 
 def startup_worker() -> None:

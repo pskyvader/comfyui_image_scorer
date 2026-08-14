@@ -21,20 +21,20 @@ from ...core.io.serialization import (
 from ...core.configuration.settings import config
 from ...domain.analysis.image_analysis import ImageAnalysis
 from ...domain.analysis.trueskill import replay_ratings, public_score_from_rating
+from ...domain.database.ports import ComparisonRepository
+from ...domain.loading import BatchSizerFactory, MapsProvider, ModelLoader
 from ...application.services.vector_list import VectorList
 from ...application.data_transform.config.maps import register_map_values
-from ...infrastructure.ml_models.model_loader import (
-    model_loader,
-    verify_models_present,
-)
-from ...infrastructure.ml_models.batch_sizer import BatchSizer
-from ...infrastructure.persistence.comparisons_repository import get_all_comparisons
 
 logger: ModuleLogger = get_logger(__name__)
-verify_models_present()
 
 
-def build_split_files(limit: int) -> dict[str, int]:
+def build_split_files(
+    limit: int,
+    model_loader: ModelLoader,
+    batch_sizer_factory: BatchSizerFactory,
+    maps_provider: MapsProvider,
+) -> dict[str, int]:
     logger.info("Starting image processing...")
 
     if not os.path.isdir(image_root):
@@ -45,7 +45,9 @@ def build_split_files(limit: int) -> dict[str, int]:
     max_workers = config["prepare"]["max_workers"]
 
     logger.debug("loading already-processed ids from split files...")
-    split_ids = VectorList([], read_only=False)
+    split_ids = VectorList(
+        [], read_only=False, model_loader=model_loader, batch_sizer_factory=batch_sizer_factory, maps_provider=maps_provider
+    )
     processed_files: set[str] | None = None
     for c in split_ids.sorted_vectors.values():
         ids = set(c["vector"].vector_list.keys())
@@ -72,13 +74,16 @@ def build_split_files(limit: int) -> dict[str, int]:
         return result
 
     logger.info("analyzing images ...")
-    image_analysis = ImageAnalysis(collected_data, model_loader, BatchSizer)
+    image_analysis = ImageAnalysis(collected_data, model_loader, batch_sizer_factory)
     processed_data = image_analysis.analyze_images_from_paths(batch_size, max_workers)
-    register_map_values(processed_data)
+    register_map_values(processed_data, maps_provider)
     logger.info(f"processed data:{len(processed_data)}. Creating vector list object...")
     vectors_list_parser = VectorList(
         processed_data,
         read_only=False,
+        model_loader=model_loader,
+        batch_sizer_factory=batch_sizer_factory,
+        maps_provider=maps_provider,
     )
 
     vectors_list_parser.create_vectors()
@@ -95,10 +100,20 @@ def build_split_files(limit: int) -> dict[str, int]:
     return summary
 
 
-def build_full_files() -> dict[str, Any]:
+def build_full_files(
+    model_loader: ModelLoader,
+    batch_sizer_factory: BatchSizerFactory,
+    maps_provider: MapsProvider,
+) -> dict[str, Any]:
     os.makedirs(vectors_dir, exist_ok=True)
 
-    vector_list = VectorList([], read_only=False)
+    vector_list = VectorList(
+        [],
+        read_only=False,
+        model_loader=model_loader,
+        batch_sizer_factory=batch_sizer_factory,
+        maps_provider=maps_provider,
+    )
 
     if not vector_list.unique_ids:
         logger.info("No split data found, skipping full file build.")
@@ -118,8 +133,10 @@ def build_full_files() -> dict[str, Any]:
     }
 
 
-def run_rebuild_scores_only() -> dict[str, Any]:
-    rows = get_all_comparisons()
+def run_rebuild_scores_only(
+    comparison_repo: ComparisonRepository,
+) -> dict[str, Any]:
+    rows = comparison_repo.get_all_comparisons()
 
     comparisons = [
         {

@@ -1,5 +1,5 @@
 import os
-from ..configuration.settings import config, PROJECT_ROOT
+from ..configuration.settings import config
 from pathlib import Path
 
 root: Path = Path(__file__).parents[2]
@@ -9,21 +9,15 @@ maps_dir: str = os.path.join(output_dir, "maps")
 cache_file: str = os.path.join(output_dir, "cache.db")
 
 
-def _resolve_image_root() -> str:
-    if config["image_root"] != "":
-        return config["image_root"]
-    from folder_paths import get_output_directory
-
-    return get_output_directory()
-
-
-image_root: str = _resolve_image_root()
+if config["image_root"] == "":
+    raise RuntimeError(
+        "core.filesystem.paths: image_root not configured. "
+        "Adapter composition root must set config['image_root'] before importing core."
+    )
+image_root: str = config["image_root"]
 image_root_processed: str = os.path.join(image_root, "scored")
 
 vectors_size_file: str = os.path.join(output_dir, "image_vector_size.json")
-hyperparameters_statistics: str = os.path.join(
-    output_dir, "hyperparameters_statistics.json"
-)
 
 vectors_dir: str = os.path.join(output_dir, "vectors")
 split_dir: str = os.path.join(vectors_dir, "split")

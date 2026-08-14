@@ -1,7 +1,7 @@
 import numpy as np
 from numpy import typing as npt
 import os
-from typing import Any, Iterator
+from typing import Any
 from pathlib import Path
 import pickle
 import base64
@@ -20,7 +20,6 @@ from ...core.filesystem.paths import (
     comparisons_data,
     feature_rule,
     comparison_rule,
-    index_file,
     comparisons_file,
 )
 from ...core.utilities.helpers import remove_directory

@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import time
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Callable
 
 from tqdm import tqdm
 
@@ -26,48 +26,47 @@ from ...domain.analysis.trueskill import (
     public_score_from_rating,
     replay_ratings,
 )
-from ...infrastructure.persistence.images_repository import (
-    add_image,
-    clear_all_images,
-    get_all_images,
-    get_image as db_get_image,
-    get_image_count,
-    reset_all_image_ratings,
-    update_image_rating_state,
-    update_image_tags,
-)
-from ...infrastructure.persistence.comparisons_repository import (
-    add_historical_comparison,
-    clear_all_comparisons,
-    get_all_comparisons,
-    clean_comparisons,
-)
-from ...infrastructure.persistence.path_handler import (
-    clear_folder_cache,
-    compute_path_from_filename,
-    get_ranked_root,
-    prewarm_folder_cache,
-    sync_image_metadata_to_json,
-)
-from ...infrastructure.persistence.deduplicate_scored import deduplicate_scored
-from ...infrastructure.persistence.cleanup_orphans import cleanup_orphans
-
-
-from ...application.services.graph_service import crystal_graph
+from ...domain.database.ports import ComparisonRepository, ImageRepository
 from ...domain.comparison.algorithm.phase_order import reset_skip
+from .graph_service import CrystalGraph
 
 logger: ModuleLogger = get_logger(__name__)
+
+
+@dataclass
+class PathOps:
+    """Infrastructure file/path operations injected by the composition root."""
+
+    ranked_root: Callable[[], Path]
+    compute_path: Callable[[str, float], Path]
+    sync_metadata: Callable[..., bool]
+    clear_folder_cache: Callable[[], None]
+    prewarm_folder_cache: Callable[[Path], None]
+    deduplicate_scored: Callable[[Path | None, bool, int], int]
+    cleanup_orphans: Callable[[Path | None, bool, bool], int]
 
 
 class ImageProcessor:
     """Process uninitialized images with parallel workers."""
 
-    def __init__(self, max_workers: int):
+    def __init__(
+        self,
+        max_workers: int,
+        image_repo: ImageRepository,
+        comparison_repo: ComparisonRepository,
+        graph: CrystalGraph,
+        path_ops: PathOps,
+    ) -> None:
         ranking_conf = config["ranking"]
         self.max_workers = max_workers
         self.batch_size = int(ranking_conf["batch_size"])
         self.default_score = float(ranking_conf["default_score"])
         self.reserve_count = int(ranking_conf["reserve_count"])
+
+        self._image_repo = image_repo
+        self._comparison_repo = comparison_repo
+        self._graph = graph
+        self._path_ops = path_ops
 
         self.processed_lock = Lock()
         self.processed_images: set[str] = set()
@@ -167,7 +166,7 @@ class ImageProcessor:
             json_data, default_score=self.default_score, filename=filename
         )
 
-        db_entry = db_get_image(filename)
+        db_entry = self._image_repo.get_image(filename)
         if db_entry:
             chosen_score = float(db_entry["score"])
             cleaned_json["score"] = round(chosen_score, 3)
@@ -186,7 +185,7 @@ class ImageProcessor:
             json.dump(cleaned_json, handle, indent=2, ensure_ascii=False)
         os.replace(str(tmp_json), str(json_path))
 
-        dest_image = compute_path_from_filename(filename, chosen_score)
+        dest_image = self._path_ops.compute_path(filename, chosen_score)
         dest_image.parent.mkdir(parents=True, exist_ok=True)
         dest_json = dest_image.with_suffix(".json")
 
@@ -242,7 +241,7 @@ class ImageProcessor:
         )
 
     def sync_processed_images_from_db(self) -> None:
-        all_imgs = get_all_images()
+        all_imgs = self._image_repo.get_all_images()
         with self.processed_lock:
             self.processed_images.clear()
             for img in all_imgs:
@@ -255,7 +254,7 @@ class ImageProcessor:
     def get_fast_total_count(self, source_dir: str) -> int:
         source_path = Path(source_dir).resolve()
         count = 0
-        exclude_roots = {get_ranked_root().resolve(), Path(output_dir).resolve()}
+        exclude_roots = {self._path_ops.ranked_root().resolve(), Path(output_dir).resolve()}
 
         for root, dirs, files in os.walk(source_path):
             root_path = Path(root).resolve()
@@ -273,7 +272,7 @@ class ImageProcessor:
             return {"status": "skipped", "message": "Already processing"}
 
         self.is_processing = True
-        db_count = get_image_count()
+        db_count = self._image_repo.get_image_count()
         total_goal = getattr(self, "total_discovered", 0)
 
         if self.total_discovered == 0:
@@ -282,7 +281,7 @@ class ImageProcessor:
         source_path = Path(source_dir).resolve()
         exclude_roots = [
             Path(image_root_processed).resolve(),
-            get_ranked_root().resolve(),
+            self._path_ops.ranked_root().resolve(),
             Path(output_dir).resolve(),
         ]
         candidates: list[Path] = []
@@ -340,7 +339,7 @@ class ImageProcessor:
                         stats["processed"] += 1
                         db_name = dest_name or filename
                         if score is not None and not db_exists:
-                            if add_image(
+                            if self._image_repo.add_image(
                                 filename=db_name,
                                 score=score,
                                 comparison_count=0,
@@ -364,17 +363,19 @@ class ImageProcessor:
 
     def rebuild_database_from_ranked(self) -> None:
         """Rebuild or repair the ranking database from ranked files and companion JSON."""
-        ranked_root = get_ranked_root()
+        ranked_root = self._path_ops.ranked_root()
         if not ranked_root.exists():
             return
 
         self.reorganize_folder_structure()
 
-        ranked_root = get_ranked_root()
-        deduplicate_scored(root=ranked_root)
-        cleanup_orphans(root=ranked_root)
-        clear_all_comparisons()
-        clear_all_images()
+        ranked_root = self._path_ops.ranked_root()
+        self._path_ops.deduplicate_scored(root=ranked_root, dry_run=False, limit=0)
+        self._path_ops.cleanup_orphans(
+            root=ranked_root, dry_run=False, delete_enabled=True
+        )
+        self._comparison_repo.clear_all_comparisons()
+        self._image_repo.clear_all_images()
 
         dir_file_pairs = discover_files(str(ranked_root))
 
@@ -389,7 +390,7 @@ class ImageProcessor:
             cleaned = self.clean_json_metadata(
                 entry, default_score=self.default_score, filename=Path(img_path).name
             )
-            add_image(
+            self._image_repo.add_image(
                 filename=Path(img_path).name,
                 score=self.default_score,
                 comparison_count=0,
@@ -398,7 +399,7 @@ class ImageProcessor:
                 rating_sigma=INITIAL_UNCERTAINTY,
             )
 
-        valid_filenames = {img["filename"] for img in get_all_images()}
+        valid_filenames = {img["filename"] for img in self._image_repo.get_all_images()}
 
         with tqdm(
             total=len(all_entries),
@@ -415,9 +416,9 @@ class ImageProcessor:
                 prompt_tags = cleaned["prompt_tags"] or self._extract_prompt_tags(
                     cleaned
                 )
-                existing = db_get_image(filename)
+                existing = self._image_repo.get_image(filename)
                 if existing and prompt_tags and existing["prompt_tags"] != prompt_tags:
-                    update_image_tags(filename, prompt_tags)
+                    self._image_repo.update_image_tags(filename, prompt_tags)
 
                 if filename in valid_filenames:
                     history = entry.get("comparison_history")
@@ -432,7 +433,7 @@ class ImageProcessor:
                             winner_file = filename if comp["winner"] else other
                             if winner_file not in valid_filenames:
                                 continue
-                            add_historical_comparison(
+                            self._comparison_repo.add_historical_comparison(
                                 filename_a=filename,
                                 filename_b=other,
                                 winner=winner_file,
@@ -443,12 +444,12 @@ class ImageProcessor:
 
                 pbar.update(1)
 
-        clean_comparisons()
+        self._comparison_repo.clean_comparisons()
 
         self._recompute_ratings_from_database_history()
 
-        all_comparisons = get_all_comparisons()
-        all_images = get_all_images()
+        all_comparisons = self._comparison_repo.get_all_comparisons()
+        all_images = self._image_repo.get_all_images()
 
         filename_to_path: dict[str, Path] = {}
         filename_to_entry: dict[str, dict[str, Any]] = {}
@@ -466,10 +467,10 @@ class ImageProcessor:
         for img in all_images:
             filename_to_image_data[img["filename"]] = img
 
-        prewarm_folder_cache(ranked_root)
+        self._path_ops.prewarm_folder_cache(ranked_root)
 
         sync_worker = partial(
-            sync_image_metadata_to_json,
+            self._path_ops.sync_metadata,
             filename_to_path=filename_to_path,
             filename_to_comparisons=filename_to_comparisons,
             filename_to_image_data=filename_to_image_data,
@@ -496,13 +497,13 @@ class ImageProcessor:
             unit="img",
         )
 
-        clear_folder_cache()
+        self._path_ops.clear_folder_cache()
         self.sync_processed_images_from_db()
 
     def _recompute_ratings_from_database_history(self) -> int:
-        reset_all_image_ratings(score=self.default_score)
+        self._image_repo.reset_all_image_ratings(score=self.default_score)
 
-        replayed = replay_ratings(get_all_comparisons())
+        replayed = replay_ratings(self._comparison_repo.get_all_comparisons())
 
         updated = 0
         with tqdm(
@@ -513,7 +514,7 @@ class ImageProcessor:
             delay=3.0,
         ) as pbar:
             for filename, (rating, count) in replayed.items():
-                if update_image_rating_state(
+                if self._image_repo.update_image_rating_state(
                     filename=filename,
                     score=public_score_from_rating(rating),
                     rating_mu=rating.mu_skill,
@@ -527,7 +528,7 @@ class ImageProcessor:
         return updated
 
     def reorganize_folder_structure(self) -> None:
-        ranked_root = get_ranked_root()
+        ranked_root = self._path_ops.ranked_root()
         if not ranked_root.exists():
             return
 
@@ -557,7 +558,7 @@ class ImageProcessor:
                     with open(json_path, "r", encoding="utf-8") as handle:
                         meta = json.load(handle)
                     score = float(meta["score"])
-                target_path = compute_path_from_filename(loose_file.name, score)
+                target_path = self._path_ops.compute_path(loose_file.name, score)
                 if target_path == loose_file:
                     continue
                 moves.append((loose_file, target_path))
@@ -605,5 +606,5 @@ class ImageProcessor:
                 self.recent_chains.popleft()
 
         if should_clear:
-            crystal_graph.rebuild_from_database()
+            self._graph.rebuild_from_database()
             reset_skip()

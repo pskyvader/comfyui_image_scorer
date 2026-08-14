@@ -12,12 +12,8 @@ from ...domain.data_transformation.data_transformer import (
     DataTransformer,
     list_filtered_features,
 )
-from ...infrastructure.loading.training_loader import training_loader
-from ...infrastructure.ml_models.training.model_trainer import (
-    model_trainer,
-    grid_base,
-    around,
-)
+from ...domain.loading import TrainingLoader
+from ...domain.training.grid import around, grid_base
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -87,7 +83,9 @@ def crossover_config(cfg1: dict[str, Any], cfg2: dict[str, Any]) -> dict[str, An
 def _load_state() -> dict[str, Any]:
     training_config = config["training"]
     return {
-        "configs": [dict(training_config[f"top{i}"]) for i in range(1, NUM_CONFIGS + 1)],
+        "configs": [
+            dict(training_config[f"top{i}"]) for i in range(1, NUM_CONFIGS + 1)
+        ],
         "step": 0,
         "cycle": 0,
         "used_keys": (
@@ -116,7 +114,9 @@ def reset_hyperparameters() -> dict[str, Any]:
     return state
 
 
-def load_training_data(filter_comparisons: bool) -> tuple[np.ndarray, np.ndarray]:
+def load_training_data(
+    filter_comparisons: bool, training_loader: TrainingLoader, model_trainer: Any
+) -> tuple[np.ndarray, np.ndarray]:
     """Load keyed vectors/scores and compress unused features. When
     filter_comparisons is True, keep only files with enough comparisons
     (scores replayed on the kept subset); otherwise keep every scored file
@@ -180,10 +180,10 @@ def load_training_data(filter_comparisons: bool) -> tuple[np.ndarray, np.ndarray
 
 
 def _evaluate_config(
-    cfg: dict[str, Any], X: np.ndarray, y: np.ndarray
+    cfg: dict[str, Any], X: np.ndarray, y: np.ndarray, model_trainer: Any
 ) -> tuple[float, float, str]:
     _, metrics = model_trainer.train_model(
-        config_dict=cfg, X=X, y=y, enable_plotting=False
+        config_dict=cfg, X=X, y=y
     )
     return (
         float(metrics["score"]),
@@ -198,6 +198,7 @@ def _run_step_on_config(
     X: np.ndarray,
     y: np.ndarray,
     max_combos: int,
+    model_trainer: Any,
 ) -> tuple[dict[str, Any], list[str]]:
     all_keys = list(grid_base.keys())
     random.shuffle(all_keys)
@@ -237,7 +238,7 @@ def _run_step_on_config(
     for i, combo in enumerate(combos):
         logger.info("---" * 10)
         merged = {**cfg, **combo}
-        score, t_time, primary_metric = _evaluate_config(merged, X, y)
+        score, t_time, primary_metric = _evaluate_config(merged, X, y, model_trainer)
         directions = model_trainer.METRIC_DIRECTIONS.get(training_objective, {})
         higher_is_better = directions.get(primary_metric, True)
 
@@ -263,7 +264,9 @@ def _run_step_on_config(
         )
 
     if improved:
-        logger.info("    Config improved: score=%.6f, time=%.2fs", best_score, best_time)
+        logger.info(
+            "    Config improved: score=%.6f, time=%.2fs", best_score, best_time
+        )
     else:
         logger.info("    Config unchanged: best score remains %s", best_score)
         used_keys.append(chosen_key)
@@ -277,6 +280,7 @@ def _run_step_on_config(
 def hpo_cycle(
     X: np.ndarray,
     y: np.ndarray,
+    model_trainer: Any,
     optimization_steps: int = 100,
     max_combos: int = 4,
     cycle: int = 0,
@@ -323,7 +327,7 @@ def hpo_cycle(
             logger.info(" %s", cfg)
 
             configs[idx], used_keys = _run_step_on_config(
-                configs[idx], used_keys, X, y, max_combos
+                configs[idx], used_keys, X, y, max_combos, model_trainer
             )
             state["step"] = i + 1
             state["configs"] = configs
@@ -376,7 +380,9 @@ def hpo_cycle(
         }
         _save_state(new_state)
 
-        logger.info("\nCycle %s complete. Trigger again to start next cycle.", cycle + 1)
+        logger.info(
+            "\nCycle %s complete. Trigger again to start next cycle.", cycle + 1
+        )
         logger.info("=" * 80 + "\n")
         return new_state
     finally:
@@ -387,6 +393,8 @@ def run_hpo_cycles(
     cycles: int | None = None,
     optimization_steps: int | None = None,
     max_combos: int | None = None,
+    training_loader: TrainingLoader | None = None,
+    model_trainer: Any = None,
 ) -> list[dict[str, Any]]:
     """Run multiple HPO cycles. Each cycle runs optimization_steps steps
     over the top1..top5 configs and breeds the next generation."""
@@ -397,14 +405,25 @@ def run_hpo_cycles(
         optimization_steps = int(training_config["optimization_steps"])
     if max_combos is None:
         max_combos = int(training_config["max_combos"])
+    if training_loader is None or model_trainer is None:
+        raise RuntimeError("training_loader and model_trainer must be provided")
 
-    X, y = load_training_data(filter_comparisons=True)
+    X, y = load_training_data(
+        filter_comparisons=True,
+        training_loader=training_loader,
+        model_trainer=model_trainer,
+    )
 
     results = []
     for i in range(cycles):
         logger.info("[run_hpo_cycles] Starting cycle %s/%s", i + 1, cycles)
         res = hpo_cycle(
-            X, y, optimization_steps=optimization_steps, max_combos=max_combos, cycle=i
+            X,
+            y,
+            model_trainer=model_trainer,
+            optimization_steps=optimization_steps,
+            max_combos=max_combos,
+            cycle=i,
         )
         results.append(res)
     return results

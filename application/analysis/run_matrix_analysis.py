@@ -1,4 +1,4 @@
-from ...core.io.serialization import load_single_jsonl, write_single_jsonl
+from ...core.io.serialization import load_single_jsonl
 from ...core.filesystem.paths import vectors_file, text_data_file, maps_dir
 from ...core.observability.logger import get_logger
 from pathlib import Path

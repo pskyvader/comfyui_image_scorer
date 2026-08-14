@@ -2,11 +2,10 @@
 
 import time
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify
 
 from ....core.observability.logger import get_logger, ModuleLogger
-from ....infrastructure.persistence.images_repository import get_all_images
-from ....application.services.graph_service import crystal_graph
+from ..deps import ServerDeps, get_server_deps
 
 maps_bp = Blueprint("maps_v2", __name__, url_prefix="/api/maps")
 logger: ModuleLogger = get_logger(__name__)
@@ -16,12 +15,13 @@ logger: ModuleLogger = get_logger(__name__)
 def get_graph_data():
     _start = time.perf_counter()
     try:
-        if crystal_graph.is_cache_stale():
-            crystal_graph.rebuild_from_database()
+        deps = get_server_deps()
+        if deps.graph.is_cache_stale():
+            deps.graph.rebuild_from_database()
 
-        stats = crystal_graph.get_graph_stats()
+        stats = deps.graph.get_graph_stats()
         node_to_height: dict[str, int] = {}
-        for proxy, _node_list in crystal_graph.get_all_chains():
+        for proxy, _node_list in deps.graph.get_all_chains():
             for node_proxy in proxy.nodes:
                 filename = node_proxy.filename
                 if (
@@ -30,9 +30,9 @@ def get_graph_data():
                 ):
                     node_to_height[filename] = proxy.length
 
-        img_dict = {img["filename"]: img for img in get_all_images()}
+        img_dict = {img["filename"]: img for img in deps.image_repo.get_all_images()}
         nodes = []
-        for node in crystal_graph.get_all_nodes():
+        for node in deps.graph.get_all_nodes():
             filename = node.filename
             img_data = img_dict.get(filename)
             comp = node.get_component()
@@ -52,14 +52,14 @@ def get_graph_data():
 
         edges = [
             {"source": winner.filename, "target": loser.filename, "weight": 1.0}
-            for winner, loser in crystal_graph.get_all_links()
+            for winner, loser in deps.graph.get_all_links()
         ]
-        all_components = crystal_graph.get_all_components()
+        all_components = deps.graph.get_all_components()
         component_members = {
             comp.id: [n.filename for n in comp.nodes] for comp in all_components
         }
         chains = []
-        for chain_proxy, _ in crystal_graph.get_all_chains():
+        for chain_proxy, _ in deps.graph.get_all_chains():
             comp = chain_proxy.get_component()
             chains.append(
                 {
@@ -90,5 +90,6 @@ def get_graph_data():
         return result
 
 
-def register_maps_routes(app) -> None:
+def register_maps_routes(app, deps: ServerDeps) -> None:
+    app.extensions["server_deps"] = deps
     app.register_blueprint(maps_bp)

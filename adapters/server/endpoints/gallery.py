@@ -8,8 +8,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from ....core.observability.logger import get_logger, ModuleLogger
-from ....infrastructure.persistence.comparisons_repository import get_all_comparisons
-from ....infrastructure.persistence.images_repository import get_all_images, get_image
+from ..deps import ServerDeps, get_server_deps
 
 gallery_bp = Blueprint("gallery_v2", __name__, url_prefix="/api/gallery")
 logger: ModuleLogger = get_logger(__name__)
@@ -18,12 +17,13 @@ logger: ModuleLogger = get_logger(__name__)
 @gallery_bp.route("/images", methods=["GET"])
 def list_images():
     _start = time.perf_counter()
+    deps = get_server_deps()
     page = max(request.args.get("page", 1, type=int), 1)
     per_page = request.args.get("per_page", 20, type=int)
     if per_page < 1 or per_page > 100:
         per_page = 20
 
-    scored = get_all_images()
+    scored = deps.image_repo.get_all_images()
     score_min = request.args.get("score_min", 0.0, type=float)
     score_max = request.args.get("score_max", 1.0, type=float)
     comparisons_min = request.args.get("comparisons_min", 0, type=int)
@@ -110,7 +110,7 @@ def list_images():
 
 @gallery_bp.route("/image/<path:filename>", methods=["GET"])
 def get_image_info(filename: str):
-    img = get_image(filename)
+    img = get_server_deps().image_repo.get_image(filename)
     if not img:
         result = jsonify({"error": "Image not found"}), 404
         return result
@@ -134,7 +134,7 @@ def search_images():
     score_max = request.args.get("score_max", 1.0, type=float)
 
     results = []
-    for img in get_all_images():
+    for img in get_server_deps().image_repo.get_all_images():
         if query and query not in img["filename"].lower():
             continue
         if not (score_min <= float(img["score"]) <= score_max):
@@ -153,15 +153,16 @@ def search_images():
 
 @gallery_bp.route("/history/<path:filename>", methods=["GET"])
 def get_image_history(filename: str):
+    deps = get_server_deps()
     wins = []
     losses = []
-    for comp in get_all_comparisons():
+    for comp in deps.comparison_repo.get_all_comparisons():
         if comp["filename_a"] != filename and comp["filename_b"] != filename:
             continue
         opponent = (
             comp["filename_b"] if comp["filename_a"] == filename else comp["filename_a"]
         )
-        opponent_data = get_image(opponent)
+        opponent_data = deps.image_repo.get_image(opponent)
         item = {
             "opponent": opponent,
             "opponent_score": float(opponent_data["score"]) if opponent_data else 0.5,
@@ -183,5 +184,6 @@ def get_image_history(filename: str):
     return result
 
 
-def register_gallery_routes(app) -> None:
+def register_gallery_routes(app, deps: ServerDeps) -> None:
+    app.extensions["server_deps"] = deps
     app.register_blueprint(gallery_bp)

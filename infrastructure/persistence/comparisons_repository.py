@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from ...core.observability.logger import ModuleLogger, get_logger
@@ -140,36 +139,6 @@ def clear_all_comparisons() -> int:
         return max(int(cur.rowcount or 0), 0)
 
 
-def get_recent_comparisons(
-    filename: str, days: int = 30, limit: int = 100
-) -> list[dict[str, Any]]:
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT * FROM comparisons
-            WHERE (filename_a=? OR filename_b=?)
-            AND timestamp > ?
-            ORDER BY timestamp DESC, id DESC
-            LIMIT ?
-            """,
-            (filename, filename, cutoff_date.isoformat(), limit),
-        ).fetchall()
-        return [dict(row) for row in rows]
-
-
-def get_comparison_count(filename: str) -> int:
-    with get_db_connection() as conn:
-        row = conn.execute(
-            """
-            SELECT COUNT(*) as cnt FROM comparisons
-            WHERE filename_a=? OR filename_b=?
-            """,
-            (filename, filename),
-        ).fetchone()
-        return int(row["cnt"]) if row else 0
-
-
 def get_total_comparisons() -> int:
     with get_db_connection() as conn:
         row = conn.execute("SELECT COUNT(*) as cnt FROM comparisons").fetchone()
@@ -217,43 +186,6 @@ def get_images_with_only_losses() -> list[str]:
             SELECT DISTINCT winner FROM comparisons
             """).fetchall()
         return [str(row["filename"]) for row in rows]
-
-
-def delete_comparisons_for_image(filename: str) -> int:
-    with get_db_connection() as conn:
-        cur = conn.execute(
-            "DELETE FROM comparisons WHERE filename_a=? OR filename_b=?",
-            (filename, filename),
-        )
-        conn.commit()
-        return max(int(cur.rowcount or 0), 0)
-
-
-def delete_comparison_by_id(comp_id: int) -> int:
-    with get_db_connection() as conn:
-        cur = conn.execute("DELETE FROM comparisons WHERE id = ?", (int(comp_id),))
-        conn.commit()
-        return max(int(cur.rowcount or 0), 0)
-
-
-def delete_comparison(filename_a: str, filename_b: str, winner: str) -> int:
-    filename_a = str(filename_a)
-    filename_b = str(filename_b)
-    winner = str(winner)
-    if winner not in (filename_a, filename_b):
-        logger.error("Winner must be one of the compared images")
-        return 0
-    canon_a, canon_b = _canonicalize_pair(filename_a, filename_b)
-    with get_db_connection() as conn:
-        cur = conn.execute(
-            """
-            DELETE FROM comparisons
-            WHERE filename_a=? AND filename_b=? AND winner=?
-            """,
-            (canon_a, canon_b, winner),
-        )
-        conn.commit()
-        return max(int(cur.rowcount or 0), 0)
 
 
 def clean_comparisons() -> dict[str, int]:
@@ -354,3 +286,69 @@ def clean_comparisons() -> dict[str, int]:
         "contradictions_removed": contradictions_removed,
         "kept": len(kept_rows),
     }
+
+
+class SQLiteComparisonsRepository:
+    """Injected implementation of the ComparisonRepository port."""
+
+    def add_comparison(
+        self,
+        filename_a: str,
+        filename_b: str,
+        winner: str,
+        weight: float = 1.0,
+        transitive_depth: int = 0,
+        timestamp: str | None = None,
+    ) -> int:
+        return add_comparison(
+            filename_a=filename_a,
+            filename_b=filename_b,
+            winner=winner,
+            weight=weight,
+            transitive_depth=transitive_depth,
+            timestamp=timestamp,
+        )
+
+    def add_historical_comparison(
+        self,
+        filename_a: str,
+        filename_b: str,
+        winner: str,
+        timestamp: str,
+        weight: float = 1.0,
+        transitive_depth: int = 0,
+    ) -> int:
+        return add_historical_comparison(
+            filename_a=filename_a,
+            filename_b=filename_b,
+            winner=winner,
+            timestamp=timestamp,
+            weight=weight,
+            transitive_depth=transitive_depth,
+        )
+
+    def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool:
+        return comparison_exists_for_pair(filename_a, filename_b)
+
+    def get_all_comparisons(
+        self, weight: float | None = None
+    ) -> list[dict[str, Any]]:
+        return get_all_comparisons(weight=weight)
+
+    def get_total_comparisons(self) -> int:
+        return get_total_comparisons()
+
+    def get_skipped_comparison_count(self) -> int:
+        return get_skipped_comparison_count()
+
+    def clean_comparisons(self) -> dict[str, int]:
+        return clean_comparisons()
+
+    def get_images_with_only_wins(self) -> list[str]:
+        return get_images_with_only_wins()
+
+    def get_images_with_only_losses(self) -> list[str]:
+        return get_images_with_only_losses()
+
+    def clear_all_comparisons(self) -> int:
+        return clear_all_comparisons()
