@@ -45,6 +45,8 @@ def _describe_one(node: NodeProxy, cg: Any) -> dict[str, Any]:
         "rating_mu": round(float(node.mu_skill), 4),
         "rating_sigma": round(float(node.sigma_uncertainty), 4),
         "comparison_count": int(node.comparison_count),
+        "wins": len(node.get_links(worse_than=True)),
+        "losses": len(node.get_links(better_than=True)),
         "chain_length": chain_length,
         "chain_id": chain_id,
         "chain_main_members": chain_main_members,
@@ -70,8 +72,9 @@ def describe_pair(
 ) -> dict[str, Any]:
     """Return phase-specific pair context built from the two nodes and config.
 
-    ``phase_index`` is an int (0=seed, 1=anchor, 2=collapsible, 3=chain_merge,
-    4=refine, 5=fallback). The int->label mapping lives on the frontend.
+    ``phase_index`` is an int (0=seed, 1=anchor, 2=collapsible,
+    3=single_win_loss, 4=refine, 5=chain_merge, 6=fallback). The int->label
+    mapping lives on the frontend.
     """
     from . import graph_helpers
     from ..constants import MIN_CHAIN_THRESHOLD
@@ -88,6 +91,9 @@ def describe_pair(
     all_nodes = cg.get_all_nodes()
     sigma_above = 0
     sigma_below = 0
+    single_win_count = 0
+    single_loss_count = 0
+    ready_count = 0
     for n in all_nodes:
         c = int(n.comparison_count)
         level_counts[c] = level_counts.get(c, 0) + 1
@@ -95,6 +101,14 @@ def describe_pair(
             sigma_above += 1
         else:
             sigma_below += 1
+        wins = len(n.get_links(worse_than=True))
+        losses = len(n.get_links(better_than=True))
+        if wins == 1:
+            single_win_count += 1
+        if losses == 1:
+            single_loss_count += 1
+        if wins > 1 and losses > 1:
+            ready_count += 1
 
     rating_a = Rating(mu_skill=node_a.mu_skill, sigma_uncertainty=node_a.sigma_uncertainty)
     rating_b = Rating(mu_skill=node_b.mu_skill, sigma_uncertainty=node_b.sigma_uncertainty)
@@ -131,5 +145,8 @@ def describe_pair(
         "sigma_threshold": sigma_threshold,
         "sigma_above_threshold": sigma_above,
         "sigma_below_threshold": sigma_below,
+        "single_win_count": single_win_count,
+        "single_loss_count": single_loss_count,
+        "ready_count": ready_count,
         "probability_a_beats_b": round(probability_a_beats_b, 4),
     }

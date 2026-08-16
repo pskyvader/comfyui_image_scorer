@@ -13,9 +13,9 @@ from contextlib import redirect_stdout, redirect_stderr
 from typing import Any, Callable
 
 from ...core.observability.logger import (
-    CaptureStream,
-    SharedLogger,
-    _TaskOutput,
+    # CaptureStream,
+    # SharedLogger,
+    # _TaskOutput,
     get_logger,
 )
 
@@ -26,43 +26,43 @@ _TASK_LOCK = threading.Lock()
 _TASK_CANCEL: set[str] = set()
 
 
-def _run_captured(
-    task_id: str, fn: Callable[..., Any], *args: Any, **kwargs: Any
-) -> None:
-    lines: list[str] = []
+# def _run_captured(
+#     task_id: str, fn: Callable[..., Any], *args: Any, **kwargs: Any
+# ) -> None:
+#     lines: list[str] = []
 
-    with _TASK_LOCK:
-        info = _TASK_OUTPUT[task_id]
-        info["_log"] = lines
+#     with _TASK_LOCK:
+#         info = _TASK_OUTPUT[task_id]
+#         info["_log"] = lines
 
-    original_stdout = sys.stdout
-    original_stderr = sys.stderr
+#     original_stdout = sys.stdout
+#     original_stderr = sys.stderr
 
-    cap_stdout = CaptureStream(lines, original_stdout, task_id=task_id)
-    cap_stderr = CaptureStream(lines, original_stderr, task_id=task_id)
+#     cap_stdout = CaptureStream(lines, original_stdout, task_id=task_id)
+#     cap_stderr = CaptureStream(lines, original_stderr, task_id=task_id)
 
-    if SharedLogger.frontend_enabled:
-        _TaskOutput.register_buffer(task_id, lines)
+#     if SharedLogger.frontend_enabled:
+#         _TaskOutput.register_buffer(task_id, lines)
 
-    try:
-        with _TaskOutput.context(task_id):
-            with redirect_stdout(cap_stdout), redirect_stderr(cap_stderr):
-                if task_id in _TASK_CANCEL:
-                    if SharedLogger.frontend_enabled:
-                        _TaskOutput.write(task_id, "Task cancelled before start")
-                    else:
-                        logger.warning("Task %s cancelled before start", task_id)
-                else:
-                    fn(task_id, *args, **kwargs)
-                    with _TASK_LOCK:
-                        info = _TASK_OUTPUT[task_id]
-                        if info["status"] == "running":
-                            info["status"] = "done"
-                            info["result"] = {"message": "completed"}
-    finally:
-        cap_stdout._flush_remaining()
-        cap_stderr._flush_remaining()
-        _TaskOutput.unregister_buffer(task_id)
+#     try:
+#         with _TaskOutput.context(task_id):
+#             with redirect_stdout(cap_stdout), redirect_stderr(cap_stderr):
+#                 if task_id in _TASK_CANCEL:
+#                     if SharedLogger.frontend_enabled:
+#                         _TaskOutput.write(task_id, "Task cancelled before start")
+#                     else:
+#                         logger.warning("Task %s cancelled before start", task_id)
+#                 else:
+#                     fn(task_id, *args, **kwargs)
+#                     with _TASK_LOCK:
+#                         info = _TASK_OUTPUT[task_id]
+#                         if info["status"] == "running":
+#                             info["status"] = "done"
+#                             info["result"] = {"message": "completed"}
+#     finally:
+#         cap_stdout._flush_remaining()
+#         cap_stderr._flush_remaining()
+#         _TaskOutput.unregister_buffer(task_id)
 
 
 def start_task(
@@ -75,18 +75,18 @@ def start_task(
             "status": "running",
             "ts": time.time(),
         }
-    if SharedLogger.frontend_enabled:
-        threading.Thread(
-            target=_run_captured,
-            args=(task_id, fn, *args),
-            daemon=True,
-        ).start()
-    else:
-        threading.Thread(
-            target=fn,
-            args=(task_id, *args),
-            daemon=True,
-        ).start()
+    # if SharedLogger.frontend_enabled:
+    #     threading.Thread(
+    #         target=_run_captured,
+    #         args=(task_id, fn, *args),
+    #         daemon=True,
+    #     ).start()
+    # else:
+    threading.Thread(
+        target=fn,
+        args=(task_id, *args),
+        daemon=True,
+    ).start()
 
     return task_id, {"task_id": task_id, "status": "started"}
 
@@ -111,21 +111,21 @@ def get_task_status(task_id: str, since: int) -> dict[str, Any] | None:
     return resp
 
 
-def cancel_task(task_id: str) -> bool:
-    with _TASK_LOCK:
-        info = _TASK_OUTPUT.get(task_id)
-        if info is None:
-            return False
-        if info["status"] in ("done", "error", "cancelled"):
-            return False
-        else:
-            _TASK_CANCEL.add(task_id)
-            info["status"] = "cancelled"
-            if SharedLogger.frontend_enabled:
-                if "_log" in info:
-                    _TaskOutput.write(task_id, "Task cancelled by user")
-                else:
-                    info["_log"] = ["Task cancelled by user"]
-            else:
-                logger.warning("Task %s cancelled by user", task_id)
-            return True
+# def cancel_task(task_id: str) -> bool:
+#     with _TASK_LOCK:
+#         info = _TASK_OUTPUT.get(task_id)
+#         if info is None:
+#             return False
+#         if info["status"] in ("done", "error", "cancelled"):
+#             return False
+#         else:
+#             _TASK_CANCEL.add(task_id)
+#             info["status"] = "cancelled"
+#             if SharedLogger.frontend_enabled:
+#                 if "_log" in info:
+#                     _TaskOutput.write(task_id, "Task cancelled by user")
+#                 else:
+#                     info["_log"] = ["Task cancelled by user"]
+#             else:
+#                 logger.warning("Task %s cancelled by user", task_id)
+#             return True

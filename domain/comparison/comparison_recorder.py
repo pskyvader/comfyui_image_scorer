@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from ...core.observability.logger import get_logger, ModuleLogger
-from .state import invalidate_images_cache
 from ..analysis.trueskill import (
     public_score_from_rating,
     rating_from_row,
@@ -146,6 +145,5 @@ class ComparisonRecorder:
             return False
 
         self._graph_service.apply_comparison(winner_filename, loser_filename)
-        invalidate_images_cache()
 
         return True

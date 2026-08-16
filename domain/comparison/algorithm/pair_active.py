@@ -38,6 +38,7 @@ class CrystalGraph(Protocol):
     ) -> list[tuple[Any, list[Any]]]: ...
     def get_graph_stats(self) -> dict[str, Any]: ...
     def are_in_same_path(self, img1: str, img2: str) -> bool: ...
+    def get_all_links(self) -> set[tuple[str, str]]: ...
 
     _chain: Any
 
@@ -65,12 +66,8 @@ def _pair_key(filename_a: str, filename_b: str) -> tuple[str, str]:
     return result
 
 
-def existing_pairs(comparison_repo: ComparisonRepository) -> set[tuple[str, str]]:
-    result = {
-        _pair_key(comp["filename_a"], comp["filename_b"])
-        for comp in comparison_repo.get_all_comparisons(weight=1.0)
-    }
-    return result
+def existing_pairs(cg: CrystalGraph) -> set[tuple[str, str]]:
+    return {_pair_key(winner, loser) for winner, loser in cg.get_all_links()}
 
 
 def _score_gap(image_a: dict[str, Any], image_b: dict[str, Any]) -> float:
@@ -108,22 +105,23 @@ def _are_in_different_paths(filename_a: str, filename_b: str, cg: CrystalGraph) 
 
 def _build_low_count_pool(
     candidate_images: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
+    cg: CrystalGraph,
+) -> list[NodeProxy]:
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
     reserve_count = int(config["ranking"]["reserve_count"])
 
+    pool: list[NodeProxy] = []
+
     for threshold in range(0, insertion_target + 1):
         pool = [
-            img for img in candidate_images if int(img["comparison_count"]) <= threshold
+            cg.get_node(img["filename"])
+            for img in candidate_images
+            if int(img["comparison_count"]) <= threshold
+            and cg.get_node(img["filename"]) is not None
         ]
         if len(pool) >= max(threshold + 2, reserve_count):
             return pool
-    result = [
-        img
-        for img in candidate_images
-        if int(img["comparison_count"]) <= insertion_target
-    ]
-    return result
+    return pool
 
 
 def phase_seed_coverage(
@@ -198,23 +196,18 @@ def phase_anchor_insert(
     cg: CrystalGraph,
 ) -> tuple[str, str] | None:
     _start = time.perf_counter()
-    pool = _build_low_count_pool(
-        [img for img in candidate_images if img["filename"] not in seed_pool]
+    pool_nodes = _build_low_count_pool(
+        [img for img in candidate_images if img["filename"] not in seed_pool], cg
     )
     reserve_count = config["ranking"]["reserve_count"]
 
-    pool_nodes = [
-        cg.get_node(img["filename"])
-        for img in pool
-        if cg.get_node(img["filename"]) is not None
-    ]
     if len(pool_nodes) < reserve_count:
         logger.warning(
-            f"phase_anchor_insert: pool too small ({len(pool)} < {reserve_count})",
+            f"pool too small ({len(pool_nodes)} < {reserve_count})",
             start_timer=_start,
         )
         return None
-    pool.sort(key=lambda img: (int(img["comparison_count"]), float(img["score"])))
+    pool_nodes.sort(key=lambda img: (int(img.comparison_count), float(img.score)))
     source_node = pool_nodes[0]
     source_name = source_node.filename
     source_mu_skill = source_node.mu_skill
@@ -267,6 +260,15 @@ def _collect_chain_extremes(
     return nodes[:10]
 
 
+def _closest_score_pair(
+    pair_list: list[tuple[NodeProxy, NodeProxy]],
+) -> tuple[str, str] | None:
+    if not pair_list:
+        return None
+    pair_list.sort(key=lambda pair: abs(pair[0].score - pair[1].score))
+    return (pair_list[0][0].filename, pair_list[0][1].filename)
+
+
 def _collapsible_extreme_pair(
     chains: list[ChainProxy],
     candidate_names: set[str],
@@ -295,15 +297,7 @@ def _collapsible_extreme_pair(
         return None
 
     node_a: NodeProxy = nodes[0]
-    pair_list: list[tuple[NodeProxy, NodeProxy]] = [
-        (node_a, node_b) for node_b in nodes[1:]
-    ]
-    pair_list.sort(
-        key=lambda pair: abs(pair[0].score - pair[1].score),
-    )
-
-    node_a, node_b = pair_list[0]
-    return (node_a.filename, node_b.filename)
+    return _closest_score_pair([(node_a, node_b) for node_b in nodes[1:]])
 
 
 def phase_collapsible_pairs(
@@ -329,8 +323,55 @@ def phase_collapsible_pairs(
     result = _collapsible_extreme_pair(chains, candidate_names, comparison_repo, cg)
     if result:
         logger.debug(f"collapsible pair: {result}", start_timer=_start)
+    else:
+        logger.debug("collapsible: no pair found", start_timer=_start)
 
     return result
+
+
+def _single_nodes(
+    cg: CrystalGraph,
+    candidate_names: set[str],
+    insertion_target: int,
+    single_win: bool,
+) -> list[NodeProxy]:
+    nodes: list[NodeProxy] = []
+    for node in cg.get_all_nodes():
+        if node.filename not in candidate_names:
+            continue
+        if node.comparison_count <= insertion_target:
+            continue
+        links = (
+            node.get_links(worse_than=True)
+            if single_win
+            else node.get_links(better_than=True)
+        )
+        if len(links) == 1:
+            nodes.append(node)
+    return nodes
+
+
+def phase_single_win_loss(
+    candidate_images: list[dict[str, Any]],
+    cg: CrystalGraph,
+) -> tuple[str, str] | None:
+    _start = time.perf_counter()
+    candidate_names = {img["filename"] for img in candidate_images}
+    insertion_target = int(config["ranking"]["insertion_target_comparisons"])
+
+    for single_win, reverse in ((True, True), (False, False)):
+        nodes = _single_nodes(cg, candidate_names, insertion_target, single_win)
+        nodes.sort(key=lambda node: node.score, reverse=reverse)
+        pair_list = [(nodes[i], nodes[i + 1]) for i in range(len(nodes) - 1)]
+        result = _closest_score_pair(pair_list)
+        if result:
+            logger.debug(
+                f"single win/loss pair: {result}, single_win: {single_win}",
+                start_timer=_start,
+            )
+            return result
+    logger.debug("single win/loss: no pair found", start_timer=_start)
+    return None
 
 
 _last_chains_index: list[int] = []
@@ -532,4 +573,5 @@ def phase_fallback(
             result = (left["filename"], right["filename"])
 
             return result
+    logger.debug("fallback: no pair found", start_timer=_start)
     return None

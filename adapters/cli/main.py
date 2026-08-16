@@ -2,6 +2,8 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
+from typing import Any, Protocol
 
 from ...core.observability.logger import (
     get_logger,
@@ -12,59 +14,39 @@ from ...core.observability.logger import (
 logger: ModuleLogger = get_logger(__name__)
 
 
-def _add_build_parser(
-    subparsers: argparse._SubParsersAction,
+class _SubParsers(Protocol):
+    def add_parser(self, name: str, **kwargs: Any) -> argparse.ArgumentParser: ...
+
+
+def _add_server_parser(
+    subparsers: _SubParsers,
 ) -> argparse.ArgumentParser:
-    build_parser = subparsers.add_parser("build", help="Data preparation pipeline")
-    build_sub = build_parser.add_subparsers(dest="build_command")
-
-    split = build_sub.add_parser("split-vectors", help="Build split vector files")
-    split.add_argument(
-        "--limit",
-        type=int,
-        default=0,
-        help="Process at most N new files (0 = no limit)",
+    server_parser: argparse.ArgumentParser = subparsers.add_parser(
+        "server", help="Start the ranking server"
     )
-    split.add_argument(
-        "--batch",
-        action="store_true",
-        help="Loop with --limit until no new files remain",
-    )
+    server_parser.add_argument("--host", default="0.0.0.0")
+    server_parser.add_argument("--port", type=int, default=5001)
+    server_parser.add_argument("--debug", action="store_true")
 
-    build_sub.add_parser("full-vectors", help="Build full vectors + text data")
-
-    build_sub.add_parser("scores", help="Build scores + comparisons")
-
-    all_parser = build_sub.add_parser(
-        "all", help="Run full pipeline (splits -> full vectors -> scores)"
-    )
-    all_parser.add_argument(
-        "--limit",
-        type=int,
-        default=0,
-        help="Process at most N new files per step (0 = no limit)",
-    )
-    all_parser.add_argument(
-        "--batch",
-        action="store_true",
-        help="Loop with --limit until no new files remain",
-    )
-
-    return build_parser
+    return server_parser
 
 
 def _add_training_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: _SubParsers,
 ) -> argparse.ArgumentParser:
-    training_parser = subparsers.add_parser("training", help="Model training")
-    training_sub = training_parser.add_subparsers(dest="training_command")
+    training_parser: argparse.ArgumentParser = subparsers.add_parser(
+        "training", help="Model training"
+    )
+    training_sub: _SubParsers = training_parser.add_subparsers(dest="training_command")
 
-    train = training_sub.add_parser(
+    train: argparse.ArgumentParser = training_sub.add_parser(
         "train-model", help="Train model from vectors/scores"
     )
     train.add_argument("--steps", type=int, default=100)
 
-    hpo = training_sub.add_parser("hpo", help="Hyperparameter optimization")
+    hpo: argparse.ArgumentParser = training_sub.add_parser(
+        "hpo", help="Hyperparameter optimization"
+    )
     hpo.add_argument(
         "--cycles", type=int, default=None, help="Number of HPO cycles (generations)"
     )
@@ -84,13 +66,60 @@ def _add_training_parser(
     return training_parser
 
 
-def _add_database_parser(
-    subparsers: argparse._SubParsersAction,
+def _add_build_parser(
+    subparsers: _SubParsers,
 ) -> argparse.ArgumentParser:
-    database_parser = subparsers.add_parser("database", help="Database maintenance")
-    database_sub = database_parser.add_subparsers(dest="database_command")
+    build_parser: argparse.ArgumentParser = subparsers.add_parser(
+        "build", help="Data preparation pipeline"
+    )
+    build_sub: _SubParsers = build_parser.add_subparsers(dest="build_command")
 
-    cleanup = database_sub.add_parser(
+    split: argparse.ArgumentParser = build_sub.add_parser(
+        "split-vectors", help="Build split vector files"
+    )
+    split.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Process at most N new files (0 = no limit)",
+    )
+    split.add_argument(
+        "--batch",
+        action="store_true",
+        help="Loop with --limit until no new files remain",
+    )
+
+    build_sub.add_parser("full-vectors", help="Build full vectors + text data")
+
+    build_sub.add_parser("scores", help="Build scores + comparisons")
+
+    all_parser: argparse.ArgumentParser = build_sub.add_parser(
+        "all", help="Run full pipeline (splits -> full vectors -> scores)"
+    )
+    all_parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Process at most N new files per step (0 = no limit)",
+    )
+    all_parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Loop with --limit until no new files remain",
+    )
+
+    return build_parser
+
+
+def _add_database_parser(
+    subparsers: _SubParsers,
+) -> argparse.ArgumentParser:
+    database_parser: argparse.ArgumentParser = subparsers.add_parser(
+        "database", help="Database maintenance"
+    )
+    database_sub: _SubParsers = database_parser.add_subparsers(dest="database_command")
+
+    cleanup: argparse.ArgumentParser = database_sub.add_parser(
         "cleanup", help="Clean stale comparisons and VACUUM the database"
     )
     cleanup.add_argument("--limit", type=int, default=0)
@@ -108,21 +137,22 @@ def _add_database_parser(
 
 
 def _add_files_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: _SubParsers,
 ) -> tuple[
     argparse.ArgumentParser,
     argparse.ArgumentParser,
     argparse.ArgumentParser,
-    argparse.ArgumentParser,
 ]:
-    files_parser = subparsers.add_parser("files", help="File management")
-    files_sub = files_parser.add_subparsers(dest="files_command")
+    files_parser: argparse.ArgumentParser = subparsers.add_parser(
+        "files", help="File management"
+    )
+    files_sub: _SubParsers = files_parser.add_subparsers(dest="files_command")
 
-    remove = files_sub.add_parser(
+    remove: argparse.ArgumentParser = files_sub.add_parser(
         "remove",
         help="Remove specific categories of generated files (vectors, models, maps, or downloaded models)",
     )
-    remove_sub = remove.add_subparsers(dest="remove_command")
+    remove_sub: _SubParsers = remove.add_subparsers(dest="remove_command")
     remove_sub.add_parser(
         "vectors", help="Remove full vector files (splits NEVER deleted)"
     )
@@ -132,30 +162,32 @@ def _add_files_parser(
         "downloaded-models", help="Remove downloaded_models/ (mediapipe)"
     )
 
-    download = files_sub.add_parser(
+    download: argparse.ArgumentParser = files_sub.add_parser(
         "download", help="Download models from prepare config"
     )
-    download_sub = download.add_subparsers(dest="download_command")
+    download_sub: _SubParsers = download.add_subparsers(dest="download_command")
     download_sub.add_parser(
         "models",
         help="Download all models in prepare config (HF/timm/torch.hub + mediapipe)",
     )
 
-    cleanup_parser = files_sub.add_parser(
+    cleanup_parser: argparse.ArgumentParser = files_sub.add_parser(
         "cleanup",
         help="Deduplicate scored entries, then move remaining orphaned files to root",
     )
     cleanup_parser.add_argument("--limit", type=int, default=0)
     cleanup_parser.add_argument("--dry-run", action="store_true")
 
-    return files_parser, remove, download, cleanup_parser
+    return files_parser, remove, download
 
 
 def _add_analyze_parser(
-    subparsers: argparse._SubParsersAction,
+    subparsers: _SubParsers,
 ) -> argparse.ArgumentParser:
-    analyze_parser = subparsers.add_parser("analyze", help="Analysis queries")
-    analyze_sub = analyze_parser.add_subparsers(dest="analyze_command")
+    analyze_parser: argparse.ArgumentParser = subparsers.add_parser(
+        "analyze", help="Analysis queries"
+    )
+    analyze_sub: _SubParsers = analyze_parser.add_subparsers(dest="analyze_command")
 
     analyze_sub.add_parser(
         "parameters", help="Run parameter analysis -> generates report"
@@ -171,40 +203,39 @@ def _add_analyze_parser(
 
 
 def main() -> int:
-    fmt = "[%(levelname)s] [%(name)s] [%(funcName)s] %(asctime)s \n%(message)s"
+    fmt: str = "[%(levelname)s] [%(name)s] [%(funcName)s] [%(asctime)s] \n%(message)s"
 
     configure_package_logging(
         logging.DEBUG, fmt=fmt, trim_level_len=1, trim_module_len=10, trim_func_len=None
     )
-    parser = argparse.ArgumentParser(
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
         prog="comfyui-scorer",
         description="Image scoring CLI for ComfyUI",
     )
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers: _SubParsers = parser.add_subparsers(dest="command")
 
-    server_parser = subparsers.add_parser("server", help="Start the ranking server")
-    server_parser.add_argument("--host", default="0.0.0.0")
-    server_parser.add_argument("--port", type=int, default=5001)
-    server_parser.add_argument("--debug", action="store_true")
-
-    training_parser = _add_training_parser(subparsers)
-    build_parser = _add_build_parser(subparsers)
-    database_parser = _add_database_parser(subparsers)
-    files_parser, files_remove_parser, files_download_parser, files_cleanup_parser = (
-        _add_files_parser(subparsers)
+    _add_server_parser(subparsers)
+    training_parser: argparse.ArgumentParser = _add_training_parser(subparsers)
+    build_parser: argparse.ArgumentParser = _add_build_parser(subparsers)
+    database_parser: argparse.ArgumentParser = _add_database_parser(subparsers)
+    files_parser: argparse.ArgumentParser
+    files_remove_parser: argparse.ArgumentParser
+    files_download_parser: argparse.ArgumentParser
+    files_parser, files_remove_parser, files_download_parser = _add_files_parser(
+        subparsers
     )
-    analyze_parser = _add_analyze_parser(subparsers)
+    analyze_parser: argparse.ArgumentParser = _add_analyze_parser(subparsers)
 
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     if args.command == "server":
         from .commands.server import run_server
 
         return run_server(host=args.host, port=args.port, debug=args.debug)
 
-    from .deps import build_cli_deps
+    from .deps import CLIDeps, build_cli_deps
 
-    deps = build_cli_deps()
+    deps: CLIDeps = build_cli_deps()
 
     if args.command == "training":
         from .commands.training import train_model, run_hpo
@@ -262,7 +293,6 @@ def main() -> int:
             remove_directory,
         )
         from ...core.filesystem.paths import maps_dir, mediapipe_models_dir
-        from pathlib import Path
 
         if args.files_command == "remove":
             if args.remove_command == "vectors":
@@ -290,13 +320,13 @@ def main() -> int:
                 files_download_parser.print_help()
                 return 1
         elif args.files_command == "cleanup":
-            dedup_count = deps.deduplicate_scored(
+            dedup_count: int = deps.deduplicate_scored(
                 root=None,
                 dry_run=args.dry_run,
                 limit=args.limit,
             )
             logger.info("Duplicates removed: %s", dedup_count)
-            orphan_count = deps.cleanup_orphans(
+            orphan_count: int = deps.cleanup_orphans(
                 root=None,
                 dry_run=args.dry_run,
                 delete_enabled=not args.dry_run,

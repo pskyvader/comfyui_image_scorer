@@ -8,8 +8,9 @@
  *     right: describe_image(node_b),
  *     pair:  describe_pair(node_a, node_b, phase_index)
  *   }
- * The phase index is an int (0=seed, 1=anchor, 2=collapsible, 3=chain_merge,
- * 4=refine, 5=fallback); its human label is mapped below.
+ * The phase index is an int (0=seed, 1=anchor, 2=collapsible,
+ * 3=single_win_loss, 4=refine, 5=chain_merge, 6=fallback); its human label
+ * is mapped below.
  */
 
 const CompareView = (() => {
@@ -59,6 +60,17 @@ const CompareView = (() => {
         if (phase && phase.show_mu_sigma) {
             lines.push(`μ: ${node.rating_mu.toFixed(2)}`);
             lines.push(`σ: ${node.rating_sigma.toFixed(2)}`);
+        }
+        if (phase && phase.show_wins_losses) {
+            const wins = node.wins ?? 0;
+            const losses = node.losses ?? 0;
+            if (wins === 1 && losses !== 1) {
+                lines.push(`W:${wins} L:${losses} — mostly losers (1 win only)`);
+            } else if (losses === 1 && wins !== 1) {
+                lines.push(`W:${wins} L:${losses} — mostly winners (1 loss only)`);
+            } else {
+                lines.push(`W:${wins} L:${losses}`);
+            }
         }
         return lines.join(" | ");
     }
@@ -156,6 +168,9 @@ const CompareView = (() => {
                 line = `Collapsible pairs${pair.collapsable ? " (resolving a branch)" : ""} - component ${compId} (${compSize.toLocaleString()} images) - top ${top.toLocaleString()} / bottom ${bottom.toLocaleString()} - ${inProgress.toLocaleString()} in progress / ${ready.toLocaleString()} ready - ${pair.total_images.toLocaleString()} images - ${pair.total_comparisons.toLocaleString()} comparisons`;
                 break;
             }
+            case "single_win_loss":
+                line = `Single win/loss - ${pair.single_win_count.toLocaleString()} with 1 win only - ${pair.single_loss_count.toLocaleString()} with 1 loss only - ${pair.ready_count.toLocaleString()} ready (more than 1 win & 1 loss) - ${pair.total_images.toLocaleString()} images - ${pair.total_comparisons.toLocaleString()} comparisons`;
+                break;
             case "chain_merge":
                 line = `Chain merge - component ${left.component_id} (${left.component_size.toLocaleString()} images) - ${pair.total_chains.toLocaleString()} chains (target ${pair.target_chains}) - reserve ${pair.reserve_count} - ${pair.total_images.toLocaleString()} images - ${pair.total_comparisons.toLocaleString()} comparisons`;
                 break;

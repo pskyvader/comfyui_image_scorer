@@ -64,7 +64,12 @@ def train_model(deps: CLIDeps) -> int:
     return 0
 
 
-def run_hpo(deps: CLIDeps, cycles, optimization_steps, max_combos) -> int:
+def run_hpo(
+    deps: CLIDeps,
+    cycles: int | None,
+    optimization_steps: int | None,
+    max_combos: int | None,
+) -> int:
     from ....application.hyperparameters.hyperparameter_optimizer import run_hpo_cycles
 
     defaults = config["training"]

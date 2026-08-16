@@ -15,7 +15,7 @@ from ..tasks import (
     start_task,
     get_task_status,
     set_task_output,
-    cancel_task as _cancel_task,
+    # cancel_task as _cancel_task,
 )
 from ....core.io.serialization import load_single_jsonl
 from ....core.filesystem.paths import vectors_file, text_data_file, scores_file
@@ -68,9 +68,7 @@ def get_stats():
     graph_stats = deps.graph.get_graph_stats()
 
     sorted_by_score = sorted(all_images, key=lambda x: float(x.get("score", 0.5)))
-    sorted_by_comp = sorted(
-        all_images, key=lambda x: int(x.get("comparison_count", 0))
-    )
+    sorted_by_comp = sorted(all_images, key=lambda x: int(x.get("comparison_count", 0)))
 
     result = jsonify(
         {
@@ -304,9 +302,7 @@ def get_report_file():
                             pass
                     if len(items) >= max_items:
                         break
-                total_count = sum(
-                    1 for _ in open(path, encoding="utf-8") if _.strip()
-                )
+                total_count = sum(1 for _ in open(path, encoding="utf-8") if _.strip())
                 result = jsonify(
                     {
                         "status": "ok",
@@ -352,11 +348,11 @@ def get_task(task_id: str):
 
 @analysis_bp.route("/task/<task_id>/cancel", methods=["POST"])
 def cancel_task(task_id: str):
-    ok = _cancel_task(task_id)
-    if not ok:
-        result = jsonify({"error": "Task not found or already finished"}), 404
+    # ok = _cancel_task(task_id)
+    # if not ok:
+    #     result = jsonify({"error": "Task not found or already finished"}), 404
 
-        return result
+    #     return result
     result = jsonify({"status": "cancelled"})
 
     return result

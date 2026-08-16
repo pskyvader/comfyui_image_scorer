@@ -175,6 +175,7 @@ def serve_section_static(section: str, filename: str):
 
 @app.route("/output/ranked/<path:filepath>")
 def serve_ranked_image(filepath: str):
+    _start = time.perf_counter()
     ranked_root = get_ranked_root()
     filepath_decoded = unquote(filepath)
 
@@ -186,6 +187,7 @@ def serve_ranked_image(filepath: str):
         )
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+        logger.debug(f"Serving direct image", start_timer=_start)
         return response
 
     filename = Path(filepath_decoded).name
@@ -197,14 +199,16 @@ def serve_ranked_image(filepath: str):
         )
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+        logger.debug(f"Serving found image", start_timer=_start)
         return response
 
-    logger.warning(f"Image not found in ranked folders: {filepath}")
+    logger.warning(f"Image not found in ranked folders: {filepath}", start_timer=_start)
     return {"error": "Image not found"}, 404
 
 
 @app.route("/images/<path:filename>")
 def serve_image_by_name(filename: str):
+    _start = time.perf_counter()
     fname = Path(unquote(filename)).name
 
     score_q = float(request.args["score"]) if "score" in request.args else None
@@ -212,17 +216,22 @@ def serve_image_by_name(filename: str):
     if score_q is not None:
         dest = compute_path_from_filename(fname, score_q)
         if dest.exists() and dest.is_file():
+            logger.debug(f"Serving image by score path", start_timer=_start)
             return send_file(str(dest))
 
     db_entry = get_db_image(fname)
     if db_entry and db_entry["score"] is not None:
         dest = compute_path_from_filename(fname, db_entry["score"])
         if dest.exists() and dest.is_file():
+            logger.debug(f"Serving image by db score path", start_timer=_start)
             return send_file(str(dest))
 
     found = find_image_path(fname)
     if found:
+        logger.debug(f"Serving image by found path", start_timer=_start)
         return send_file(str(found))
+
+    logger.warning(f"Image not found: {filename}", start_timer=_start)
 
     return {"error": "Image not found"}, 404
 

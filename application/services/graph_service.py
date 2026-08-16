@@ -32,7 +32,6 @@ class CrystalGraph:
     ) -> None:
         self._chain: ChainManager = ChainManager()
         self._images: dict[str, dict[str, Any]] = {}
-        self._comparisons: list[dict[str, Any]] = []
         self._chain_map: dict[int, ChainDict] | None = None
         self._rebuilding: bool = False
         self._image_repo = image_repo
@@ -59,6 +58,7 @@ class CrystalGraph:
         images: list[dict[str, Any]] | None = None,
         comparisons: list[dict[str, Any]] | None = None,
     ) -> None:
+        _start = time.perf_counter()
         if self._rebuilding:
             logger.warning("Already rebuilding, skipping nested call")
             return
@@ -79,7 +79,6 @@ class CrystalGraph:
             comparisons = self._comparison_repo.get_all_comparisons()
 
         self._images = {img["filename"]: img for img in images}
-        self._comparisons = comparisons
         self._chain.set_db_comparison_count(len(comparisons))
         self._chain.set_built_at(datetime.now(timezone.utc))
 
@@ -90,9 +89,10 @@ class CrystalGraph:
             all_filenames.add(comp["filename_b"])
 
         self._chain.build(comparisons, all_filenames=all_filenames)
-        self._chain_map = None
-        self.get_chains_map()
+        self._chain_map = None  # chain map will be rebuilt lazily
+        # self.get_chains_map()
         self._rebuilding = False
+        logger.info("rebuild from database complete", start_timer=_start)
 
     def apply_comparison(self, winner: str, loser: str) -> None:
         self._chain.apply_comparison(winner, loser)
@@ -224,32 +224,8 @@ class CrystalGraph:
 
     # -- Links ----------------------------------------------------------
 
-    def get_all_links(self) -> list[tuple[NodeProxy, NodeProxy]]:
-        result: list[tuple[NodeProxy, NodeProxy]] = []
-        seen: set[tuple[str, str]] = set()
-        node_id: str
-        loser: str
-        key: tuple[str, str]
-        with tqdm(
-            self._chain.get_all_filenames(),
-            desc="Collecting links",
-            unit="node",
-            delay=3.0,
-        ) as pbar:
-            for node_id in pbar:
-                for loser in self._chain.get_worse_than(node_id):
-                    key = (node_id, loser)
-                    if key not in seen:
-                        seen.add(key)
-                        result.append(
-                            (
-                                NodeProxy(
-                                    self._chain, node_id, self._images.get(node_id)
-                                ),
-                                NodeProxy(self._chain, loser, self._images.get(loser)),
-                            )
-                        )
-        return result
+    def get_all_links(self) -> set[tuple[str, str]]:
+        return set(self._chain.get_all_edges())
 
     # -- Stats ----------------------------------------------------------
 

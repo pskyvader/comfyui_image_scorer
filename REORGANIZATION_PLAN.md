@@ -5,8 +5,10 @@ adapter-wiring statements in the three composition roots, pytest 30 passed,
 ruff ARG/F401 clean, pyright 701-error baseline with zero new, node smoke OK).
 v3 (CLI-parity remediation) is superseded by this revision, which extends it:
 **strict CLI parity, a full rename cascade to CLI command names, and the
-complete removal of the server task system.** The CLI
-(`adapters/cli/`) is the source of truth and is **not modified**.
+complete removal of the server task system.** Every command endpoint becomes
+a single direct call to its CLI command's function — no reimplementation
+(§1.1). The CLI (`adapters/cli/`) is the source of truth and is **not
+modified**.
 
 **Scope:** `adapters/server/` (endpoints, `main.py`, `deps.py`),
 `adapters/*/frontend/` folders, `adapters/server/frontend/`, the docs that
@@ -31,7 +33,9 @@ by the user. This plan never creates, edits, or deletes anything inside it.
 ## 0. Ground Rules (from README + module AGENTS.md, abbreviated)
 
 1. Every command runs in the ComfyUI venv (`& "E:\ComfyUI\.venv\Scripts\Activate.ps1"` first).
-2. Relative imports at module scope.
+2. Relative imports at module scope, at the top of each file. No inline
+   imports anywhere in the module except `adapters/cli/main.py` (the one
+   established lazy dispatch pattern).
 3. pyright strict must pass (`pyrightconfig.json`).
 4. No `try`/`except` blocks — failures surface with clear errors.
 5. No new test files. Existing tests must keep passing.
@@ -50,6 +54,12 @@ by the user. This plan never creates, edits, or deletes anything inside it.
     Node names and workflow behavior remain untouched.
 11. No new dependencies.
 12. Small, direct changes; narrowest code path per fix.
+13. Command endpoints call the CLI command functions directly
+    (`adapters/cli/commands/*`, or the exact body CLI `main.py` runs for
+    `files`/`analyze`): endpoint body = one call + response wrapping. No
+    endpoint reimplements command logic. Endpoints may import
+    `adapters/cli/commands/*` (adapters→adapters; adds zero infrastructure
+    import statements to endpoints — the §4 AST gate holds).
 
 ---
 
@@ -79,6 +89,49 @@ by the user. This plan never creates, edits, or deletes anything inside it.
 
 ---
 
+## 1.1 Endpoint → CLI function parity contract
+
+Every command endpoint's body is **one call to the function its CLI command
+runs** — the `adapters/cli/commands/*.py` wrappers, or the exact body CLI
+`main.py` executes for `files`/`analyze` — wrapped in the §3.2 response
+shape. No endpoint reimplements command logic.
+
+| Endpoint (after §3.3 cascade) | CLI command | Function(s) called |
+|---|---|---|
+| `POST /api/training/train` | `training train-model` | `train_model(deps)` |
+| `POST /api/training/hpo` | `training hpo` | `run_hpo(deps, cycles, optimization_steps, max_combos)` — body params, `None` → config defaults |
+| `POST /api/build/prepare` — `mode=split` | `build split-vectors` | `run_split_vectors(limit, batch, deps)` |
+| `POST /api/build/prepare` — `mode=full` | `build full-vectors` | `run_full_vectors(deps)` |
+| `POST /api/build/prepare` — default | `build all` | `run_all(limit, batch, deps)` |
+| `POST /api/build/delete-vectors` | `files remove vectors` | `delete_full_vectors()` |
+| `POST /api/database/rebuild-db` | `database rebuild` | `rebuild(deps)` |
+| `POST /api/database/recalculate` | `database recalculate` | `recalculate(deps)` |
+| `POST /api/database/cleanup` | `database cleanup` | `cleanup(deps)` |
+| `POST /api/files/remove-models` | `files remove models` | `remove_models()` |
+| `POST /api/files/remove-maps` | `files remove maps` | `remove_directory(Path(maps_dir))` |
+| `POST /api/files/remove-downloaded-models` | `files remove downloaded-models` | `remove_directory(Path(mediapipe_models_dir))` |
+| `POST /api/files/download-models` | `files download models` | `os.environ["HF_HUB_OFFLINE"] = "0"`; `deps.download_configured_models()`; `deps.download_mediapipe_models()` |
+| `POST /api/files/cleanup` | `files cleanup` | `deps.deduplicate_scored(root=None, dry_run, limit)`; `deps.cleanup_orphans(root=None, dry_run, delete_enabled=not dry_run)` |
+| `GET /api/analyze/stats` | `analyze stats` | `run_stats(image_repo=deps.image_repo, comparison_repo=deps.comparison_repo)` |
+| `POST /api/analyze/analyze-parameters` | `analyze parameters` | `run_parameter_analysis()` |
+| `POST /api/analyze/analyze-matrix` | `analyze matrix` | `run_matrix_analysis()` |
+
+Mechanics:
+- Endpoints import the command functions from `adapters/cli/commands/*`
+  (adapters→adapters; the endpoints gain zero infrastructure import
+  statements, so the §4 AST gate holds). `analyze`/`files` call the same
+  application/core functions CLI `main.py` calls, with the same arguments.
+- `ServerDeps` grows to a superset of `CLIDeps` and gains a `to_cli_deps()`
+  helper in `adapters/server/deps.py`; endpoints pass its result to the
+  command functions. New fields: `vacuum_database`,
+  `download_configured_models`, `download_mediapipe_models` (§3.7 #28).
+- Response: `{"status": "done", "result": <command return value>, "log":
+  <captured output>}` (§3.2).
+- Server startup sets the matplotlib Agg backend so the CLI's `plt.show()`
+  calls (`train_model`) are no-ops in server context.
+
+---
+
 ## 2. Section → endpoint file mapping (after rename cascade)
 
 | CLI section | Endpoint file | Blueprint prefix | Frontend folder | Section name |
@@ -104,8 +157,9 @@ server-only features — out of scope, unchanged.
    stores/locks) and remove every import of it.
 2. **Delete `adapters/server/frontend/js/task_poller.js`** (incl. the dead
    SSE EventSource logic) and its `<script>` tag in `index.html`.
-3. **All command endpoints become synchronous:** run the work in the request,
-   capture logs, and return `{"status": "done", "result": ..., "log": ...}`
+3. **All command endpoints become synchronous:** one call to the CLI command
+   function (§1.1), capture logs, and return
+   `{"status": "done", "result": <command return value>, "log": ...}`
    (long commands block the request — accepted design decision).
 4. **Delete every `GET /<bp>/task/<task_id>` route** (and the
    `/task/<task_id>/cancel` route in the old analysis bp). No task routes
@@ -153,81 +207,126 @@ server-only features — out of scope, unchanged.
 
 ### 3.4 `training` — `endpoints/training.py` + `adapters/training/frontend/`
 
-12. **Add `POST /api/training/train`** replicating CLI `train-model`:
-    synchronous; loads training data via `deps.training_loader`/
-    `deps.model_trainer`, trains `config["training"]["top1"]`, saves model +
-    plots. Result: metrics + plot paths.
-13. **`/hpo` honors request params** — accept `cycles`, `optimization_steps`,
-    `max_combos` from the body (absent/`None` → config defaults).
+12. **Add `POST /api/training/train`** — body is one call to the CLI command:
+    `train_model(deps)` (`adapters/cli/commands/training.py`). The command
+    loads the training data, trains `config["training"]["top1"]`, and saves
+    the model + plots itself. Server startup sets the matplotlib Agg backend
+    so the command's `plt.show()` is a no-op in server context.
+13. **`/hpo` is one call to `run_hpo(deps, cycles, optimization_steps,
+    max_combos)`** — the request body's `cycles`, `optimization_steps`,
+    `max_combos` are passed through; absent/`None` → config defaults (exactly
+    like the CLI's `--cycles`/`--optimization-steps`/`--max-combos`).
 14. **Remove `POST /api/training/reset`** and **`GET/POST
-    /api/training/config`** — no CLI counterpart.
+    /api/training/config`** — no CLI counterpart; move **`POST
+    /api/training/remove-models`** to `endpoints/files.py` (§3.7 #27).
 15. **Frontend:** remove the "Optimize Hyperparameters" (`optimize-hpo`),
-    "View Config" (`get-training-config`), and "Reset Training objects"
-    (`reset-config`) buttons/actions. Keep `train-top` → `/training/train`
-    and `hpo-cycle` → `/training/hpo`.
+    "View Config" (`get-training-config`), "Reset Training objects"
+    (`reset-config`) buttons/actions, and the "Remove Models"
+    (`remove-models`) action (its route moves to §3.7). Keep `train-top` →
+    `/training/train` and `hpo-cycle` → `/training/hpo`.
 
 ### 3.5 `build` — `endpoints/build.py` + `adapters/build/frontend/`
 
-16. **Add `split_vectors` mode** to `POST /api/build/prepare`: replicating
-    `build split-vectors` — `build_split_files` with the `batch` loop and the
-    `remove_derived_caches` side effect (both currently missing).
-17. **Add `full_vectors` mode** replicating `build full-vectors`.
-18. **Default branch = `build all`** (split + full + scores), honoring `batch`.
-19. **Delete the `rebuild_missing_vectors` and `text_only` branches** — they
-    call `run_rebuild_missing_vectors()` / `run_text_only()`, which do not
-    exist in `application/data_transform/prepare_data.py` and have no CLI
+16. **`POST /api/build/prepare` — `mode=split` is one call to
+    `run_split_vectors(limit, batch, deps)`** (`adapters/cli/commands/
+    vectors.py`): the `batch` loop and the `remove_derived_caches` side
+    effect are the command's own (both currently missing from the endpoint).
+17. **`mode=full` is one call to `run_full_vectors(deps)`**.
+18. **Default branch (`mode=all`) is one call to `run_all(limit, batch,
+    deps)`** — split + full + scores, honoring `batch`.
+19. Request body carries the CLI's parameters: `mode` (`"split"` | `"full"` |
+    `"all"`, default `"all"`), `limit` (0), `batch` (false). **Delete the
+    `rebuild_missing_vectors` and `text_only` branches** — they call
+    `run_rebuild_missing_vectors()` / `run_text_only()`, which do not exist
+    in `application/data_transform/prepare_data.py` and have no CLI
     counterpart. Drop the unused `test_run` flag.
 20. **Remove `POST /api/build/scan-import`** — no CLI counterpart.
 21. **Frontend:** remove the "Rebuild Missing" and "Text-Only"
-    buttons/actions.
+    buttons/actions; the prepare view offers Split / Full / All.
 22. **Note — `POST /api/build/delete-vectors` (`files remove vectors`):**
-    verified 2026-08 — it calls `delete_full_vectors()`
-    (`core/utilities/helpers.py`), which unlinks **only** `vectors_file`,
-    `scores_file`, `index_file`, `text_data_file`, `comparisons_file` and
-    **never touches the `split/` directory** ("keep the split/ directory
-    intact"). Keep the endpoint exactly as-is behaviorally; keep the
-    frontend confirmation dialog. (Both CLI and endpoint share this helper —
-    parity by construction.)
+    verified 2026-08 — body is one call to `delete_full_vectors()`
+    (`core/utilities/helpers.py`), the exact function CLI `files remove
+    vectors` runs; it unlinks **only** `vectors_file`, `scores_file`,
+    `index_file`, `text_data_file`, `comparisons_file` and **never touches
+    the `split/` directory** ("keep the split/ directory intact"). Keep the
+    endpoint exactly as-is behaviorally; keep the frontend confirmation
+    dialog. (Parity by construction.)
 
 ### 3.6 `database` — `endpoints/database.py` + `adapters/database/frontend/`
 
-23. **Add `POST /api/database/recalculate`** replicating CLI `database
-    recalculate`: `reset_all_image_ratings(default_score)` →
-    `replay_ratings(all_comparisons)` → update each image's
-    score/rating/count.
-24. **Add `POST /api/database/cleanup`** replicating CLI `database cleanup`
-    (clean comparisons + vacuum) — resolves the `cleanup-orphans` name
-    collision. Requires adding `vacuum_database` to `ServerDeps`.
-25. **`/deduplicate` root alignment:** CLI passes `root=None`, endpoint
-    passes `root=Path(image_root_processed)` — verify `deduplicate_scored`
-    treats them identically; align if not.
+23. **Add `POST /api/database/recalculate`** — body is one call to
+    `recalculate(deps)` (`adapters/cli/commands/database.py`): reset ratings
+    → replay → update each image's score/rating/count. The command owns the
+    sequence.
+24. **Add `POST /api/database/cleanup`** — body is one call to `cleanup(deps)`
+    (clean comparisons + `vacuum_database`). Requires adding
+    `vacuum_database` to `ServerDeps` (§3.7 #28).
+25. **`/rebuild-db` becomes one call to `rebuild(deps)`** — the CLI command
+    runs only `processor.rebuild_database_from_ranked()`; drop the
+    endpoint's extra `deps.graph.rebuild_from_database()` call.
 26. **Remove `GET /api/database/status`**, **`POST /api/database/sync-all`**,
-    **`POST /api/database/normalize-comparisons`** — no CLI counterpart.
-27. **Frontend:** remove "Sync All → JSON" (`sync-all`) and "Normalize
-    Comparisons" (`normalize-comparisons`) buttons/actions; remove dead
-    actions `reset-ratings`, `cleanup-orphans-dry`, `deduplicate-dry`.
+    **`POST /api/database/normalize-comparisons`**, **`POST
+    /api/database/deduplicate`**, **`POST /api/database/cleanup-orphans`** —
+    no CLI counterpart (dedup + orphans move to the single
+    `/api/files/cleanup` route, §3.7 #27).
+27. **Frontend:** remove "Sync All → JSON" (`sync-all`), "Normalize
+    Comparisons" (`normalize-comparisons`), "Deduplicate"
+    (`deduplicate`/`deduplicate-dry`), and "Cleanup Orphans"
+    (`cleanup-orphans`/`cleanup-orphans-dry`) buttons/actions, and the dead
+    `reset-ratings` action; the dedup/orphan buttons are replaced by the
+    single Files Cleanup action (§3.7 #30).
 
 ### 3.7 `files` — new `adapters/server/endpoints/files.py`
 
-28. **Create `endpoints/files.py`** (`files_bp`, `/api/files`) with
-    synchronous routes: `POST /remove-maps` → `remove_directory(maps_dir)`;
-    `POST /remove-downloaded-models` →
-    `remove_directory(mediapipe_models_dir)`; `POST /download-models` →
-    `download_configured_models()` + `download_mediapipe_models()`
-    (**user-initiated only** — button click; no background downloads).
-29. **Wire in `adapters/server/deps.py`:** add `vacuum_database`,
+27. **Create `endpoints/files.py`** (`files_bp`, `/api/files`). Every route
+    body is the exact body CLI `main.py` runs for the matching `files`
+    command — one call per function, no extra logic:
+    - `POST /remove-models` → `remove_models()` (moved from
+      `endpoints/training.py`; matches `files remove models`);
+    - `POST /remove-maps` → `remove_directory(Path(maps_dir))`;
+    - `POST /remove-downloaded-models` →
+      `remove_directory(Path(mediapipe_models_dir))`;
+    - `POST /download-models` → `os.environ["HF_HUB_OFFLINE"] = "0"`;
+      `deps.download_configured_models()`; `deps.download_mediapipe_models()`
+      (**user-initiated only** — button click; no background downloads);
+    - `POST /cleanup` → `deps.deduplicate_scored(root=None, dry_run, limit)`;
+      `deps.cleanup_orphans(root=None, dry_run, delete_enabled=not dry_run)`
+      — the whole `files cleanup` command, replacing the old split
+      `/api/database/deduplicate` + `/api/database/cleanup-orphans` routes.
+      `root=None` everywhere, exactly like the CLI (the old
+      `Path(image_root_processed)` argument is gone).
+28. **Wire in `adapters/server/deps.py`:** add `vacuum_database`,
     `download_configured_models`, `download_mediapipe_models`, and the
-    maps/mediapipe directory removers to `ServerDeps`. **No infrastructure
-    imports in the endpoint file.**
-30. **Register** `register_files_routes(app, deps)` in `adapters/server/main.py`.
-31. **Frontend (database view):** add "Remove Maps", "Remove Downloaded
-    Models", "Download Models" buttons/actions; render the returned log.
+    maps/mediapipe directory removers to `ServerDeps` (making it a superset
+    of `CLIDeps`), plus a `to_cli_deps()` helper that builds the `CLIDeps`
+    the command functions receive. **No infrastructure imports in the
+    endpoint file.**
+29. **Register** `register_files_routes(app, deps)` in
+    `adapters/server/main.py`.
+30. **Frontend (database view):** add "Remove Maps", "Remove Downloaded
+    Models", "Download Models", and a single "Files Cleanup" button (with a
+    dry-run toggle) — the dedup/orphan buttons it replaces are removed
+    (§3.6 #27); the "Remove Models" button moves here from the training view.
+    Render the returned log.
 
 ### 3.8 `analyze` — `endpoints/analyze.py` + `adapters/analyze/frontend/`
 
+31. **All three command routes become one call to the function CLI `main.py`
+    runs for that command** — delete the inline reimplementations:
+    - `GET /api/analyze/stats` → `run_stats(image_repo=deps.image_repo,
+      comparison_repo=deps.comparison_repo)` — the endpoint's bucket/top/
+      bottom computation is deleted; the command's printed report is captured
+      into `log` (it is the command's output, per §3.10 #38).
+    - `POST /api/analyze/analyze-parameters` → `run_parameter_analysis()` —
+      the inline `ParameterAnalyzer` use is deleted. Behavior moves to the
+      CLI's: reports land in `output/analysis/`, and empty vectors/text_data
+      fail with the command's clear error.
+    - `POST /api/analyze/analyze-matrix` → `run_matrix_analysis()` — the
+      inline `MatrixAnalyzer` use is deleted; output moves to
+      `output/maps/matrix_analysis.json` (the CLI's path).
 32. **Remove `GET /api/analyze/report-file`** — no CLI counterpart (frontend
-    never calls it). The three command routes (`/stats`,
-    `/analyze-parameters`, `/analyze-matrix`) already match the CLI.
+    never calls it). **Frontend:** the stats and analyze views render the
+    returned `log` text instead of the old structured JSON.
 
 ### 3.9 Docs — align with the final state and this plan
 
@@ -250,7 +349,8 @@ server-only features — out of scope, unchanged.
 AST scan of the current tree (all layers, excluding
 `comfyui_image_scorer_old/`) against the module rules. The same clusters
 exist at `21570f4` / `c231460` / `003449d` — each commit reduced them
-(try/except 55→56→51, inline imports 35→35→25, defaults 131→134→115);
+(try/except 55→56→51, inline imports 35→35→25→26 under the current scan
+with only `cli/main.py` exempt, defaults 131→134→115);
 none of them introduced a rule. Fix per the rules — never by relaxing one.
 `comfyui_image_scorer_old/` stays read-only reference material.
 
@@ -276,16 +376,35 @@ none of them introduced a rule. Fix per the rules — never by relaxing one.
     commented-out debug prints at `logger.py:394-397, 554-564`). `run_stats.py`
     prints the CLI report table — that is the command's output; keep it as
     report output and document the choice.
-39. **Module-scope imports — 25 inline imports** outside the established CLI
-    lazy pattern (`adapters/cli/`, `scorer.py`). The lazy heavy-dep imports
-    in `plot.py` (3) and `application/analysis/run_*_analysis.py` (2) match
-    the CLI justification and may stay. Move everything else to module scope:
-    `domain/graph/` proxy modules (9 — break the import cycle),
-    `domain/comparison/algorithm/view.py` 2, `domain/data_transformation/
-    data_transformer.py` 1, `infrastructure/persistence/deduplicate_scored.py`
-    1, `core/observability/logger.py` 1, server endpoints
-    (`comparison.py` 1, `data_transform.py` 1, `training.py` 2, `main.py` 1,
-    `adapters/comfyui/services.py` 1).
+39. **Module-scope imports — 26 imports to move to the top of their files
+    across 15 files.** The **only file allowed to keep inline imports is
+    `adapters/cli/main.py`** (its lazy command dispatch is the one
+    established exception). This overrides the old allowances for `scorer.py`,
+    `plot.py`, and `application/analysis/run_*_analysis.py`.
+    - `adapters/cli/` — `commands/training.py` 2 (`load_training_data`,
+      `run_hpo_cycles`), `commands/vectors.py` 3 (`build_split_files`,
+      `build_full_files`, `run_rebuild_scores_only`), `deps.py` 3 (inside
+      `build_cli_deps`: `training_loader`, `model_trainer`, `maps_list`).
+    - server endpoints — `endpoints/comparison.py` 1 (`ComparisonRecorder`),
+      `endpoints/data_transform.py` 1, `endpoints/training.py` 2.
+    - module root `__init__.py` 2 — the PEP 562 `__getattr__` node mappings
+      become an eager module-scope import of `adapters.comfyui`.
+    - `application/` — `analysis/run_parameter_analysis.py` 1
+      (`ParameterAnalyzer`), `analysis/run_matrix_analysis.py` 1
+      (`MatrixAnalyzer`).
+    - `domain/` — `comparison/algorithm/view.py` 2 (`graph_helpers`,
+      `MIN_CHAIN_THRESHOLD`), `data_transformation/data_transformer.py` 1
+      (`maps_dir`), `training/plot.py` 3 (`Rectangle`, `Normalize`,
+      `mannwhitneyu`).
+    - `infrastructure/persistence/deduplicate_scored.py` 1
+      (`image_root_processed`), `core/observability/logger.py` 1
+      (`traceback`).
+    - `scorer.py` 2 — the `__main__` guard imports (`sys`, `cli.main`) move
+      to module scope; the script entry point still works.
+    Already module-scope conditionals at the top of their files — leave
+    as-is: the `folder_paths` config guard (`adapters/cli/deps.py:35`,
+    `adapters/server/main.py:23`, `adapters/comfyui/services.py:7`) and the
+    `if TYPE_CHECKING:` cycle-breaker imports in `domain/graph/` (9).
 40. **Function-arg defaults — 115** ("always try to avoid"): 93 in
     core/domain/application, 22 in infrastructure/adapters. `plot.py` 44
     display params dominate (`show`, `cols`, `title` etc.), then
@@ -316,15 +435,29 @@ pyright                            # 701-error baseline; zero new errors
 2. Node registration smoke check (README "Node Import Verification" snippet) →
    `AestheticScore` loads.
 3. Route smoke check: new routes respond — `/api/training/train`,
-   `/api/database/recalculate`, `/api/database/cleanup`, `/api/files/*`,
-   `/api/build/prepare` (split/full modes), `/api/training/hpo` body params;
-   removed routes 404 — `/api/training/reset`, `/api/training/config`,
-   `/api/build/scan-import`, `/api/database/status`, `/api/database/sync-all`,
-   `/api/database/normalize-comparisons`, `/api/analyze/report-file`, and
-   every `/task/<task_id>` route.
+   `/api/database/recalculate`, `/api/database/cleanup`, `/api/files/*`
+   (`/remove-models`, `/remove-maps`, `/remove-downloaded-models`,
+   `/download-models`, `/cleanup`), `/api/build/prepare` (split/full/all
+   modes), `/api/training/hpo` body params; removed routes 404 —
+   `/api/training/reset`, `/api/training/config`,
+   `/api/training/remove-models`, `/api/build/scan-import`,
+   `/api/database/status`, `/api/database/sync-all`,
+   `/api/database/normalize-comparisons`, `/api/database/deduplicate`,
+   `/api/database/cleanup-orphans`, `/api/analyze/report-file`, and every
+   `/task/<task_id>` route.
+   Parity check: every command endpoint body is exactly one call to its CLI
+   function — grep `adapters/server/endpoints/` for `cli.commands` imports
+   and the `files`-command bodies; no inline command logic remains
+   (`build_split_files`, `run_hpo_cycles`, `ParameterAnalyzer`,
+   `MatrixAnalyzer`, `distribute`, bucket computation) in endpoints.
 4. Frontend smoke: every section loads (`build`, `analyze`, `database`,
    `training`, `compare`, `gallery`, `chains`), no 404 on static assets, no
-   TaskPoller references remain.
+   TaskPoller references, and no old `deduplicate`/`cleanup-orphans`/
+   `remove-models` actions remain.
+5. Inline-import scan: AST walk of every `.py` file (excluding
+   `comfyui_image_scorer_old/`) — no `Import`/`ImportFrom` nodes inside
+   function bodies or the `__main__` guard anywhere except
+   `adapters/cli/main.py`.
 
 ---
 
@@ -332,7 +465,8 @@ pyright                            # 701-error baseline; zero new errors
 
 - CLI changes (`adapters/cli/`) — source of truth, not modified (including
   the unused `--steps` on `train-model` and unused `--limit` on
-  `database cleanup`).
+  `database cleanup`). Endpoints import and call the CLI command functions
+  (§1.1); the CLI's parsers, `main.py`, and `deps.py` are untouched.
 - `comparison.py`, `gallery.py`, `maps.py` blueprints and their frontends.
 - The `maps` (v1) frontend folder — dead but harmless.
 - `core`/`domain`/`application`/`infrastructure` behavior (the logger helper

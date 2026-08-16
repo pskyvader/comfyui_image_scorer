@@ -11,25 +11,28 @@ logger: ModuleLogger = get_logger(__name__)
 _images_cache: dict[str, Any] = {"data": None, "timestamp": 0.0}
 
 
-def get_cached_all_images(images: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return cached all_images list, refreshing if stale."""
+def set_images_cache(images: list[dict[str, Any]]) -> None:
+    """Store the all_images list with a fresh timestamp."""
     global _images_cache
-    now = time.time()
-    if (
+    _images_cache = {"data": images, "timestamp": time.time()}
+
+
+def is_images_cache_valid() -> bool:
+    """Return True when the cached all_images list is present and fresh."""
+    return (
         _images_cache["data"] is not None
-        and (now - _images_cache["timestamp"]) < IMAGES_CACHE_TTL
-    ):
-        return _images_cache["data"]
-
-    _images_cache = {"data": images, "timestamp": now}
-    return images
+        and (time.time() - _images_cache["timestamp"]) < IMAGES_CACHE_TTL
+    )
 
 
-def get_cached_image(
-    filename: str, images: list[dict[str, Any]]
-) -> dict[str, Any] | None:
+def get_cached_all_images() -> list[dict[str, Any]]:
+    """Return the cached all_images list; call only when is_images_cache_valid()."""
+    return _images_cache["data"]
+
+
+def get_cached_image(filename: str) -> dict[str, Any] | None:
     """Return a single image from the cached list, or None."""
-    for img in get_cached_all_images(images):
+    for img in get_cached_all_images():
         if img["filename"] == filename:
             return img
     return None

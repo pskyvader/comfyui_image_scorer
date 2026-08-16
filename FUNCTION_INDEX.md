@@ -517,7 +517,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 | Name | Description |
 |---|---|
-| `select_pair_for_comparison(exclude_set, crystal_graph, comparison_repo, all_images=None)` | Select the next pair of images to compare. |
+| `select_pair_for_comparison(exclude_set, crystal_graph, comparison_repo)` | Select the next pair of images to compare. |
 
 ### Module-level constants
 
@@ -669,8 +669,10 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 | Name | Description |
 |---|---|
-| `get_cached_all_images(images)` | Return cached all_images list, refreshing if stale. |
-| `get_cached_image(filename, images)` | Return a single image from the cached list, or None. |
+| `set_images_cache(images)` | Store the all_images list with a fresh timestamp. |
+| `is_images_cache_valid()` | Return True when the cached all_images list is present and fresh. |
+| `get_cached_all_images()` | Return the cached all_images list; call only when is_images_cache_valid(). |
+| `get_cached_image(filename)` | Return a single image from the cached list, or None. |
 | `invalidate_images_cache()` | — |
 
 ### Module-level constants

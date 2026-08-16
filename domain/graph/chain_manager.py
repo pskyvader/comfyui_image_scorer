@@ -301,6 +301,13 @@ class ChainManager:
     def get_worse_than(self, node_id: str) -> list[str]:
         return self._worse_than.get(node_id, [])
 
+    def get_all_edges(self) -> list[tuple[str, str]]:
+        return [
+            (winner, loser)
+            for winner, losers in self._worse_than.items()
+            for loser in losers
+        ]
+
     def is_top(self, node_id: str) -> bool:
         return node_id in self._top_nodes
 
@@ -347,7 +354,7 @@ class ChainManager:
         self._identify_top_bottom()
         self._build_components()
         self._build_chains()
-        logger.info("build complete", start_timer=_start)
+        # logger.info("build complete", start_timer=_start)
 
     def _reset_adjacency(self) -> None:
         self._better_than.clear()

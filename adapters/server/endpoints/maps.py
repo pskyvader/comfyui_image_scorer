@@ -51,7 +51,7 @@ def get_graph_data():
             )
 
         edges = [
-            {"source": winner.filename, "target": loser.filename, "weight": 1.0}
+            {"source": winner, "target": loser, "weight": 1.0}
             for winner, loser in deps.graph.get_all_links()
         ]
         all_components = deps.graph.get_all_components()

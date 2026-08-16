@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import random
 from typing import Any
+import time
 
 from ....core.observability.logger import SharedLogger
 from ....core.configuration.settings import config
@@ -17,6 +18,7 @@ from .pair_active import (
     phase_seed_coverage,
     phase_anchor_insert,
     phase_collapsible_pairs,
+    phase_single_win_loss,
     phase_chain_merge,
     phase_uncertainty_refine,
     phase_fallback,
@@ -58,8 +60,18 @@ PHASES: list[dict[str, Any]] = [
         "show_mu_sigma": False,
     },
     {
+        "single_win_loss": phase_single_win_loss,
+        "phase_label": "Phase 4 / Single Win-Loss",
+        "card_class": "card-single",
+        "description_class": "text-cyan-400",
+        "description": "compares images with exactly one win (highest score first) or exactly one loss (lowest score first), picking the closest-score adjacent pair until one image remains in each group",
+        "show_chain_info": False,
+        "show_mu_sigma": False,
+        "show_wins_losses": True,
+    },
+    {
         "refine": phase_uncertainty_refine,
-        "phase_label": "Phase 4 / Uncertainty Refine",
+        "phase_label": "Phase 5 / Uncertainty Refine",
         "card_class": "card-refine",
         "description_class": "text-amber-400",
         "description": "reduces uncertainty by comparing images above \u03c3 \u2265 {sigma_threshold} against the closest-mu seed images",
@@ -68,7 +80,7 @@ PHASES: list[dict[str, Any]] = [
     },
     {
         "chain_merge": phase_chain_merge,
-        "phase_label": "Phase 5 / Chain Merge",
+        "phase_label": "Phase 6 / Chain Merge",
         "card_class": "card-chain-merge",
         "description_class": "text-red-400",
         "description": "merges the longest chains by comparing internal mid-chain nodes, reducing the total number of chains",
@@ -122,10 +134,7 @@ def select_pair(
     comparison_repo: Any,
 ) -> tuple[tuple[str, str] | None, int | None]:
     global _skip_before
-
-    logger.debug(
-        f"skip before: {_skip_before}, candidate count: {len(candidate_images)}"
-    )
+    _start = time.perf_counter()
 
     if len(candidate_images) < 2:
         logger.warning(
@@ -133,17 +142,17 @@ def select_pair(
         )
         return None, None
 
-    existing_pairs_set = existing_pairs(comparison_repo)
+    existing_pairs_set = existing_pairs(cg)
+    logger.debug(f"existing pairs: {len(existing_pairs_set)}", start_timer=_start)
 
     seed_pool = set(stable_seed_pool(all_images))
-
     random.shuffle(candidate_images)
 
     seed_candidates = [img for img in candidate_images if img["filename"] in seed_pool]
 
     reserve_count = int(config["ranking"]["reserve_count"])
     total_comps: int = comparison_repo.get_total_comparisons()
-    # logger.debug(f"total comps: {total_comps}, skip before:{_skip_before}")
+
     if total_comps % reserve_count == 0:
         reset_skip()
 
@@ -160,6 +169,8 @@ def select_pair(
             result = fn(candidate_images, seed_pool, existing_pairs_set, cg)
         elif name == "collapsible":
             result = fn(candidate_images, cg, comparison_repo)
+        elif name == "single_win_loss":
+            result = fn(candidate_images, cg)
         elif name == "refine":
             result = fn(candidate_images, existing_pairs_set, cg)
         elif name == "chain_merge":
@@ -173,5 +184,5 @@ def select_pair(
             _skip_before = idx
             return result, idx
 
-    logger.warning("select_pair: no pair found after all phases")
+    logger.warning("No pair found after all phases")
     return None, None

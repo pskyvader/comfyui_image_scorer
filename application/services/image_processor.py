@@ -29,6 +29,7 @@ from ...domain.analysis.trueskill import (
 from ...domain.database.ports import ComparisonRepository, ImageRepository
 from ...domain.comparison.algorithm.phase_order import reset_skip
 from .graph_service import CrystalGraph
+from ...domain.comparison.state import invalidate_images_cache
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -254,7 +255,10 @@ class ImageProcessor:
     def get_fast_total_count(self, source_dir: str) -> int:
         source_path = Path(source_dir).resolve()
         count = 0
-        exclude_roots = {self._path_ops.ranked_root().resolve(), Path(output_dir).resolve()}
+        exclude_roots = {
+            self._path_ops.ranked_root().resolve(),
+            Path(output_dir).resolve(),
+        }
 
         for root, dirs, files in os.walk(source_path):
             root_path = Path(root).resolve()
@@ -608,3 +612,4 @@ class ImageProcessor:
         if should_clear:
             self._graph.rebuild_from_database()
             reset_skip()
+            invalidate_images_cache()

@@ -155,15 +155,13 @@ def get_next_pair():
         return result
 
     full_exclude = set(recent_files_ordered)
-    all_images = deps.image_repo.get_all_images()
-
-    logger.debug(f"all images: {len(all_images)}", start_timer=_start)
+    if not state.is_images_cache_valid():
+        state.set_images_cache(deps.image_repo.get_all_images())
 
     pair, phase_index = merge_sort_ranker.select_pair_for_comparison(
         exclude_set=full_exclude,
         crystal_graph=deps.graph,
         comparison_repo=deps.comparison_repo,
-        all_images=all_images,
     )
     logger.debug(f"phase {phase_index}", start_timer=_start)
     if not pair:
@@ -266,9 +264,10 @@ def submit_comparison():
 
     processor.clear_old_cache(force=False)
 
-    all_images = deps.image_repo.get_all_images()
-    data_a = state.get_cached_image(filename_a, all_images)
-    data_b = state.get_cached_image(filename_b, all_images)
+    if not state.is_images_cache_valid():
+        state.set_images_cache(deps.image_repo.get_all_images())
+    data_a = state.get_cached_image(filename_a)
+    data_b = state.get_cached_image(filename_b)
     if data_a is None or data_b is None:
         result = jsonify({"error": "Image not found"}), 404
         return result
