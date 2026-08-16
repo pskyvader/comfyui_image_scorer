@@ -9,6 +9,11 @@ const compareQueueLogger = FrontendLogger.create("external_modules.comparison.fr
 
 const DEFAULT_TIMEOUT_MS = 30000;
 
+// Parallel prefetch: number of concurrent fill workers (B2) and the
+// error sentinel for pipelined next-pair fetches (B1).
+const PREFETCH_WORKERS = 2;
+const PREFETCH_FETCH_ERROR = Symbol("pair fetch failed");
+
 // ── Timeout-aware fetch ──────────────────────────────────────────────
 
 /**
@@ -297,7 +302,27 @@ class PrefetchManager {
     }
 
     async _loop() {
-        // compareQueueLogger.info("Prefetch loop started");
+        // B2: fill the cache with multiple concurrent workers when
+        // parallel_requests is enabled, single worker otherwise.
+        const workers = this._parallelRequests ? PREFETCH_WORKERS : 1;
+        await Promise.all(Array.from({ length: workers }, () => this._fillWorker()));
+        this._prefetching = false;
+    }
+
+    _logFetchError(e) {
+        compareQueueLogger.error("Prefetch fetch failed", e);
+    }
+
+    /** getNextPair that never rejects — resolves PREFETCH_FETCH_ERROR on failure. */
+    _fetchPairQuiet() {
+        return CompareApi.getNextPair(this._timeoutMs).catch((e) => {
+            this._logFetchError(e);
+            return PREFETCH_FETCH_ERROR;
+        });
+    }
+
+    async _fillWorker() {
+        let pendingPairPromise = null;
 
         while (this._prefetching && this._cache.length < this._targetSize) {
             // Wait if outgoing submissions are still in-flight
@@ -306,16 +331,17 @@ class PrefetchManager {
                 continue;
             }
 
-            let pair;
-            try {
-                pair = await CompareApi.getNextPair(this._timeoutMs);
-            } catch (e) {
-                const isTimeout = e.name === "AbortError";
-                const reason = isTimeout ? "timed out" : e.message || String(e);
-                compareQueueLogger.error("Prefetch fetch failed", e);
-                continue;
+            const fetched = pendingPairPromise || this._fetchPairQuiet();
+
+            // B1: fetch the next pair's metadata while the current pair loads
+            if (this._parallelRequests) {
+                pendingPairPromise = this._fetchPairQuiet();
             }
 
+            const pair = await fetched;
+            if (pair === PREFETCH_FETCH_ERROR) {
+                continue;
+            }
             if (!pair) {
                 break; // no more pairs available
             }
@@ -346,8 +372,6 @@ class PrefetchManager {
             this._cache.push({ pair, leftImg, rightImg });
             this.onCacheChange();
         }
-
-        this._prefetching = false;
     }
 
     _loadImageWithTimeout(img, url) {

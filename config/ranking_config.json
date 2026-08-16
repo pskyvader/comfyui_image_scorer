@@ -6,7 +6,7 @@
     "batch_size": 1000,
     "default_score": 0.5,
     "reserve_count": 30,
-    "parallel_requests": false,
+    "parallel_requests": true,
     "timeout_ms": 30000,
     "seed_percentage": 5,
     "seed_target_comparisons": 10,

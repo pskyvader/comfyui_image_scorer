@@ -195,11 +195,11 @@ def phase_anchor_insert(
     existing_pair_set: set[tuple[str, str]],
     cg: CrystalGraph,
 ) -> tuple[str, str] | None:
-    _start = time.perf_counter()
-    pool_nodes = _build_low_count_pool(
+    _start: float = time.perf_counter()
+    pool_nodes: list[NodeProxy] = _build_low_count_pool(
         [img for img in candidate_images if img["filename"] not in seed_pool], cg
     )
-    reserve_count = config["ranking"]["reserve_count"]
+    reserve_count: int = config["ranking"]["reserve_count"]
 
     if len(pool_nodes) < reserve_count:
         logger.warning(
@@ -208,11 +208,13 @@ def phase_anchor_insert(
         )
         return None
     pool_nodes.sort(key=lambda img: (int(img.comparison_count), float(img.score)))
-    source_node = pool_nodes[0]
-    source_name = source_node.filename
-    source_mu_skill = source_node.mu_skill
+    source_node: NodeProxy = pool_nodes[0]
+    source_name: str = source_node.filename
+    source_mu_skill: float = source_node.mu_skill
 
-    remaining = [img for img in pool_nodes if img.filename != source_name]
+    remaining: list[NodeProxy] = [
+        img for img in pool_nodes if img.filename != source_name
+    ]
     remaining.sort(key=lambda opp: (abs(float(opp.mu_skill) - source_mu_skill),))
 
     seen_opponents = 0
@@ -223,7 +225,7 @@ def phase_anchor_insert(
         opp_name = opponent.filename
         if not _are_in_different_paths(source_name, opp_name, cg):
             continue
-        result = (source_name, opp_name)
+        result: tuple[str, str] = (source_name, opp_name)
         return result
     logger.debug(f"no pair found out of {seen_opponents} opponents")
     return None
