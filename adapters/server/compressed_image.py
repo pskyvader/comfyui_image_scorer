@@ -64,12 +64,12 @@ def compressed_image_response(src: Path, fname: str) -> Response:
     response = Response(data, mimetype="image/webp")
     response.headers["Content-Length"] = str(len(data))
     response.headers["Cache-Control"] = "private, max-age=86400"
-    logger.debug(
-        "compressed %s: %d -> %d bytes (%.1f%% smaller)",
-        fname,
-        st.st_size,
-        len(data),
-        (1 - len(data) / st.st_size) * 100,
-        start_timer=_start,
-    )
+    # logger.debug(
+    #     "compressed %s: %d -> %d bytes (%.1f%% smaller)",
+    #     fname,
+    #     st.st_size,
+    #     len(data),
+    #     (1 - len(data) / st.st_size) * 100,
+    #     start_timer=_start,
+    # )
     return response

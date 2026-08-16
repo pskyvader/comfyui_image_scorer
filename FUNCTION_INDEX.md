@@ -497,6 +497,8 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 | Name | Description |
 |---|---|
+| `pair_key(filename_a, filename_b)` | — |
+| `stable_seed_pool(images)` | — |
 | `is_collapsable_pair(filename_a, filename_b, cg)` | Check if a pair is collapsible (both top or both bottom in same component, no common chains). |
 | `filter_excluded_images(images, exclude_set)` | Remove images whose filename is in exclude_set. |
 
@@ -547,18 +549,13 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 | Name | Description |
 |---|---|
-| `stable_seed_pool(images)` | — |
-| `_pair_key(filename_a, filename_b)` | — |
-| `existing_pairs(comparison_repo)` | — |
-| `_score_gap(image_a, image_b)` | — |
-| `_find_unseen_candidates(source, candidates, pair_set)` | — |
-| `_are_in_different_paths(filename_a, filename_b, cg)` | — |
-| `_build_low_count_pool(candidate_images)` | — |
-| `phase_seed_coverage(seed_candidates, existing_pair_set, cg)` | — |
+| `phase_seed_coverage(seed_candidates, existing_pair_set)` | — |
 | `phase_anchor_insert(candidate_images, seed_pool, existing_pair_set, cg)` | — |
 | `_collect_chain_extremes(chains, candidate_names, check_list, use_bottom, cg)` | Return up to 10 qualifying chain extremes, least-compared first. |
-| `_collapsible_extreme_pair(chains, candidate_names, comparison_repo, cg)` | Anchor on the least-compared node and return its most score-similar same-type partner. |
-| `phase_collapsible_pairs(candidate_images, cg, comparison_repo)` | — |
+| `_closest_score_pair(pair_list)` | — |
+| `phase_collapsible_pairs(candidate_images, cg, comparison_repo)` | Anchor on the least-compared node and return its most score-similar same-type partner. |
+| `_single_nodes(cg, candidate_names, insertion_target, single_win)` | — |
+| `phase_single_win_loss(candidate_images, cg)` | — |
 | `phase_chain_merge(candidate_images, cg)` | — |
 | `phase_uncertainty_refine(candidate_images, pair_set, cg)` | — |
 | `phase_fallback(candidate_images, pair_set)` | — |

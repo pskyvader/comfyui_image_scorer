@@ -8,11 +8,29 @@ strategies.
 from typing import Any, Protocol
 import time
 
+from ....core.configuration.settings import config
+from ...graph.node_proxy import NodeProxy
+
 
 class CrystalGraph(Protocol):
     def get_node(self, node_id: str | None = None) -> Any: ...
     def get_component(self, node_id: str | None = None, component_id: int | None = None, chain_id: int | None = None) -> Any: ...
     def are_in_same_path(self, img1: str, img2: str) -> bool: ...
+
+
+def pair_key(filename_a: str, filename_b: str) -> tuple[str, str]:
+    return (
+        (filename_a, filename_b)
+        if filename_a <= filename_b
+        else (filename_b, filename_a)
+    )
+
+
+def stable_seed_pool(images: list[NodeProxy]) -> set[str]:
+    seed_percentage = int(config["ranking"]["seed_percentage"])
+    seed_size = max(1, len(images) * seed_percentage // 100)
+    by_comps = sorted(images, key=lambda node: node.comparison_count, reverse=True)
+    return {node.filename for node in by_comps[:seed_size]}
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +84,7 @@ def filter_excluded_images(
     if not exclude_set:
         return images
 
-    result = []
+    result: list[dict[str, Any]] = []
     for img in images:
         filename = img["filename"]
         if filename not in exclude_set:

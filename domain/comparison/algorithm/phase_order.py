@@ -22,9 +22,8 @@ from .pair_active import (
     phase_chain_merge,
     phase_uncertainty_refine,
     phase_fallback,
-    existing_pairs,
-    stable_seed_pool,
 )
+from .graph_helpers import pair_key, stable_seed_pool
 
 logger = SharedLogger.get_logger(__name__)
 
@@ -142,13 +141,25 @@ def select_pair(
         )
         return None, None
 
-    existing_pairs_set = existing_pairs(cg)
+    existing_pairs_set = {pair_key(winner, loser) for winner, loser in cg.get_all_links()}
     logger.debug(f"existing pairs: {len(existing_pairs_set)}", start_timer=_start)
 
-    seed_pool = set(stable_seed_pool(all_images))
+    seed_pool = stable_seed_pool(
+        [node for img in all_images if (node := cg.get_node(img["filename"])) is not None]
+    )
     random.shuffle(candidate_images)
 
-    seed_candidates = [img for img in candidate_images if img["filename"] in seed_pool]
+    candidate_nodes = [
+        node for img in candidate_images if (node := cg.get_node(img["filename"])) is not None
+    ]
+    if len(candidate_nodes) < 2:
+        logger.warning(
+            "select_pair: only %d candidates with graph nodes, need >=2",
+            len(candidate_nodes),
+        )
+        return None, None
+
+    seed_nodes = [node for node in candidate_nodes if node.filename in seed_pool]
 
     reserve_count = int(config["ranking"]["reserve_count"])
     total_comps: int = comparison_repo.get_total_comparisons()
@@ -164,25 +175,25 @@ def select_pair(
             continue
 
         if name == "seed":
-            result = fn(seed_candidates, existing_pairs_set, cg)
+            result = fn(seed_nodes, existing_pairs_set)
         elif name == "anchor":
-            result = fn(candidate_images, seed_pool, existing_pairs_set, cg)
+            result = fn(candidate_nodes, seed_pool, existing_pairs_set, cg)
         elif name == "collapsible":
-            result = fn(candidate_images, cg, comparison_repo)
+            result = fn(candidate_nodes, cg, comparison_repo)
         elif name == "single_win_loss":
-            result = fn(candidate_images, cg)
+            result = fn(candidate_nodes, cg)
         elif name == "refine":
-            result = fn(candidate_images, existing_pairs_set, cg)
+            result = fn(candidate_nodes, existing_pairs_set, cg)
         elif name == "chain_merge":
-            result = fn(candidate_images, cg)
+            result = fn(candidate_nodes, cg)
         elif name == "fallback":
-            result = fn(candidate_images, existing_pairs_set)
+            result = fn(candidate_nodes, existing_pairs_set)
         else:
             result = None
 
         if result:
             _skip_before = idx
-            return result, idx
+            return (result[0].filename, result[1].filename), idx
 
     logger.warning("No pair found after all phases")
     return None, None
