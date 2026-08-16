@@ -6,11 +6,12 @@
     "batch_size": 1000,
     "default_score": 0.5,
     "reserve_count": 30,
-    "parallel_requests": true,
+    "parallel_requests": false,
     "timeout_ms": 30000,
     "seed_percentage": 5,
     "seed_target_comparisons": 10,
     "insertion_target_comparisons": 3,
     "score_steepness": 2,
-    "sigma_threshold": 3.0
+    "sigma_threshold": 3.0,
+    "compress_images": true
 }

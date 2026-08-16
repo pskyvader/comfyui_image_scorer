@@ -11,10 +11,15 @@ from typing import Any
 from flask import Flask, send_from_directory, request, send_file, Response
 from urllib.parse import unquote
 
+
 from ...core.observability.logger import (
     get_logger,
     configure_package_logging,
+    ModuleLogger,
 )
+
+logger: ModuleLogger = get_logger(__name__)
+
 from ...core.configuration.settings import config
 from ...core.filesystem.paths import image_root
 
@@ -49,8 +54,7 @@ from ...infrastructure.loading.training_loader import training_loader
 from ...infrastructure.ml_models.training.model_trainer import model_trainer
 from ...infrastructure.loading.maps_loader import maps_list
 from .deps import ServerDeps
-
-logger = get_logger(__name__)
+from .compressed_image import compressed_image_response
 
 image_repo = SQLiteImagesRepository()
 comparison_repo = SQLiteComparisonsRepository()
@@ -216,19 +220,25 @@ def serve_image_by_name(filename: str):
     if score_q is not None:
         dest = compute_path_from_filename(fname, score_q)
         if dest.exists() and dest.is_file():
-            logger.debug(f"Serving image by score path", start_timer=_start)
+            # logger.debug(f"Serving image by score path", start_timer=_start)
+            if config["ranking"]["compress_images"]:
+                return compressed_image_response(dest, fname)
             return send_file(str(dest))
 
     db_entry = get_db_image(fname)
     if db_entry and db_entry["score"] is not None:
         dest = compute_path_from_filename(fname, db_entry["score"])
         if dest.exists() and dest.is_file():
-            logger.debug(f"Serving image by db score path", start_timer=_start)
+            # logger.debug(f"Serving image by db score path", start_timer=_start)
+            if config["ranking"]["compress_images"]:
+                return compressed_image_response(dest, fname)
             return send_file(str(dest))
 
     found = find_image_path(fname)
     if found:
-        logger.debug(f"Serving image by found path", start_timer=_start)
+        # logger.debug(f"Serving image by found path", start_timer=_start)
+        if config["ranking"]["compress_images"]:
+            return compressed_image_response(Path(found), fname)
         return send_file(str(found))
 
     logger.warning(f"Image not found: {filename}", start_timer=_start)
