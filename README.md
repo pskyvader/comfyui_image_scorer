@@ -12,7 +12,7 @@ No layer may import from a layer to its right. The **ComfyUI node integration is
 
 The codebase still violates parts of this documented architecture. The known violations (layer imports, `core` purity, structural defects) are enumerated in `REORGANIZATION_PLAN.md`, which is the live remediation roadmap and the source of truth for what must change.
 
-The pending revision (v4) targets `adapters/server/` only: strict CLI parity (every endpoint maps to a CLI command, the rest are removed), a rename cascade to CLI command names (`build`, `analyze`, `database`, `training`, `files`), removal of the server task system, and the synchronous log-capture backend. Nothing in this document's current layout changes until that work is done — see `REORGANIZATION_PLAN.md` for the full task list.
+The pending revision (v4) targets `adapters/server/` (strict CLI parity — every endpoint maps to a CLI command, the rest are removed — a rename cascade to CLI command names (`build`, `analyze`, `database`, `training`, `files`), removal of the server task system, and the synchronous log-capture backend) and, per the 2026-08-17 scope decision, extends to the §3.10 rules audit across all layers (try/except, prints, inline imports, defaults, module-level containers). Nothing in this document's current layout changes until that work is done — see `REORGANIZATION_PLAN.md` for the full task list.
 
 ---
 
@@ -254,7 +254,7 @@ def test_no_architectural_violations():
 AST layer scan in `REORGANIZATION_PLAN.md` §4 is the gate today (run
 manually). The previous plan revision closed the enumerated violations: the
 only `infrastructure` imports that remain are the 28 adapter-wiring
-statements in the three composition roots, and `pytest` passes (30 tests).
+statements in the three composition roots, and `pytest` passes (34 tests).
 
 Existing violations must be fixed by moving code across the boundary — never by
 relaxing the rule or deleting the check. The `core` row has an empty allowed

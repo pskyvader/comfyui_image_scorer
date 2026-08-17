@@ -1,20 +1,43 @@
 # Reorganization Plan — `comfyui_image_scorer` (v4)
 
-**Status (2026-08):** v2 is complete (verified against the live tree: 28
-adapter-wiring statements in the three composition roots, pytest 30 passed,
-ruff ARG/F401 clean, pyright 701-error baseline with zero new, node smoke OK).
+**Status (2026-08-17):** live-tree re-verification at commit `747b2bc`. v4
+tasks (§3.1–§3.9) are **not yet started** — the tree is pre-v4: `tasks.py`,
+`task_poller.js`, `/api/data` and `/api/analysis` are all present; there is
+no `files.py` and no `/train`, `/recalculate`, or `/cleanup` route; the
+rename cascade has not run. Verified baselines: **pytest 34 passed** (two
+test files added since v2), **ruff ARG/F401: 10 errors** — all in files this
+revision deletes or rewrites (`tasks.py` 3 F401, `endpoints/analysis.py` 1
+ARG, `core/observability/logger.py` 6: F401×3 + ARG001×2 + ARG003×1),
+**pyright 724 errors** (701 at v2 plus drift; ≈50 sit in the four endpoint
+files this revision rewrites). The §3.10 cluster counts were re-run against
+the live tree and match the table below exactly: try/except 51, prints 97,
+inline imports 26 statements across 15 files, module-level containers 7.
+One **uncommitted user edit** exists in
+`domain/comparison/algorithm/pair_active.py` (commented debug line +
+reformat) — preserved, out of scope, never touched.
+
+**Scope decision (2026-08-17):** execute the full plan **including the §3.10
+rules audit** (§3.1–§3.9 + §3.10 #37–#41). Carve-outs honored from §5: the
+CLI is not behaviorally modified — `adapters/cli/main.py` **and**
+`adapters/cli/deps.py` keep their lazy imports (§5 names the CLI's parsers,
+`main.py`, and `deps.py` as untouched; `deps.py` is additionally the
+composition root the endpoints consume); `batch_sizer.py` keeps its
+sanctioned try/except (#37); `run_stats.py` keeps its report prints (#38);
+`endpoints/maps.py` keeps its try/except (out-of-scope blueprint).
 v3 (CLI-parity remediation) is superseded by this revision, which extends it:
 **strict CLI parity, a full rename cascade to CLI command names, and the
 complete removal of the server task system.** Every command endpoint becomes
 a single direct call to its CLI command's function — no reimplementation
 (§1.1). The CLI (`adapters/cli/`) is the source of truth and is **not
-modified**.
+behaviorally modified**.
 
 **Scope:** `adapters/server/` (endpoints, `main.py`, `deps.py`),
 `adapters/*/frontend/` folders, `adapters/server/frontend/`, the docs that
 describe the module state (`AGENTS.md`, `README.md`, `FUNCTION_INDEX.md`),
-and the frontend `index.html`/`index.js`. Nothing else in the module is
-touched.
+the frontend `index.html`/`index.js`, and — per the 2026-08-17 scope
+decision — the §3.10 rules audit across all layers. The CLI is **not
+behaviorally modified** (`cli/main.py` and `cli/deps.py` keep their lazy
+imports; see the status note).
 
 **Strict parity rule:** every command endpoint maps to a CLI command; every
 endpoint with no CLI counterpart is removed (with its frontend
@@ -35,7 +58,8 @@ by the user. This plan never creates, edits, or deletes anything inside it.
 1. Every command runs in the ComfyUI venv (`& "E:\ComfyUI\.venv\Scripts\Activate.ps1"` first).
 2. Relative imports at module scope, at the top of each file. No inline
    imports anywhere in the module except `adapters/cli/main.py` (the one
-   established lazy dispatch pattern).
+   established lazy dispatch pattern) and `adapters/cli/deps.py` (§5
+   carve-out, status note).
 3. pyright strict must pass (`pyrightconfig.json`).
 4. No `try`/`except` blocks — failures surface with clear errors.
 5. No new test files. Existing tests must keep passing.
@@ -346,16 +370,27 @@ server-only features — out of scope, unchanged.
 
 ### 3.10 Rules audit — compliance tasks (2026-08)
 
-AST scan of the current tree (all layers, excluding
-`comfyui_image_scorer_old/`) against the module rules. The same clusters
-exist at `21570f4` / `c231460` / `003449d` — each commit reduced them
+**In scope for this revision** (scope decision 2026-08-17 — see status
+note). AST scan of the live tree (all layers, excluding
+`comfyui_image_scorer_old/`): the counts below were re-verified against
+commit `747b2bc` and match exactly. The clusters have existed since
+`21570f4` / `c231460` / `003449d` — those commits each reduced them
 (try/except 55→56→51, inline imports 35→35→25→26 under the current scan
-with only `cli/main.py` exempt, defaults 131→134→115);
-none of them introduced a rule. Fix per the rules — never by relaxing one.
-`comfyui_image_scorer_old/` stays read-only reference material.
+with only `cli/main.py` exempt, defaults 131→134→115) and none of them
+introduced a rule. Fix per the rules — never by relaxing one.
+`comfyui_image_scorer_old/` stays read-only reference material. Carve-outs
+that apply here: `cli/main.py` and `cli/deps.py` keep their lazy imports
+(§5); `batch_sizer.py` keeps its sanctioned try/except (#37);
+`run_stats.py` keeps its report prints (#38); `endpoints/maps.py` keeps its
+try/except (out-of-scope blueprint).
 
-37. **No `try`/`except` — 51 blocks.** Only sanctioned exception: the batch
-    sizer profiler (`infrastructure/ml_models/batch_sizer.py`), clean.
+37. **No `try`/`except` — 51 blocks.** Sanctioned exceptions: the batch
+    sizer profiler (`infrastructure/ml_models/batch_sizer.py`), clean, and
+    semantically-required try/finally cleanup kept with a comment and never
+    swallowing errors (e.g. the `_hpo_running` guard in
+    `application/hyperparameters/hyperparameter_optimizer.py`, the new
+    log-capture helper in §3.2 #5). `endpoints/maps.py` stays
+    (out-of-scope blueprint).
     - `infrastructure` (26): `training_loader.py` 6, `model_loader.py` 6,
       `images_repository.py` 5, `path_handler.py` 4, `model_trainer.py` 3,
       `folder_organizer.py` 1, `mediapipe_models.py` 1 (partial-download
@@ -372,19 +407,23 @@ none of them introduced a rule. Fix per the rules — never by relaxing one.
     (`core/observability/logger.py`): `run_stats.py` 25, `parameter_analysis.py`
     22, `plot.py` 14, `matrix_analysis.py` 13, `data_transformer.py` 11,
     `model_loader.py` 5, `endpoints/database.py` 3, `training_loader.py` 2,
-    `model_trainer.py` 1, `logger.py:728` debug leftover (also remove the
-    commented-out debug prints at `logger.py:394-397, 554-564`). `run_stats.py`
+    `model_trainer.py` 1, `logger.py:548` debug leftover (also remove the
+    commented-out debug prints at `logger.py:213, 216, 374, 380-387` and the
+    commented-out `frontend_enabled` task-write block at `logger.py:394-397`). `run_stats.py`
     prints the CLI report table — that is the command's output; keep it as
     report output and document the choice.
 39. **Module-scope imports — 26 imports to move to the top of their files
-    across 15 files.** The **only file allowed to keep inline imports is
+    across 15 files.** The **only files allowed to keep inline imports are
     `adapters/cli/main.py`** (its lazy command dispatch is the one
-    established exception). This overrides the old allowances for `scorer.py`,
-    `plot.py`, and `application/analysis/run_*_analysis.py`.
+    established exception) **and `adapters/cli/deps.py`** (§5: the CLI's
+    `deps.py` is untouched; see the status note). This overrides the old
+    allowances for `scorer.py`, `plot.py`, and
+    `application/analysis/run_*_analysis.py`.
     - `adapters/cli/` — `commands/training.py` 2 (`load_training_data`,
       `run_hpo_cycles`), `commands/vectors.py` 3 (`build_split_files`,
-      `build_full_files`, `run_rebuild_scores_only`), `deps.py` 3 (inside
-      `build_cli_deps`: `training_loader`, `model_trainer`, `maps_list`).
+      `build_full_files`, `run_rebuild_scores_only`). `deps.py`'s 3 lazy
+      imports inside `build_cli_deps` (`training_loader`, `model_trainer`,
+      `maps_list`) stay per §5.
     - server endpoints — `endpoints/comparison.py` 1 (`ComparisonRecorder`),
       `endpoints/data_transform.py` 1, `endpoints/training.py` 2.
     - module root `__init__.py` 2 — the PEP 562 `__getattr__` node mappings
@@ -425,9 +464,10 @@ none of them introduced a rule. Fix per the rules — never by relaxing one.
 ## 4. Verification (in order, ComfyUI venv)
 
 ```powershell
-pytest -q                          # 30 passed, no regressions
+pytest -q                          # 34 passed (2026-08-17 baseline), no regressions
 ruff check --select ARG,F401 --target-version py313 --exclude comfyui_image_scorer_old .
-pyright                            # 701-error baseline; zero new errors
+                                   # must end clean: the 10 baseline errors live in files this revision deletes/rewrites
+pyright                            # 724-error baseline (2026-08-17); zero new errors
 ```
 
 1. AST layer scan (§6 script of v2) → **28 statements, all in the three
@@ -457,7 +497,8 @@ pyright                            # 701-error baseline; zero new errors
 5. Inline-import scan: AST walk of every `.py` file (excluding
    `comfyui_image_scorer_old/`) — no `Import`/`ImportFrom` nodes inside
    function bodies or the `__main__` guard anywhere except
-   `adapters/cli/main.py`.
+   `adapters/cli/main.py` and `adapters/cli/deps.py` (§5 carve-out, see the
+   status note).
 
 ---
 
@@ -466,10 +507,16 @@ pyright                            # 701-error baseline; zero new errors
 - CLI changes (`adapters/cli/`) — source of truth, not modified (including
   the unused `--steps` on `train-model` and unused `--limit` on
   `database cleanup`). Endpoints import and call the CLI command functions
-  (§1.1); the CLI's parsers, `main.py`, and `deps.py` are untouched.
+  (§1.1); the CLI's parsers, `main.py`, and `deps.py` are untouched. Sole
+  exception: the §3.10 #39 module-scope import moves in `commands/training.py`
+  and `commands/vectors.py` (import hygiene only — zero behavior change).
 - `comparison.py`, `gallery.py`, `maps.py` blueprints and their frontends.
 - The `maps` (v1) frontend folder — dead but harmless.
-- `core`/`domain`/`application`/`infrastructure` behavior (the logger helper
-  in §3.2 #5 is the only non-`adapters` change, and it is additive).
+- `core`/`domain`/`application`/`infrastructure` behavior: **no behavioral
+  changes** — the §3.10 fixes (#37–#41) are mechanical rule compliance
+  (fail-fast try/except removal, prints → logger, module-scope imports,
+  defaults, container types) and the logger helper in §3.2 #5 is additive.
+  `domain/comparison/algorithm/pair_active.py` carries an uncommitted user
+  edit — never touched.
 - New ComfyUI nodes, new features, new dependencies, new test files.
 - Node names and workflow compatibility.

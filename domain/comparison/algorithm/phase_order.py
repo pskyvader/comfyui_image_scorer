@@ -99,11 +99,13 @@ PHASES: list[dict[str, Any]] = [
 
 
 _skip_before: int = 0
+_existing_pairs: set[tuple[str, str]] = set()
 
 
 def reset_skip() -> None:
-    global _skip_before
+    global _skip_before, _existing_pairs
     _skip_before = 0
+    _existing_pairs = set()
 
 
 def get_phases() -> list[dict[str, Any]]:
@@ -132,7 +134,7 @@ def select_pair(
     cg: Any,
     comparison_repo: Any,
 ) -> tuple[tuple[str, str] | None, int | None]:
-    global _skip_before
+    global _skip_before, _existing_pairs
     _start = time.perf_counter()
 
     if len(candidate_images) < 2:
@@ -141,16 +143,19 @@ def select_pair(
         )
         return None, None
 
-    existing_pairs_set = {pair_key(winner, loser) for winner, loser in cg.get_all_links()}
+    if len(_existing_pairs) == 0:
+        _existing_pairs = {
+            pair_key(winner, loser) for winner, loser in cg.get_all_links()
+        }
+    existing_pairs_set: set[tuple[str, str]] = _existing_pairs
     logger.debug(f"existing pairs: {len(existing_pairs_set)}", start_timer=_start)
 
-    seed_pool = stable_seed_pool(
-        [node for img in all_images if (node := cg.get_node(img["filename"])) is not None]
-    )
     random.shuffle(candidate_images)
 
     candidate_nodes = [
-        node for img in candidate_images if (node := cg.get_node(img["filename"])) is not None
+        node
+        for img in candidate_images
+        if (node := cg.get_node(img["filename"])) is not None
     ]
     if len(candidate_nodes) < 2:
         logger.warning(
@@ -158,6 +163,14 @@ def select_pair(
             len(candidate_nodes),
         )
         return None, None
+
+    seed_pool = stable_seed_pool(
+        [
+            node
+            for img in all_images
+            if (node := cg.get_node(img["filename"])) is not None
+        ]
+    )
 
     seed_nodes = [node for node in candidate_nodes if node.filename in seed_pool]
 

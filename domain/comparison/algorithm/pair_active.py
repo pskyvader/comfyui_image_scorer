@@ -152,7 +152,7 @@ def _closest_score_pair(
 ) -> tuple[NodeProxy, NodeProxy] | None:
     if not pair_list:
         return None
-    pair_list.sort(key=lambda pair: abs(pair[0].score - pair[1].score))
+    pair_list.sort(key=lambda pair: abs(pair[0].mu_skill - pair[1].mu_skill))
     return pair_list[0]
 
 
@@ -198,48 +198,45 @@ def phase_collapsible_pairs(
     return _closest_score_pair([(node_a, node_b) for node_b in nodes[1:]])
 
 
-def _single_nodes(
-    cg: CrystalGraph,
-    candidate_names: set[str],
-    insertion_target: int,
-    single_win: bool,
-) -> list[NodeProxy]:
-    nodes: list[NodeProxy] = []
-    for node in cg.get_all_nodes():
-        if node.filename not in candidate_names:
-            continue
-        if node.comparison_count <= insertion_target:
-            continue
-        links = (
-            node.get_links(worse_than=True)
-            if single_win
-            else node.get_links(better_than=True)
-        )
-        if len(links) == 1:
-            nodes.append(node)
-    return nodes
-
-
 def phase_single_win_loss(
-    candidate_images: list[NodeProxy],
+    candidate_nodes: list[NodeProxy],
     cg: CrystalGraph,
 ) -> tuple[NodeProxy, NodeProxy] | None:
-    _start = time.perf_counter()
-    candidate_names = {node.filename for node in candidate_images}
+    _start: float = time.perf_counter()
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
 
     for single_win, reverse in ((True, True), (False, False)):
-        nodes = _single_nodes(cg, candidate_names, insertion_target, single_win)
-        nodes.sort(key=lambda node: node.score, reverse=reverse)
-        pair_list = [(nodes[i], nodes[i + 1]) for i in range(len(nodes) - 1)]
-        result = _closest_score_pair(pair_list)
-        if result:
-            logger.debug(
-                f"single win/loss pair: {result}, single_win: {single_win}",
-                start_timer=_start,
+
+        nodes: list[NodeProxy] = []
+        for node in candidate_nodes:
+            if node.comparison_count <= insertion_target:
+                continue
+            links: list[NodeProxy] = (
+                node.get_links(worse_than=True)
+                if single_win
+                else node.get_links(better_than=True)
             )
+            if len(links) == 1:
+                nodes.append(node)
+
+            if len(nodes) > 10:
+                break
+
+        if len(nodes) < 2:
+            continue
+
+        nodes.sort(key=lambda node: node.comparison_count)  # , reverse=reverse)
+        pair_list: list[tuple[NodeProxy, NodeProxy]] = [
+            (nodes[i], nodes[i + 1]) for i in range(len(nodes) - 1)
+        ]
+        result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(pair_list)
+        if result:
+            # logger.debug(
+            #     f"single win/loss pair: {result}, single_win: {single_win}",
+            #     start_timer=_start,
+            # )
             return result
-    logger.debug("single win/loss: no pair found", start_timer=_start)
+    logger.debug("no pair found", start_timer=_start)
     return None
 
 
@@ -348,11 +345,7 @@ def phase_uncertainty_refine(
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
 
     candidate_nodes = sorted(
-        (
-            node
-            for node in candidate_images
-            if node.comparison_count > insertion_target
-        ),
+        (node for node in candidate_images if node.comparison_count > insertion_target),
         key=lambda node: -node.sigma_uncertainty,
     )
 
