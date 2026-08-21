@@ -11,7 +11,7 @@ from ...core.observability.logger import get_logger, ModuleLogger
 logger: ModuleLogger = get_logger(__name__)
 
 # Category order MUST match maps_loader.AGE/GENDER/RACE_CATEGORIES (model output index order).
-AGE_LABELS = [
+AGE_LABELS = (
     "0-2",
     "10-19",
     "20-29",
@@ -21,9 +21,9 @@ AGE_LABELS = [
     "50-59",
     "60-69",
     "more than 70",
-]
-GENDER_LABELS = ["Female", "Male"]
-RACE_LABELS = [
+)
+GENDER_LABELS = ("Female", "Male")
+RACE_LABELS = (
     "Black",
     "East Asian",
     "Indian",
@@ -31,7 +31,7 @@ RACE_LABELS = [
     "Middle Eastern",
     "Southeast Asian",
     "White",
-]
+)
 
 
 class FaceAttributeAnalyzer:

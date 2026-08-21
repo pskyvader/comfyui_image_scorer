@@ -1,5 +1,9 @@
 """Main server - Flask application for ranking system."""
 
+import matplotlib
+
+matplotlib.use("Agg")
+
 import sys
 import threading
 import time
@@ -46,9 +50,16 @@ from ...infrastructure.persistence.comparisons_repository import (
 )
 from ...infrastructure.persistence.deduplicate_scored import deduplicate_scored
 from ...infrastructure.persistence.cleanup_orphans import cleanup_orphans
+from ...infrastructure.persistence.database import vacuum_database
 from ...application.services.graph_service import CrystalGraph
 from ...application.services.image_processor import ImageProcessor, PathOps
-from ...infrastructure.ml_models.model_loader import model_loader
+from ...infrastructure.ml_models.model_loader import (
+    model_loader,
+    download_configured_models,
+)
+from ...infrastructure.external_services.mediapipe_models import (
+    download_mediapipe_models,
+)
 from ...infrastructure.ml_models.batch_sizer import BatchSizer
 from ...infrastructure.loading.training_loader import training_loader
 from ...infrastructure.ml_models.training.model_trainer import model_trainer
@@ -111,8 +122,11 @@ deps = ServerDeps(
     maps_provider=maps_list,
     training_loader=training_loader,
     model_trainer=model_trainer,
+    vacuum_database=vacuum_database,
     cleanup_orphans=cleanup_orphans,
     deduplicate_scored=deduplicate_scored,
+    download_configured_models=download_configured_models,
+    download_mediapipe_models=download_mediapipe_models,
 )
 
 app = Flask(__name__, static_folder=None)
@@ -126,19 +140,20 @@ from .endpoints.comparison import register_ranking_routes
 from .endpoints.gallery import register_gallery_routes
 from .endpoints.maps import register_maps_routes
 from .endpoints.database import register_database_routes
-from .endpoints.data_transform import register_data_transform_routes
+from .endpoints.build import register_build_routes
 from .endpoints.training import register_training_routes
-from .endpoints.analysis import register_analysis_routes
+from .endpoints.analyze import register_analyze_routes
+from .endpoints.files import register_files_routes
 
 SECTION_FRONTENDS = {
     "comparison": Path(__file__).parent.parent / "comparison" / "frontend",
     "gallery": Path(__file__).parent.parent / "gallery" / "frontend",
     "maps": Path(__file__).parent.parent / "maps" / "frontend",
     "maps2": Path(__file__).parent.parent / "maps2" / "frontend",
-    "database": Path(__file__).parent.parent / "database_structure" / "frontend",
-    "data": Path(__file__).parent.parent / "data_transform" / "frontend",
-    "training": Path(__file__).parent.parent / "training_hyperparameters" / "frontend",
-    "analysis": Path(__file__).parent.parent / "analysis" / "frontend",
+    "database": Path(__file__).parent.parent / "database" / "frontend",
+    "build": Path(__file__).parent.parent / "build" / "frontend",
+    "training": Path(__file__).parent.parent / "training" / "frontend",
+    "analyze": Path(__file__).parent.parent / "analyze" / "frontend",
 }
 
 SERVER_FRONTEND = Path(__file__).parent / "frontend"
@@ -147,9 +162,10 @@ register_ranking_routes(app, deps)
 register_gallery_routes(app, deps)
 register_maps_routes(app, deps)
 register_database_routes(app, deps)
-register_data_transform_routes(app, deps)
+register_build_routes(app, deps)
 register_training_routes(app, deps)
-register_analysis_routes(app, deps)
+register_analyze_routes(app, deps)
+register_files_routes(app, deps)
 
 # Rebuild graph once at startup (adapter composition root owns wiring)
 graph.rebuild_from_database()

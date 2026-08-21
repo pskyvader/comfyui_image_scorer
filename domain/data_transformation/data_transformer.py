@@ -10,6 +10,7 @@ from sklearn.preprocessing import PolynomialFeatures
 
 from ...core.observability.logger import get_logger
 from ...core.configuration.settings import config
+from ...core.filesystem.paths import maps_dir
 from ..analysis.trueskill import (
     public_score_from_rating,
     replay_ratings,
@@ -78,7 +79,7 @@ class DataTransformer:
 
     def filter_low_comparisons(
         self,
-        threshold: int = 0,
+        threshold: int,
     ) -> dict[str, tuple[float, int]]:
         """Return the kept subset as filename -> (score, count).
 
@@ -133,7 +134,10 @@ class DataTransformer:
             return rule_cached
 
         # Build (x, y) from the keyed inputs without imposing any ordering.
-        order = list(scores_keyed.keys())
+        # order: list[str] = list(scores_keyed.keys())
+        # filter out scores for missing vectors
+        order: list[str] = [fid for fid in scores_keyed.keys() if fid in vectors_keyed]
+
         x = np.array([vectors_keyed[fid] for fid in order], dtype=np.float32)
         y = np.array([scores_keyed[fid] for fid in order], dtype=np.float32)
 
@@ -350,7 +354,10 @@ class DataTransformer:
         )
 
         with tqdm(
-            total=n_samples, desc="Building Interaction Matrix", unit="samples", delay=3.0
+            total=n_samples,
+            desc="Building Interaction Matrix",
+            unit="samples",
+            delay=3.0,
         ) as pbar:
             for i in range(0, n_samples, batch_size):
                 end_idx = min(i + batch_size, n_samples)
@@ -442,15 +449,10 @@ def _label_person_map_slot(vec_name: str, pos_in_unit: int) -> str:
 
 def _load_map_slots(vec_name: str) -> list[str] | None:
     """Load the saved map JSON for a map-type vector, returning slot labels by index."""
-    from ...core.filesystem.paths import maps_dir
-
     path = os.path.join(maps_dir, f"{vec_name}_map.json")
     if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
     return None
 
 
@@ -461,7 +463,7 @@ def _print_vector_summary(
     total_in_vec: int,
     slot_size: int,
     per_unit_size: int | None,
-    start_idx: int = 0,
+    start_idx: int,
 ) -> None:
     """Print one vector line (or expanded lines for known multi-slot / map vectors)."""
     kept_count = len(kept_in_vec)
@@ -479,7 +481,7 @@ def _print_vector_summary(
         elif vec_type == "person_map":
             unit_labels_fn = lambda upos: _label_person_map_slot(vec_name, upos)
 
-        print(f"  {vec_name}  ({kept_count}/{total_in_vec} = {pct:.1f}%)")
+        logger.info("  %s  (%d/%d = %.1f%%)", vec_name, kept_count, total_in_vec, pct)
         if unit_labels_fn:
             for ui in range(n_units):
                 offset = ui * per_unit_size
@@ -489,18 +491,18 @@ def _print_vector_summary(
                 if kept_in_unit:
                     kept_positions = [i - offset for i in kept_in_unit]
                     labels = [unit_labels_fn(p) for p in kept_positions]
-                    print(f"    unit {ui}: kept({', '.join(labels)})")
+                    logger.info("    unit %d: kept(%s)", ui, ", ".join(labels))
                 elif n_units > 1:
                     pass  # skip units with nothing kept
             if kept_count == 0 and n_units == 1 and unit_labels_fn:
                 all_labels = [unit_labels_fn(p) for p in range(per_unit_size)]
-                print(f"    Sub-features: {', '.join(all_labels)}")
+                logger.info("    Sub-features: %s", ", ".join(all_labels))
         return
 
     # Map vector â? Convert absolute indices to local slots and look up labels
     if vec_type == "map" and kept_count > 0:
         slot_labels = _load_map_slots(vec_name)
-        print(f"  {vec_name}  ({kept_count}/{total_in_vec} = {pct:.1f}%)")
+        logger.info("  %s  (%d/%d = %.1f%%)", vec_name, kept_count, total_in_vec, pct)
         for i in kept_in_vec:
             local_slot = i - start_idx
             label = (
@@ -508,11 +510,11 @@ def _print_vector_summary(
                 if slot_labels and local_slot < len(slot_labels)
                 else f"slot_{local_slot}"
             )
-            print(f"    [{local_slot}] {label}")
+            logger.info("    [%d] %s", local_slot, label)
         return
 
     # Simple line per vector
-    print(f"  {vec_name:28s}  {kept_count:4d}/{total_in_vec:4d}  ({pct:5.1f}%)")
+    logger.info("  %-28s  %4d/%4d  (%5.1f%%)", vec_name, kept_count, total_in_vec, pct)
 
 
 def list_filtered_features(transformer: DataTransformer) -> None:
@@ -523,7 +525,7 @@ def list_filtered_features(transformer: DataTransformer) -> None:
     """
     cached = transformer.training_loader.load_feature_rule()
     if cached is None:
-        print(
+        logger.info(
             "No feature rule cache found. Run data_transformer.filter_unused_features() first."
         )
         return
@@ -533,9 +535,8 @@ def list_filtered_features(transformer: DataTransformer) -> None:
     total = mapping["total_features"]
     kept_set = set(kept_indices.tolist())
 
-    print(f"Total features: {total}")
-    print(f"Kept: {len(kept_indices)}, Dropped: {total - len(kept_indices)}")
-    print()
+    logger.info("Total features: %d", total)
+    logger.info("Kept: %d, Dropped: %d", len(kept_indices), total - len(kept_indices))
 
     # Group kept indices by vector
     vec_kept: dict[str, list[int]] = {vn: [] for vn in mapping["vector_ranges"]}
@@ -544,7 +545,7 @@ def list_filtered_features(transformer: DataTransformer) -> None:
         if info:
             vec_kept[info["vector_name"]].append(i)
 
-    print("--- Feature survival summary ---")
+    logger.info("--- Feature survival summary ---")
     for vec_name in sorted(mapping["vector_ranges"].keys()):
         rng = mapping["vector_ranges"][vec_name]
         slot_size = rng["slot_size"]

@@ -34,6 +34,7 @@ class CrystalGraph:
         self._images: dict[str, dict[str, Any]] = {}
         self._chain_map: dict[int, ChainDict] | None = None
         self._rebuilding: bool = False
+        self._creating_chain_map: bool = False
         self._image_repo = image_repo
         self._comparison_repo = comparison_repo
 
@@ -116,7 +117,7 @@ class CrystalGraph:
 
     # -- Node lookups ---------------------------------------------------
 
-    def get_node(self, node_id: str | None = None) -> NodeProxy | None:
+    def get_node(self, node_id: str | None) -> NodeProxy | None:
         if node_id is None or node_id not in self._chain.get_all_filenames():
             return None
         image_data: dict[str, Any] | None = self._images.get(node_id)
@@ -258,6 +259,10 @@ class CrystalGraph:
     def get_chains_map(self) -> dict[int, ChainDict]:
         if self._chain_map is not None:
             return self._chain_map
+        if self._creating_chain_map:
+            time.sleep(1)
+            return self.get_chains_map()
+        self._creating_chain_map = True
 
         min_chains: dict[int, list[str]] = self._chain.get_chains()
 
@@ -329,4 +334,6 @@ class CrystalGraph:
                 f"Chain mapping completed with {len(errors)} non real main chains"
                 # f": {errors}"
             )
+        self._creating_chain_map = False
+
         return self._chain_map

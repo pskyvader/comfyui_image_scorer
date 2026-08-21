@@ -11,7 +11,7 @@ const DEFAULT_TIMEOUT_MS = 30000;
 
 // Parallel prefetch: number of concurrent fill workers (B2) and the
 // error sentinel for pipelined next-pair fetches (B1).
-const PREFETCH_WORKERS = 2;
+const PREFETCH_WORKERS = 1;
 const PREFETCH_FETCH_ERROR = Symbol("pair fetch failed");
 
 // ── Timeout-aware fetch ──────────────────────────────────────────────
@@ -315,10 +315,11 @@ class PrefetchManager {
 
     /** getNextPair that never rejects — resolves PREFETCH_FETCH_ERROR on failure. */
     _fetchPairQuiet() {
-        return CompareApi.getNextPair(this._timeoutMs).catch((e) => {
-            this._logFetchError(e);
-            return PREFETCH_FETCH_ERROR;
-        });
+        return CompareApi.getNextPair(this._timeoutMs)
+            .catch((e) => {
+                this._logFetchError(e);
+                return PREFETCH_FETCH_ERROR;
+            });
     }
 
     async _fillWorker() {

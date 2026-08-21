@@ -43,8 +43,8 @@ class PathOps:
     sync_metadata: Callable[..., bool]
     clear_folder_cache: Callable[[], None]
     prewarm_folder_cache: Callable[[Path], None]
-    deduplicate_scored: Callable[[Path | None, bool, int], int]
-    cleanup_orphans: Callable[[Path | None, bool, bool], int]
+    deduplicate_scored: Callable[[Path | None, int], int]
+    cleanup_orphans: Callable[[Path | None], int]
 
 
 class ImageProcessor:
@@ -60,7 +60,6 @@ class ImageProcessor:
     ) -> None:
         ranking_conf = config["ranking"]
         self.max_workers = max_workers
-        self.batch_size = int(ranking_conf["batch_size"])
         self.default_score = float(ranking_conf["default_score"])
         self.reserve_count = int(ranking_conf["reserve_count"])
 
@@ -373,11 +372,9 @@ class ImageProcessor:
 
         self.reorganize_folder_structure()
 
-        ranked_root = self._path_ops.ranked_root()
-        self._path_ops.deduplicate_scored(root=ranked_root, dry_run=False, limit=0)
-        self._path_ops.cleanup_orphans(
-            root=ranked_root, dry_run=False, delete_enabled=True
-        )
+        ranked_root: Path = self._path_ops.ranked_root()
+        self._path_ops.deduplicate_scored(root=ranked_root, limit=0)
+        self._path_ops.cleanup_orphans(root=ranked_root)
         self._comparison_repo.clear_all_comparisons()
         self._image_repo.clear_all_images()
 

@@ -1,3 +1,8 @@
+from ....application.data_transform.prepare_data import (
+    build_full_files,
+    build_split_files,
+    run_rebuild_scores_only,
+)
 from ....core.observability.logger import get_logger, ModuleLogger
 from ....core.filesystem.paths import (
     vectors_data,
@@ -16,8 +21,6 @@ logger: ModuleLogger = get_logger(__name__)
 
 
 def run_split_vectors(limit: int, batch: bool, deps: CLIDeps) -> int:
-    from ....application.data_transform.prepare_data import build_split_files
-
     logger.info("Building split vector files (limit=%s, batch=%s)...", limit, batch)
     changed = False
     if limit > 0 and batch:
@@ -67,8 +70,6 @@ def run_split_vectors(limit: int, batch: bool, deps: CLIDeps) -> int:
 
 
 def run_full_vectors(deps: CLIDeps) -> int:
-    from ....application.data_transform.prepare_data import build_full_files
-
     logger.info("Building full vectors + text data from existing splits...")
     result = build_full_files(
         model_loader=deps.model_loader,
@@ -80,8 +81,6 @@ def run_full_vectors(deps: CLIDeps) -> int:
 
 
 def run_scores(deps: CLIDeps) -> int:
-    from ....application.data_transform.prepare_data import run_rebuild_scores_only
-
     logger.info("Building scores + comparisons...")
     result = run_rebuild_scores_only(comparison_repo=deps.comparison_repo)
     logger.info("Scores done: %s", result)

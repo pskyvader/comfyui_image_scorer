@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import erf, exp, pi, sqrt
+from typing import Any
+
+import random
+from tqdm import tqdm
 
 from ...core.configuration.settings import config
 
@@ -34,7 +38,8 @@ def expected_win_probability(first_rating: Rating, second_rating: Rating) -> flo
         + (_clamp_uncertainty(second_rating.sigma_uncertainty) ** 2)
     )
     return normal_cumulative_distribution(
-        SCORE_STEEPNESS * (first_rating.mu_skill - second_rating.mu_skill)
+        SCORE_STEEPNESS
+        * (first_rating.mu_skill - second_rating.mu_skill)
         / max(denominator, EPSILON)
     )
 
@@ -43,6 +48,10 @@ def public_score_from_rating(rating: Rating) -> float:
     return expected_win_probability(
         rating, Rating(mu_skill=INITIAL_MEAN, sigma_uncertainty=INITIAL_UNCERTAINTY)
     )
+
+
+def trueskill_score_from_rating(rating: Rating) -> float:
+    return rating.mu_skill - (3.0 * rating.sigma_uncertainty)
 
 
 def normal_probability_density(x: float) -> float:
@@ -79,7 +88,8 @@ def update_ratings(winner: Rating, loser: Rating) -> tuple[Rating, Rating]:
     loser_variance = loser_uncertainty**2
 
     winner_new_mean = (
-        winner.mu_skill + (winner_variance / combined_deviation) * skill_adjustment_weight
+        winner.mu_skill
+        + (winner_variance / combined_deviation) * skill_adjustment_weight
     )
     loser_new_mean = (
         loser.mu_skill - (loser_variance / combined_deviation) * skill_adjustment_weight
@@ -100,29 +110,52 @@ def update_ratings(winner: Rating, loser: Rating) -> tuple[Rating, Rating]:
     )
 
 
-def replay_ratings(rows: list[dict]) -> dict[str, tuple[Rating, int]]:
-    ordered = sorted(rows, key=lambda r: int(r.get("id", 0) or 0))
+def replay_ratings(
+    rows: list[dict[str, Any]], order: str = "random"
+) -> dict[str, tuple[Rating, int]]:
+    ordered: list[dict[str, Any]]
+    if order == "default":
+        ordered = sorted(rows, key=lambda r: int(r.get("id", 0) or 0))
+    elif order == "reverse":
+        ordered = sorted(rows, key=lambda r: int(r.get("id", 0) or 0), reverse=True)
+    elif order == "random":
+        ordered = rows.copy()
+        random.shuffle(ordered)
+    else:
+        raise ValueError(f"Invalid order: {order}")
+
     ratings: dict[str, Rating] = {}
     counts: dict[str, int] = {}
+    with tqdm(
+        total=len(ordered),
+        desc=f"replaying rsting with order {order}",
+        unit="bucket",
+        position=0,
+        leave=True,
+        delay=3.0,
+    ) as pbar:
+        for row in ordered:
+            left = str(row["filename_a"])
+            right = str(row["filename_b"])
+            winner = str(row["winner"])
+            if winner not in (left, right):
+                continue
+            loser: str = right if winner == left else left
 
-    for row in ordered:
-        left = str(row["filename_a"])
-        right = str(row["filename_b"])
-        winner = str(row["winner"])
-        if winner not in (left, right):
-            continue
-        loser = right if winner == left else left
+            winner_rating: Rating = ratings.get(winner, Rating())
+            loser_rating: Rating = ratings.get(loser, Rating())
+            ratings[winner], ratings[loser] = update_ratings(
+                winner_rating, loser_rating
+            )
+            counts[winner] = counts.get(winner, 0) + 1
+            counts[loser] = counts.get(loser, 0) + 1
 
-        winner_rating = ratings.get(winner, Rating())
-        loser_rating = ratings.get(loser, Rating())
-        ratings[winner], ratings[loser] = update_ratings(winner_rating, loser_rating)
-        counts[winner] = counts.get(winner, 0) + 1
-        counts[loser] = counts.get(loser, 0) + 1
+            pbar.update(1)
 
     return {fid: (rating, counts.get(fid, 0)) for fid, rating in ratings.items()}
 
 
-def rating_from_row(row: dict) -> Rating:
+def rating_from_row(row: dict[str, Any]) -> Rating:
     return Rating(
         mu_skill=float(row["rating_mu"]),
         sigma_uncertainty=float(row["rating_sigma"]),

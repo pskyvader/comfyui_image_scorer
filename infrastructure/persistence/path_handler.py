@@ -29,14 +29,11 @@ def prewarm_folder_cache(ranked_root: Path) -> None:
         base = ranked_root / f"scored_{i / 10:.1f}"
         if not base.exists():
             continue
-        try:
-            items = os.listdir(base)
-            has_subfolders = any(
-                item.startswith("scored_") and (base / item).is_dir() for item in items
-            )
-            _folder_listdir_cache[str(base)] = (len(items), has_subfolders)
-        except Exception:
-            pass
+        items = os.listdir(base)
+        has_subfolders = any(
+            item.startswith("scored_") and (base / item).is_dir() for item in items
+        )
+        _folder_listdir_cache[str(base)] = (len(items), has_subfolders)
 
 
 def clear_folder_cache() -> None:
@@ -63,17 +60,13 @@ def compute_path_from_filename(filename: str, score: float) -> Path:
     if cached is not None:
         file_count, has_subfolders = cached
     elif base_folder.exists():
-        try:
-            items = os.listdir(base_folder)
-            file_count = len(items)
-            has_subfolders = any(
-                item.startswith("scored_") and (base_folder / item).is_dir()
-                for item in items
-            )
-            _folder_listdir_cache[cache_key] = (file_count, has_subfolders)
-        except Exception:
-            file_count = 0
-            has_subfolders = False
+        items = os.listdir(base_folder)
+        file_count = len(items)
+        has_subfolders = any(
+            item.startswith("scored_") and (base_folder / item).is_dir()
+            for item in items
+        )
+        _folder_listdir_cache[cache_key] = (file_count, has_subfolders)
     else:
         file_count = 0
         has_subfolders = False
@@ -87,12 +80,9 @@ def compute_path_from_filename(filename: str, score: float) -> Path:
 
 def find_image_path(filename: str) -> Path | None:
     ranked_root = get_ranked_root()
-    try:
-        for root, _, files in os.walk(ranked_root):
-            if filename in files:
-                return Path(root) / filename
-    except Exception:
-        pass
+    for root, _, files in os.walk(ranked_root):
+        if filename in files:
+            return Path(root) / filename
     return None
 
 
@@ -218,10 +208,6 @@ def sync_image_metadata_to_json(
     ):
         return True
 
-    try:
-        atomic_write_json(str(json_path), data, indent=2)
-        _move_image_and_json(img_path, json_path, score)
-        return True
-    except Exception as exc:
-        logger.error("Failed to sync JSON metadata for %s: %s", filename, exc)
-        return False
+    atomic_write_json(str(json_path), data, indent=2)
+    _move_image_and_json(img_path, json_path, score)
+    return True

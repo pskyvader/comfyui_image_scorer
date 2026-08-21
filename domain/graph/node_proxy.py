@@ -9,13 +9,17 @@ if TYPE_CHECKING:
 
 from . import chain_proxy as _chain_proxy
 from . import component_proxy as _component_proxy
+from ..analysis.trueskill import Rating, trueskill_score_from_rating
 
 
 class NodeProxy:
     """Represents one image/node in the graph. Created on demand, zero overhead."""
 
     def __init__(
-        self, chain: ChainManager, node_id: str, image_data: dict[str, Any] | None = None
+        self,
+        chain: ChainManager,
+        node_id: str,
+        image_data: dict[str, Any] | None = None,
     ) -> None:
         self._chain: ChainManager = chain
         self._node_id: str = node_id
@@ -40,6 +44,12 @@ class NodeProxy:
     @property
     def sigma_uncertainty(self) -> float:
         return self._image_data.get("rating_sigma", 25.0 / 3.0)
+
+    @property
+    def trueskill_score(self) -> float:
+        return trueskill_score_from_rating(
+            Rating(mu_skill=self.mu_skill, sigma_uncertainty=self.sigma_uncertainty)
+        )
 
     @property
     def comparison_count(self) -> int:

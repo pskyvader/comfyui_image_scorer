@@ -26,11 +26,11 @@ def get_image(filename: str) -> dict[str, Any] | None:
 
 def add_image(
     filename: str,
-    score: float = 0.5,
-    comparison_count: int = 0,
-    prompt_tags: str | None = None,
-    rating_mu: float = 25.0,
-    rating_sigma: float = 25.0 / 3.0,
+    score: float,
+    comparison_count: int,
+    prompt_tags: str | None,
+    rating_mu: float,
+    rating_sigma: float,
 ) -> None:
     with get_db_connection() as conn:
         conn.execute(
@@ -49,97 +49,77 @@ def update_image_rating_state(
     rating_mu: float,
     rating_sigma: float,
     comparison_count: int,
-    touch_timestamp: bool = True,
+    touch_timestamp: bool,
     last_compared_at: str | None = None,
 ) -> bool:
-    try:
-        with get_db_connection() as conn:
-            if touch_timestamp:
-                conn.execute(
-                    """
-                    UPDATE images
-                    SET score=?, rating_mu=?, rating_sigma=?, comparison_count=?, last_compared_at=CURRENT_TIMESTAMP
-                    WHERE filename=?
-                    """,
-                    (float(score), float(rating_mu), float(rating_sigma), int(comparison_count), filename),
-                )
-            elif last_compared_at is not None:
-                conn.execute(
-                    """
-                    UPDATE images
-                    SET score=?, rating_mu=?, rating_sigma=?, comparison_count=?, last_compared_at=?
-                    WHERE filename=?
-                    """,
-                    (float(score), float(rating_mu), float(rating_sigma), int(comparison_count), str(last_compared_at), filename),
-                )
-            else:
-                conn.execute(
-                    """
-                    UPDATE images
-                    SET score=?, rating_mu=?, rating_sigma=?, comparison_count=?
-                    WHERE filename=?
-                    """,
-                    (float(score), float(rating_mu), float(rating_sigma), int(comparison_count), filename),
-                )
-            conn.commit()
-        return True
-    except Exception as exc:
-        logger.error("Failed to update rating state for %s: %s", filename, exc)
-        return False
-
-
-def update_image_tags(filename: str, prompt_tags: str) -> bool:
-    try:
-        with get_db_connection() as conn:
-            conn.execute(
-                "UPDATE images SET prompt_tags=? WHERE filename=?",
-                (prompt_tags, filename),
-            )
-            conn.commit()
-        return True
-    except Exception as exc:
-        logger.error("Failed to update tags for %s: %s", filename, exc)
-        return False
-
-
-def get_image_count() -> int:
-    try:
-        with get_db_connection() as conn:
-            row = conn.execute("SELECT COUNT(*) as cnt FROM images").fetchone()
-            return row["cnt"] if row else 0
-    except Exception as exc:
-        logger.error("Failed to count images: %s", exc)
-        return 0
-
-
-def clear_all_images() -> int:
-    try:
-        with get_db_connection() as conn:
-            cur = conn.execute("DELETE FROM images")
-            conn.commit()
-        return int(cur.rowcount or 0)
-    except Exception as exc:
-        logger.error("Error clearing images: %s", exc)
-        return 0
-
-
-def reset_all_image_ratings(score: float = 0.5) -> bool:
-    try:
-        MU0 = 25.0
-        SIGMA0 = MU0 / 3.0
-        with get_db_connection() as conn:
+    with get_db_connection() as conn:
+        if touch_timestamp:
             conn.execute(
                 """
                 UPDATE images
-                SET score=?, rating_mu=?, rating_sigma=?, comparison_count=0, last_compared_at=NULL
+                SET score=?, rating_mu=?, rating_sigma=?, comparison_count=?, last_compared_at=CURRENT_TIMESTAMP
+                WHERE filename=?
                 """,
-                (float(score), MU0, SIGMA0),
+                (float(score), float(rating_mu), float(rating_sigma), int(comparison_count), filename),
             )
-            conn.commit()
-        return True
-    except Exception as exc:
-        logger.error("Failed to reset ratings: %s", exc)
-        return False
+        elif last_compared_at is not None:
+            conn.execute(
+                """
+                UPDATE images
+                SET score=?, rating_mu=?, rating_sigma=?, comparison_count=?, last_compared_at=?
+                WHERE filename=?
+                """,
+                (float(score), float(rating_mu), float(rating_sigma), int(comparison_count), str(last_compared_at), filename),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE images
+                SET score=?, rating_mu=?, rating_sigma=?, comparison_count=?
+                WHERE filename=?
+                """,
+                (float(score), float(rating_mu), float(rating_sigma), int(comparison_count), filename),
+            )
+        conn.commit()
+    return True
+
+
+def update_image_tags(filename: str, prompt_tags: str) -> bool:
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE images SET prompt_tags=? WHERE filename=?",
+            (prompt_tags, filename),
+        )
+        conn.commit()
+    return True
+
+
+def get_image_count() -> int:
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT COUNT(*) as cnt FROM images").fetchone()
+        return row["cnt"] if row else 0
+
+
+def clear_all_images() -> int:
+    with get_db_connection() as conn:
+        cur = conn.execute("DELETE FROM images")
+        conn.commit()
+    return int(cur.rowcount or 0)
+
+
+def reset_all_image_ratings(score: float) -> bool:
+    MU0 = 25.0
+    SIGMA0 = MU0 / 3.0
+    with get_db_connection() as conn:
+        conn.execute(
+            """
+            UPDATE images
+            SET score=?, rating_mu=?, rating_sigma=?, comparison_count=0, last_compared_at=NULL
+            """,
+            (float(score), MU0, SIGMA0),
+        )
+        conn.commit()
+    return True
 
 
 class SQLiteImagesRepository:
@@ -180,7 +160,7 @@ class SQLiteImagesRepository:
         rating_mu: float,
         rating_sigma: float,
         comparison_count: int,
-        touch_timestamp: bool = True,
+        touch_timestamp: bool,
     ) -> bool:
         return update_image_rating_state(
             filename=filename,

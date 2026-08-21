@@ -153,7 +153,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 ## `core\observability\__init__.py`
 
-> Observability/logging — SharedLogger and ModuleLogger with configurable level/filter hooks, task-scoped output buffers (CaptureStream), SSE broadcast to frontend subscribers, and CustomFormatter for trimmed log output.
+> Observability/logging — SharedLogger and ModuleLogger with configurable level/filter hooks, synchronous log capture for command endpoints, and CustomFormatter for trimmed log output.
 
 
 ## `core\observability\logger.py`
@@ -164,74 +164,33 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 | Name | Description |
 |---|---|
-| `_custom_find_caller(stack_info=False, stacklevel=1)` | — |
-| `_is_progress_line(line)` | — |
-| `set_log_filter_hook(fn)` | Install a hook that is called for **every** output line across all |
+| `_custom_find_caller(_self, stack_info=False, _stacklevel=1)` | — |
+| `capture_log_output()` | Collect log output (package log records + stdout/stderr writes) during |
 | `get_logger(module_name=None)` | — |
 | `get_logger(module_name)` | — |
 | `get_logger(module_name=None)` | — |
 | `configure_package_logging(level=logging.INFO, fmt=None, *, datefmt='%H:%M:%S', trim_level_len=3, trim_module_len=15, trim_func_len=15, trim_msg_len=None)` | — |
-| `log_message(module_name, level_name, message, start_timer, task_id=None)` | — |
 
 ### Module-level constants
 
 | Symbol | Description |
 |---|---|
 | `LogLevelName` | `Literal['debug', 'info', 'warning', 'error', 'critical']` |
-| `_PROGRESS_INDICATORS` | `['%', '|', 'img/s', 'items/s', '[00:', 'it/s']` |
-| `_log_filter_hook` | ── Global filter hook — called for EVERY output line ───────────────── |
 
-### Class `_TaskOutput`
+### Class `_CaptureHandler` (logging.Handler)
 
-> Single point of control for ALL task output: logs, progress, prints,
+> Collects formatted package log records into a line list.
 
 | Name | Description |
 |---|---|
-| `context(task_id)` (classmethod) | — |
-| `current_task_id()` (classmethod) | — |
-| `register_buffer(task_id, lines)` (classmethod) | — |
-| `unregister_buffer(task_id)` (classmethod) | — |
-| `has_buffer(task_id)` (classmethod) | — |
-| `write(task_id, line, *, is_progress=False, module_name=None)` (classmethod) | Write a line of output. The single path for buffer + SSE. |
-
-### Class `CaptureStream` (io.TextIOBase)
-
-> Wraps stdout/stderr during a task.
-
-| Name | Description |
-|---|---|
-| `__init__(lines, original_stream, *, task_id=None)` | — |
-| `write(s)` | — |
-| `_process_line(line)` | — |
-| `flush()` | — |
-| `_flush_remaining()` | — |
-
-### Class `SSELogBroadcaster`
-
-> Broadcasts log lines to all connected SSE clients in real time.
-
-| Name | Description |
-|---|---|
-| `_ensure_dispatch()` (classmethod) | — |
-| `_dispatch_loop()` (classmethod) | — |
-| `subscribe()` (classmethod) | — |
-| `unsubscribe(sub_id)` (classmethod) | — |
-| `broadcast(line)` (classmethod) | — |
+| `__init__(lines, level)` | — |
+| `emit(record)` | — |
 
 ### Class `_DynamicModuleFilter` (logging.Filter)
 
 | Name | Description |
 |---|---|
 | `filter(record)` | — |
-
-### Class `TaskLogHandler` (logging.Handler)
-
-> Capture unmanaged logging records for a single task thread.
-
-| Name | Description |
-|---|---|
-| `__init__(lines, owner_thread_id)` | — |
-| `emit(record)` | — |
 
 ### Class `ModuleLogger`
 
@@ -254,24 +213,17 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 ### Class `SharedLogger`
 
-> Centralized backend logger and task log router.
+> Centralized backend logger.
 
 | Name | Description |
 |---|---|
 | `install_root_filter()` (classmethod) | — |
 | `set_name_filters(exact_names, prefixes)` (classmethod) | — |
 | `clear_name_filters()` (classmethod) | — |
-| `set_frontend_enabled(enabled)` (classmethod) | — |
-| `set_frontend_level(level_name)` (classmethod) | — |
 | `should_emit(module_name)` (classmethod) | — |
 | `get_logger(module_name)` (classmethod) | — |
-| `register_task_buffer(task_id, lines)` (classmethod) | — |
-| `unregister_task_buffer(task_id)` (classmethod) | — |
-| `task_context(task_id)` (classmethod) | — |
-| `current_task_id()` (classmethod) | — |
 | `format_message(message, start_timer)` (classmethod) | — |
-| `format_task_line(module_name, level_name, message)` (classmethod) | — |
-| `log(module_name, level_name, message, start_timer, task_id=None)` (classmethod) | — |
+| `log(module_name, level_name, message, start_timer)` (classmethod) | — |
 | `_normalize_level(level_name)` (staticmethod) | — |
 
 ### Class `CustomFormatter` (logging.Formatter)
@@ -1624,17 +1576,27 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 ## `adapters\__init__.py`
 
-> Adapters — external interface layer connecting the application to ComfyUI (node registration), CLI (command entry), web server (API + SSE streaming), and frontend JS/CSS/HTML assets.
+> Adapters — external interface layer connecting the application to ComfyUI (node registration), CLI (command entry), web server (REST API + frontend assets), and frontend JS/CSS/HTML assets.
 
 
-## `adapters\analysis\__init__.py`
+## `adapters\analyze\__init__.py`
 
-> Analysis adapter — frontend JS/CSS assets for the analysis/dashboard tab in the web UI: score distribution charts, trend graphs, and quality metrics.
+> Analyze adapter — frontend JS/CSS assets for the analysis/dashboard tab in the web UI: score distribution charts, trend graphs, and quality metrics.
 
 
-## `adapters\analysis\frontend\__init__.py`
+## `adapters\analyze\frontend\__init__.py`
 
-> Analysis frontend — static assets (JS, CSS, HTML) for the analysis visualization dashboard: statistical plots, trend lines, and data tables.
+> Analyze frontend — static assets (JS, CSS, HTML) for the analysis visualization dashboard: statistical plots, trend lines, and data tables.
+
+
+## `adapters\build\__init__.py`
+
+> Build adapter — frontend JS/CSS assets for the data preparation pipeline UI: split/full vector generation and cleanup controls.
+
+
+## `adapters\build\frontend\__init__.py`
+
+> Build frontend — static assets for data preparation controls: split/full vector generation, limits, and cleanup.
 
 
 ## `adapters\cli\__init__.py`
@@ -1853,24 +1815,14 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 > Comparison frontend — static assets for the image comparison workflow UI: side-by-side or overlay comparison, vote recording, and batch navigation.
 
 
-## `adapters\data_transform\__init__.py`
+## `adapters\database\__init__.py`
 
-> Data transform adapter — frontend JS/CSS assets for data transformation and preprocessing configuration UI.
-
-
-## `adapters\data_transform\frontend\__init__.py`
-
-> Data transform frontend — static assets for configuring data transformation pipelines: normalization, filtering, and feature extraction steps.
+> Database adapter — frontend JS/CSS assets for the database maintenance and file management UI.
 
 
-## `adapters\database_structure\__init__.py`
+## `adapters\database\frontend\__init__.py`
 
-> Database structure adapter — frontend JS/CSS assets for the database schema browser and table inspection UI.
-
-
-## `adapters\database_structure\frontend\__init__.py`
-
-> Database structure frontend — static assets for database inspection: schema viewer, table row browser, raw SQL query interface.
+> Database frontend — static assets for database maintenance and file management: rebuild, recalculate, cleanup, downloads.
 
 
 ## `adapters\gallery\__init__.py`
@@ -1915,7 +1867,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 ## `adapters\server\__init__.py`
 
-> Server adapter — web server providing REST API endpoints for remote access, SSE log streaming to frontend subscribers, and static asset serving for the web UI.
+> Server adapter — web server providing REST API endpoints and static asset serving for the web UI.
 
 
 ## `adapters\server\deps.py`
@@ -1927,6 +1879,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | Name | Description |
 |---|---|
 | `get_server_deps()` | — |
+| `to_cli_deps()` | — |
 
 ### Class `ServerDeps`
 
@@ -1943,37 +1896,58 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | `maps_provider` | — |
 | `training_loader` | — |
 | `model_trainer` | — |
-| `cleanup_orphans` | — |
+| `vacuum_database` | — |
 | `deduplicate_scored` | — |
+| `cleanup_orphans` | — |
+| `download_configured_models` | — |
+| `download_mediapipe_models` | — |
 
 
 ## `adapters\server\endpoints\__init__.py`
 
-> Server endpoints — HTTP request handler implementations for API operations: graph queries, ranking data, image metadata, database management, and status/info (future).
+> Server endpoints — HTTP request handler implementations for API operations: build pipeline, training, database maintenance, analysis, file management, ranking, gallery, and maps.
 
 
-## `adapters\server\endpoints\analysis.py`
+## `adapters\server\endpoints\analyze.py`
 
-> Analysis API - endpoints for statistics, parameter analysis, and reporting.
+> Analyze API - endpoints for statistics, parameter analysis, and matrix analysis.
 
 ### Module-level functions
 
 | Name | Description |
 |---|---|
-| `get_stats()` | — |
+| `stats()` | — |
 | `analyze_parameters()` | — |
 | `analyze_matrix()` | — |
-| `get_report_file()` | — |
-| `get_task(task_id)` | — |
-| `cancel_task(task_id)` | — |
-| `register_analysis_routes(app, deps)` | — |
+| `register_analyze_routes(app, deps)` | — |
 
 ### Module-level constants
 
 | Symbol | Description |
 |---|---|
-| `analysis_bp` | `Blueprint('analysis_v2', __name__, url_prefix='/api/analysis')` |
+| `analyze_bp` | `Blueprint('analyze', __name__, url_prefix='/api/analyze')` |
 | `logger` | `get_logger(__name__)` |
+
+
+## `adapters\server\endpoints\build.py`
+
+> Build API - endpoints for the data preparation pipeline.
+
+### Module-level functions
+
+| Name | Description |
+|---|---|
+| `prepare()` | — |
+| `delete_vectors()` | Delete the full vector files from disk, keeping the split files intact. |
+| `register_build_routes(app, deps)` | — |
+
+### Module-level constants
+
+| Symbol | Description |
+|---|---|
+| `build_bp` | `Blueprint('build', __name__, url_prefix='/api/build')` |
+| `logger` | `get_logger(__name__)` |
+| `_PREPARE_MODES` | `('split', 'full', 'all')` |
 
 
 ## `adapters\server\endpoints\comparison.py`
@@ -2004,45 +1978,17 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | `logger` | `get_logger(__name__)` |
 
 
-## `adapters\server\endpoints\data_transform.py`
-
-> Data Transform API - endpoints for data preparation and transformation.
-
-### Module-level functions
-
-| Name | Description |
-|---|---|
-| `_get_processor()` | — |
-| `prepare_data()` | — |
-| `scan_import()` | — |
-| `delete_vectors()` | Delete the full vector files from disk, keeping the split files intact. |
-| `get_task(task_id)` | — |
-| `register_data_transform_routes(app, deps)` | — |
-
-### Module-level constants
-
-| Symbol | Description |
-|---|---|
-| `data_bp` | `Blueprint('data_v2', __name__, url_prefix='/api/data')` |
-| `logger` | `get_logger(__name__)` |
-
-
 ## `adapters\server\endpoints\database.py`
 
-> Database endpoints - API routes for maintenance and file operations.
+> Database endpoints - API routes for maintenance.
 
 ### Module-level functions
 
 | Name | Description |
 |---|---|
-| `_get_processor()` | — |
-| `get_status()` | — |
-| `normalize()` | — |
 | `rebuild_database()` | — |
-| `sync_all()` | — |
-| `run_cleanup_orphans()` | — |
-| `run_deduplicate()` | — |
-| `get_task(task_id)` | — |
+| `recalculate_ratings()` | — |
+| `clean_database()` | — |
 | `register_database_routes(app, deps)` | — |
 
 ### Module-level constants
@@ -2051,6 +1997,29 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 |---|---|
 | `logger` | `get_logger(__name__)` |
 | `database_bp` | `Blueprint('database', __name__, url_prefix='/api/database')` |
+
+
+## `adapters\server\endpoints\files.py`
+
+> Files API - endpoints for file management operations.
+
+### Module-level functions
+
+| Name | Description |
+|---|---|
+| `delete_models()` | — |
+| `delete_maps()` | — |
+| `delete_downloaded_models()` | — |
+| `download_models()` | — |
+| `cleanup()` | — |
+| `register_files_routes(app, deps)` | — |
+
+### Module-level constants
+
+| Symbol | Description |
+|---|---|
+| `files_bp` | `Blueprint('files', __name__, url_prefix='/api/files')` |
+| `logger` | `get_logger(__name__)` |
 
 
 ## `adapters\server\endpoints\gallery.py`
@@ -2102,19 +2071,15 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 | Name | Description |
 |---|---|
-| `reset_configs()` | — |
-| `run_hpo()` | — |
-| `delete_models()` | — |
-| `get_task(task_id)` | — |
-| `get_training_config()` | — |
-| `update_training_config()` | — |
+| `train()` | — |
+| `hpo()` | — |
 | `register_training_routes(app, deps)` | — |
 
 ### Module-level constants
 
 | Symbol | Description |
 |---|---|
-| `training_bp` | `Blueprint('training_v2', __name__, url_prefix='/api/training')` |
+| `training_bp` | `Blueprint('training', __name__, url_prefix='/api/training')` |
 | `logger` | `get_logger(__name__)` |
 
 
@@ -2157,9 +2122,9 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | `graph` | `CrystalGraph(image_repo=image_repo, comparison_repo=comparison_repo)` |
 | `path_ops` | `PathOps(ranked_root=get_ranked_root, compute_path=compute_path_from_filename, sync_metadata=sync_image_metadata_to_json, clear_folder_cache=clear_folder_cache, prewarm_folder_cache=prewarm_folder_cache, deduplicate_scored=deduplicate_scored, cleanup_orphans=cleanup_orphans)` |
 | `image_processor` | `ImageProcessor(max_workers=int(config['ranking']['max_workers']), image_repo=image_repo, comparison_repo=comparison_repo, graph=graph, path_ops=path_ops)` |
-| `deps` | `ServerDeps(image_repo=image_repo, comparison_repo=comparison_repo, path_resolver=_PathResolverAdapter(), path_ops=path_ops, graph=graph, processor=image_processor, model_loader=model_loader, batch_sizer_factory=BatchSizer, maps_provider=maps_list, training_loader=training_loader, model_trainer=model_trainer, cleanup_orphans=cleanup_orphans, deduplicate_scored=deduplicate_scored)` |
+| `deps` | `ServerDeps(image_repo=image_repo, comparison_repo=comparison_repo, path_resolver=_PathResolverAdapter(), path_ops=path_ops, graph=graph, processor=image_processor, model_loader=model_loader, batch_sizer_factory=BatchSizer, maps_provider=maps_list, training_loader=training_loader, model_trainer=model_trainer, vacuum_database=vacuum_database, cleanup_orphans=cleanup_orphans, deduplicate_scored=deduplicate_scored, download_configured_models=download_configured_models, download_mediapipe_models=download_mediapipe_models)` |
 | `app` | `Flask(__name__, static_folder=None)` |
-| `SECTION_FRONTENDS` | `{'comparison': Path(__file__).parent.parent / 'comparison' / 'frontend', 'gallery': Path(__file__).parent.parent / 'gallery' / 'frontend', 'maps': Path(__file__).parent.parent / 'maps' / 'frontend', 'maps2': Path(__file__).parent.parent / 'maps2' / 'frontend', 'database': Path(__file__).parent.parent / 'database_structure' / 'frontend', 'data': Path(__file__).parent.parent / 'data_transform' / 'frontend', 'training': Path(__file__).parent.parent / 'training_hyperparameters' / 'frontend', 'analysis': Path(__file__).parent.parent / 'analysis' / 'frontend'}` |
+| `SECTION_FRONTENDS` | `{'comparison': Path(__file__).parent.parent / 'comparison' / 'frontend', 'gallery': Path(__file__).parent.parent / 'gallery' / 'frontend', 'maps': Path(__file__).parent.parent / 'maps' / 'frontend', 'maps2': Path(__file__).parent.parent / 'maps2' / 'frontend', 'database': Path(__file__).parent.parent / 'database' / 'frontend', 'build': Path(__file__).parent.parent / 'build' / 'frontend', 'training': Path(__file__).parent.parent / 'training' / 'frontend', 'analyze': Path(__file__).parent.parent / 'analyze' / 'frontend'}` |
 | `SERVER_FRONTEND` | `Path(__file__).parent / 'frontend'` |
 | `scanner_thread` | `None` |
 
@@ -2170,43 +2135,14 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | `sync_image_metadata_to_json(filename, score, rating_mu, rating_sigma, comparison_count, all_comparisons=None)` | — |
 
 
-## `adapters\server\routing\__init__.py`
+## `adapters\training\__init__.py`
 
-> Server routing — URL route registration and dispatch tables mapping HTTP methods + paths to endpoint handler functions (future).
-
-
-## `adapters\server\tasks.py`
-
-> Server-specific background task helpers (moved from core.utilities.tasks).
-
-### Module-level functions
-
-| Name | Description |
-|---|---|
-| `_run_captured(task_id, fn, *args, **kwargs)` | — |
-| `start_task(fn, *, task_prefix, args)` | — |
-| `set_task_output(task_id, data)` | — |
-| `get_task_status(task_id, since)` | — |
-| `cancel_task(task_id)` | — |
-
-### Module-level constants
-
-| Symbol | Description |
-|---|---|
-| `logger` | `get_logger(__name__)` |
-| `_TASK_OUTPUT` | `{}` |
-| `_TASK_LOCK` | `threading.Lock()` |
-| `_TASK_CANCEL` | `set()` |
+> Training adapter — frontend JS/CSS assets for the training and HPO UI: train top model and hyperparameter optimization.
 
 
-## `adapters\training_hyperparameters\__init__.py`
+## `adapters\training\frontend\__init__.py`
 
-> Training hyperparameters adapter — frontend JS/CSS assets for training configuration UI: hyperparameter sliders, preset loaders, and run controls.
-
-
-## `adapters\training_hyperparameters\frontend\__init__.py`
-
-> Training hyperparameters frontend — static assets for training configuration: learning rate, batch size, loss weight controls, and experiment tracking UI.
+> Training frontend — static assets for training controls: train top model and HPO cycle runs.
 
 
 ## `infrastructure\__init__.py`
@@ -2452,7 +2388,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 |---|---|
 | `_walk_all_files(root)` | — |
 | `_scored_root_files(root)` | — |
-| `cleanup_orphans(root=None, dry_run=False, delete_enabled=True)` | — |
+| `cleanup_orphans(root=None)` | — |
 | `main()` | — |
 
 ### Module-level constants
@@ -2543,7 +2479,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 |---|---|
 | `_md5(path)` | — |
 | `_merge_comparison_histories(keeper, discard, filename)` | — |
-| `deduplicate_scored(root=None, dry_run=False, limit=0)` | — |
+| `deduplicate_scored(root=None, limit=0)` | — |
 | `main()` | — |
 
 ### Module-level constants
@@ -2645,10 +2581,7 @@ stay in sync.
 | Path | Documented intent |
 |---|---|
 | `tests/test_architecture.py` | README “Dependency Violation Test”. AST-based layer-import scan; not created while test authoring is on hold |
-| `adapters/server/endpoints/build.py` | Renamed from `data_transform.py`; serves the `build` section (plan §3.3/§3.5) |
-| `adapters/server/endpoints/analyze.py` | Renamed from `analysis.py`; serves the `analyze` section (plan §3.3/§3.8) |
-| `adapters/server/endpoints/files.py` | New `files` blueprint, one synchronous route per `files` CLI command (plan §3.7) |
-| `adapters/build/frontend/` | Renamed from `adapters/data_transform/frontend/` (plan §3.3) |
-| `adapters/analyze/frontend/` | Renamed from `adapters/analysis/frontend/` (plan §3.3) |
-| `adapters/database/frontend/` | Renamed from `adapters/database_structure/frontend/` (plan §3.3) |
-| `adapters/training/frontend/` | Renamed from `adapters/training_hyperparameters/frontend/` (plan §3.3) |
+
+The v4 rename targets (`build`/`analyze`/`database`/`training` endpoints and
+frontends, `endpoints/files.py`) previously listed here are on disk now and
+indexed above.

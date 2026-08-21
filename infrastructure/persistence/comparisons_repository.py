@@ -35,8 +35,8 @@ def add_historical_comparison(
     filename_b: str,
     winner: str,
     timestamp: str,
-    weight: float = 1.0,
-    transitive_depth: int = 0,
+    weight: float,
+    transitive_depth: int,
 ) -> int:
     """Insert one historical comparison row if an exact copy does not already exist."""
     filename_a = str(filename_a)
@@ -87,9 +87,9 @@ def add_comparison(
     filename_a: str,
     filename_b: str,
     winner: str,
-    weight: float = 1.0,
-    transitive_depth: int = 0,
-    timestamp: str | None = None,
+    weight: float,
+    transitive_depth: int,
+    timestamp: str | None,
 ) -> int:
     """Record a comparison result."""
     filename_a = str(filename_a)
@@ -296,9 +296,9 @@ class SQLiteComparisonsRepository:
         filename_a: str,
         filename_b: str,
         winner: str,
-        weight: float = 1.0,
-        transitive_depth: int = 0,
-        timestamp: str | None = None,
+        weight: float,
+        transitive_depth: int,
+        timestamp: str | None,
     ) -> int:
         return add_comparison(
             filename_a=filename_a,
@@ -315,8 +315,8 @@ class SQLiteComparisonsRepository:
         filename_b: str,
         winner: str,
         timestamp: str,
-        weight: float = 1.0,
-        transitive_depth: int = 0,
+        weight: float,
+        transitive_depth: int,
     ) -> int:
         return add_historical_comparison(
             filename_a=filename_a,

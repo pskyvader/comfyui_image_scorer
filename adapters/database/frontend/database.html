@@ -1,0 +1,67 @@
+<div id="database-container" class="max-w-3xl mx-auto space-y-6">
+    <!-- Maintenance -->
+    <div class="glass rounded-2xl p-6 shadow-2xl">
+        <div class="section-title">Maintenance</div>
+        <div class="space-y-2">
+            <div class="flex items-center gap-3">
+                <button class="action-btn primary whitespace-nowrap" data-action="rebuild-db"> Rebuild DB from
+                    Ranked</button>
+                <span class="text-xs text-gray-400">Re-import ranked/ folder images + scores into empty DB</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <button class="action-btn whitespace-nowrap" data-action="recalculate">↻ Recalculate Ratings</button>
+                <span class="text-xs text-gray-400">Reset ratings and replay all comparisons</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <button class="action-btn whitespace-nowrap" data-action="cleanup">
+                    ✓ Clean comparisons</button>
+                <span class="text-xs text-gray-400">Clean comparison records and VACUUM the database</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- File Management -->
+    <div class="glass rounded-2xl p-6 shadow-2xl">
+        <div class="section-title">File Management</div>
+        <div class="space-y-2">
+            <div class="flex items-center gap-3">
+                <button class="action-btn danger whitespace-nowrap" data-action="remove-generated-models">Remove Generated Models</button>
+                <span class="text-xs text-gray-400">Delete the models/ folder</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <button class="action-btn danger whitespace-nowrap" data-action="remove-vector-maps">Remove Vector Maps</button>
+                <span class="text-xs text-gray-400">Delete the maps/ folder and vector map splits</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <button class="action-btn danger whitespace-nowrap" data-action="remove-downloaded-models">Remove Downloaded Models</button>
+                <span class="text-xs text-gray-400">Delete the downloaded_models/ folder (mediapipe)</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <button class="action-btn whitespace-nowrap" data-action="download-models">Download Models</button>
+                <span class="text-xs text-gray-400">Download models from the prepare config (user-initiated)</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <button class="action-btn primary whitespace-nowrap" data-action="cleanup-files">Files Cleanup</button>
+                <span class="text-xs text-gray-400">Deduplicate scored entries, then move orphaned files to root</span>
+            </div>
+            <div class="flex items-center gap-3 pl-1">
+                <label class="text-xs text-gray-400 flex items-center gap-2">
+                    Limit
+                    <input type="number" id="files-limit" value="0" min="0"
+                        class="bg-gray-900 border border-white/10 rounded px-2 py-0.5 w-20 text-xs">
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Output -->
+    <div class="glass rounded-2xl p-6 shadow-2xl">
+        <div class="flex items-center justify-between mb-3">
+            <div class="section-title mb-0">Output Log</div>
+            <button id="clear-log-btn" class="text-xs text-gray-500 hover:text-white transition">Clear</button>
+        </div>
+        <div id="log-area" class="log-area" style="max-height: 300px;">
+            <div class="text-gray-500">Ready.</div>
+        </div>
+    </div>
+</div>

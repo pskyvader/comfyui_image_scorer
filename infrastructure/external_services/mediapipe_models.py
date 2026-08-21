@@ -23,12 +23,12 @@ def download_mediapipe_models() -> None:
 
 def _download_to(url: str, dest: str, key: str) -> None:
     tmp = f"{dest}.part"
+    # finally guarantees the partial download is removed even when the transfer fails
     try:
         with urllib.request.urlopen(url, timeout=60) as response, open(tmp, "wb") as out:
             shutil.copyfileobj(response, out)
         os.replace(tmp, dest)
-    except Exception:
+    finally:
         if os.path.exists(tmp):
             os.remove(tmp)
-        raise
     logger.info("MediaPipe model '%s' downloaded", key)

@@ -2,6 +2,10 @@ import os
 
 import matplotlib.pyplot as plt
 
+from ....application.hyperparameters.hyperparameter_optimizer import (
+    load_training_data,
+    run_hpo_cycles,
+)
 from ....core.observability.logger import get_logger
 from ....core.configuration.settings import config
 from ....core.filesystem.paths import training_plots_dir
@@ -12,10 +16,6 @@ logger = get_logger(__name__)
 
 
 def train_model(deps: CLIDeps) -> int:
-    from ....application.hyperparameters.hyperparameter_optimizer import (
-        load_training_data,
-    )
-
     logger.info("Loading training data...")
     vectors, scores = load_training_data(
         filter_comparisons=True,
@@ -70,8 +70,6 @@ def run_hpo(
     optimization_steps: int | None,
     max_combos: int | None,
 ) -> int:
-    from ....application.hyperparameters.hyperparameter_optimizer import run_hpo_cycles
-
     defaults = config["training"]
     logger.info(
         "HPO options — cycles=%s, optimization_steps=%s, max_combos=%s",

@@ -1,20 +1,110 @@
 # Reorganization Plan — `comfyui_image_scorer` (v4)
 
-**Status (2026-08-17):** live-tree re-verification at commit `747b2bc`. v4
-tasks (§3.1–§3.9) are **not yet started** — the tree is pre-v4: `tasks.py`,
-`task_poller.js`, `/api/data` and `/api/analysis` are all present; there is
-no `files.py` and no `/train`, `/recalculate`, or `/cleanup` route; the
-rename cascade has not run. Verified baselines: **pytest 34 passed** (two
-test files added since v2), **ruff ARG/F401: 10 errors** — all in files this
-revision deletes or rewrites (`tasks.py` 3 F401, `endpoints/analysis.py` 1
-ARG, `core/observability/logger.py` 6: F401×3 + ARG001×2 + ARG003×1),
-**pyright 724 errors** (701 at v2 plus drift; ≈50 sit in the four endpoint
-files this revision rewrites). The §3.10 cluster counts were re-run against
-the live tree and match the table below exactly: try/except 51, prints 97,
-inline imports 26 statements across 15 files, module-level containers 7.
-One **uncommitted user edit** exists in
+**Status (2026-08-18):** §3.10 audit complete. Verified gates: **pytest 34
+passed**, **ruff ARG/F401 clean** except the untouched `pair_active.py`
+ARG001, **pyright 604** (baseline 633 — the +3 was `model_loader.py`'s four
+`logger.info` conversions flagged by strict mode and
+`parameter_analysis.py`'s term-stats info-args error; fixed by typing the
+config dicts and `term_stats`, which also cleared ~27 pre-existing
+unknown-variable errors). Tasks 37–39 complete (try/except 51->13 live
+sanctioned; prints 97->25 all in the `run_stats.py` report; inline imports
+moved to module scope, 26 sanctioned remain). Task 40 (function-arg
+defaults) complete:
+48 defaults removed across 18 functions (audit 183->135); all gates green
+after the change (pyright 604, pytest 34, ruff 1). Task 41 (global mutable
+state) complete: the 7 listed containers were already immutable; 5 more
+constant tables converted to tuples/frozensets/MappingProxyType; runtime
+caches documented as out of scope. §3.10 fully done.
+**v4 §3.1–§3.9 are complete** (two execution batches, 2026-08-17 — see the
+Progress notes below): task system deleted, rename cascade done, all command
+endpoints synchronous CLI calls, docs aligned. Verified baselines: **pytest 34 passed**, **ruff
+ARG/F401: 10 errors** at `747b2bc` — all in files this revision deletes or
+rewrites (`tasks.py` 3 F401, `endpoints/analysis.py` 1 ARG,
+`core/observability/logger.py` 6: F401×3 + ARG001×2 + ARG003×1) — now clean
+except the untouched `pair_active.py` ARG001, **pyright 724 errors** at
+`747b2bc` (now 604). The §3.10 cluster counts were re-run against the live
+tree and match the table below exactly: try/except 51, prints 97, inline
+imports 26 statements across 15 files, module-level containers 7. One
+**uncommitted user edit** exists in
 `domain/comparison/algorithm/pair_active.py` (commented debug line +
-reformat) — preserved, out of scope, never touched.
+reformat) — preserved, out of scope, never touched. During batch-2 route
+testing `output/models/` was deleted by a misdirected test stub — it is
+regeneratable via `python scorer.py files download models` (user-initiated);
+nothing tracked was lost. Restored by the user (2026-08-18) via
+`python scorer.py training train-model`.
+
+**v5 scope amendment (user-authorized, 2026-08-18):** the CLI is now modified
+beyond the §5 "no CLI changes" rule, with the matching endpoints and
+frontend:
+- `files remove models` → `files remove generated-models`
+  (`POST /api/files/remove-generated-models`)
+- `files remove maps` → `files remove vector-maps`
+  (`POST /api/files/remove-vector-maps`) — also deletes `split/map/`
+  (data-driven map splits are invalidated once the maps tables are gone)
+- `files remove vectors` (`POST /api/build/delete-vectors`) now deletes all
+  split categories **except `split/image/`** (CLIP embeddings are the only
+  at-all-costs folder; recovery requires re-analysis)
+- `files cleanup` / `POST /api/files/cleanup` dropped the preview flag and
+  the toggle parameters (`delete_enabled` / `--no-delete`) — the command
+  always applies changes (`deduplicate_scored(root, limit)` +
+  `cleanup_orphans(root)`)
+The dynamic architecture test `tests/test_commands_endpoints.py` covers the
+resulting contract.
+
+** §3.1–§3.8
+backend + frontend rewrites complete. `tasks.py` and `task_poller.js`
+deleted; all command endpoints are synchronous, one call to the CLI command
+function, returning `{"status": "done", "result", "log"}` via the new
+`capture_log_output()` helper; the rename cascade ran (`build`/`analyze`/
+`database`/`training` folders + `endpoints/build.py`/`analyze.py`,
+`/api/build`/`/api/analyze` prefixes, `data_bp`/`analysis_bp` →
+`build_bp`/`analyze_bp`); `training` exposes only `/train` + `/hpo`;
+`build` exposes only `/prepare` (mode split/full/all) + `/delete-vectors`;
+`database` exposes `/rebuild-db`/`/recalculate`/`/cleanup` (tasks 23–26 done
+ahead of schedule — forced by the `tasks.py` deletion); `analyze` exposes
+`/stats`/`/analyze-parameters`/`/analyze-matrix` (tasks 31–32 done ahead of
+schedule — the parity rule requires them); `endpoints/files.py` exists with
+`/remove-generated-models` only (task 27's remaining routes pending). `ServerDeps` is
+now a `CLIDeps` superset with `to_cli_deps()`; matplotlib Agg set at server
+startup; frontend views are one-shot log renderers. §3.9 docs and §3.10
+rules audit (#37–#41) still pending. Verified: pytest 34 passed, ruff
+ARG/F401 clean (only the untouched `pair_active.py` ARG001 remains), pyright
+668 errors (baseline 724, zero new), route map matches §1.1 exactly, node
+registration OK.
+
+**Progress (2026-08-17, second execution batch — tasks 21–36 done, §3.1–§3.9
+complete):** `endpoints/files.py` now has all five routes — `/remove-generated-models`,
+`/remove-vector-maps`, `/remove-downloaded-models`, `/download-models`
+(user-initiated only, sets `HF_HUB_OFFLINE=0`), `/cleanup` (`limit` body
+param) — each body identical to the `files` CLI dispatch in
+`cli/main.py`; the database view gained the File Management card (Remove
+Generated Models/Vector Maps/Downloaded Models, Download Models, Files
+Cleanup with limit input). Docs aligned: `AGENTS.md` was already rules-only (verified,
+no edits); `README.md` updated (v4-complete paragraph, renamed layout tree,
+commands↔endpoints parity table, dependency-table exception for CLI parity,
+30 infra-wiring statements, removed `routing/` — it was an empty dead
+package, deleted); `FUNCTION_INDEX.md` regenerated (renamed adapters/
+endpoints/frontend sections, `files.py`, `capture_log_output`, dropped
+task-system symbols `_TaskOutput`/`CaptureStream`/`SSELogBroadcaster`/
+`TaskLogHandler`/`set_log_filter_hook`/`_is_progress_line` and the
+`tasks.py`/`routing/` sections; renamed `__init__.py` docstrings refreshed).
+Re-check of batch 1 found and fixed one real bug: the renamed CSS files
+still targeted the old container IDs (`#transform-container` etc.) — now
+`#build-container`/`#analyze-container`/`#database-container`. Pyright:
+640 errors (724 baseline — zero new; partial-unknown body-parsing errors
+fixed with `dict[str, Any]` + `app: Flask` register signatures on the four
+rewritten endpoints). Live smoke: server starts, `/` and `/api/analyze/stats`
+respond 200; `/api/files/cleanup` returns 200 with
+`{"duplicates_removed", "orphans_cleaned"}` (dedup scan is slow by nature —
+~100s on this dataset; faithful CLI semantics). Full gates: pytest 34
+passed, ruff ARG/F401 clean (only `pair_active.py`), AST scan 30 infra
+statements all in the three composition roots (zero in endpoints), route map
+exact, no `/task` routes, no TaskPoller references, no stale frontend
+actions, `AestheticScore` loads. **Outstanding:** §3.10 (#37–#41) rules
+audit, still pending. **Note:** during route testing `output/models/` was
+deleted (test stub misdirected) — it is regeneratable via
+`python scorer.py files download models` (user-initiated); nothing tracked
+was lost.
 
 **Scope decision (2026-08-17):** execute the full plan **including the §3.10
 rules audit** (§3.1–§3.9 + §3.10 #37–#41). Carve-outs honored from §5: the
@@ -101,12 +191,12 @@ by the user. This plan never creates, edits, or deletes anything inside it.
 | `database` | `cleanup` | `comparison_repo.clean_comparisons()` + `vacuum_database()` (`commands/database.py:9`) |
 | `database` | `rebuild` | `processor.rebuild_database_from_ranked()` (`commands/database.py:18`) |
 | `database` | `recalculate` | reset all ratings → `replay_ratings` → update each image (`commands/database.py:24`) |
-| `files` | `remove vectors` | `delete_full_vectors()` |
-| `files` | `remove models` | `remove_models()` |
-| `files` | `remove maps` | `remove_directory(maps_dir)` |
+| `files` | `remove vectors` | `delete_full_vectors()` (deletes all splits except `image/`) |
+| `files` | `remove generated-models` | `remove_models()` |
+| `files` | `remove vector-maps` | `remove_directory(maps_dir)` + `remove_directory(split_dir/"map")` |
 | `files` | `remove downloaded-models` | `remove_directory(mediapipe_models_dir)` |
 | `files` | `download models` | `download_configured_models()` + `download_mediapipe_models()` (user-initiated) |
-| `files` | `cleanup` | `deduplicate_scored(root=None, dry_run, limit)` + `cleanup_orphans(root=None, dry_run)` |
+| `files` | `cleanup` | `deduplicate_scored(root=None, limit)` + `cleanup_orphans(root=None)` |
 | `analyze` | `parameters` | `run_parameter_analysis()` |
 | `analyze` | `matrix` | `run_matrix_analysis()` |
 | `analyze` | `stats` | `run_stats(image_repo, comparison_repo)` |
@@ -131,11 +221,11 @@ shape. No endpoint reimplements command logic.
 | `POST /api/database/rebuild-db` | `database rebuild` | `rebuild(deps)` |
 | `POST /api/database/recalculate` | `database recalculate` | `recalculate(deps)` |
 | `POST /api/database/cleanup` | `database cleanup` | `cleanup(deps)` |
-| `POST /api/files/remove-models` | `files remove models` | `remove_models()` |
-| `POST /api/files/remove-maps` | `files remove maps` | `remove_directory(Path(maps_dir))` |
+| `POST /api/files/remove-generated-models` | `files remove generated-models` | `remove_models()` |
+| `POST /api/files/remove-vector-maps` | `files remove vector-maps` | `remove_directory(Path(maps_dir))`; `remove_directory(Path(split_dir) / "map")` |
 | `POST /api/files/remove-downloaded-models` | `files remove downloaded-models` | `remove_directory(Path(mediapipe_models_dir))` |
 | `POST /api/files/download-models` | `files download models` | `os.environ["HF_HUB_OFFLINE"] = "0"`; `deps.download_configured_models()`; `deps.download_mediapipe_models()` |
-| `POST /api/files/cleanup` | `files cleanup` | `deps.deduplicate_scored(root=None, dry_run, limit)`; `deps.cleanup_orphans(root=None, dry_run, delete_enabled=not dry_run)` |
+| `POST /api/files/cleanup` | `files cleanup` | `deps.deduplicate_scored(root=None, limit)`; `deps.cleanup_orphans(root=None)` |
 | `GET /api/analyze/stats` | `analyze stats` | `run_stats(image_repo=deps.image_repo, comparison_repo=deps.comparison_repo)` |
 | `POST /api/analyze/analyze-parameters` | `analyze parameters` | `run_parameter_analysis()` |
 | `POST /api/analyze/analyze-matrix` | `analyze matrix` | `run_matrix_analysis()` |
@@ -241,12 +331,13 @@ server-only features — out of scope, unchanged.
     `max_combos` are passed through; absent/`None` → config defaults (exactly
     like the CLI's `--cycles`/`--optimization-steps`/`--max-combos`).
 14. **Remove `POST /api/training/reset`** and **`GET/POST
-    /api/training/config`** — no CLI counterpart; move **`POST
-    /api/training/remove-models`** to `endpoints/files.py` (§3.7 #27).
+    /api/training/config`** — no CLI counterpart; the training "remove
+    models" route moves to `endpoints/files.py` (§3.7 #27) as
+    `POST /api/files/remove-generated-models`.
 15. **Frontend:** remove the "Optimize Hyperparameters" (`optimize-hpo`),
     "View Config" (`get-training-config`), "Reset Training objects"
-    (`reset-config`) buttons/actions, and the "Remove Models"
-    (`remove-models`) action (its route moves to §3.7). Keep `train-top` →
+    (`reset-config`) buttons/actions, and the "Remove Generated Models"
+    (`remove-generated-models`) action (its route moves to §3.7). Keep `train-top` →
     `/training/train` and `hpo-cycle` → `/training/hpo`.
 
 ### 3.5 `build` — `endpoints/build.py` + `adapters/build/frontend/`
@@ -305,16 +396,17 @@ server-only features — out of scope, unchanged.
 27. **Create `endpoints/files.py`** (`files_bp`, `/api/files`). Every route
     body is the exact body CLI `main.py` runs for the matching `files`
     command — one call per function, no extra logic:
-    - `POST /remove-models` → `remove_models()` (moved from
-      `endpoints/training.py`; matches `files remove models`);
-    - `POST /remove-maps` → `remove_directory(Path(maps_dir))`;
+    - `POST /remove-generated-models` → `remove_models()` (moved from
+      `endpoints/training.py`; matches `files remove generated-models`);
+    - `POST /remove-vector-maps` → `remove_directory(Path(maps_dir))`;
+      `remove_directory(Path(split_dir) / "map")`;
     - `POST /remove-downloaded-models` →
       `remove_directory(Path(mediapipe_models_dir))`;
     - `POST /download-models` → `os.environ["HF_HUB_OFFLINE"] = "0"`;
       `deps.download_configured_models()`; `deps.download_mediapipe_models()`
       (**user-initiated only** — button click; no background downloads);
-    - `POST /cleanup` → `deps.deduplicate_scored(root=None, dry_run, limit)`;
-      `deps.cleanup_orphans(root=None, dry_run, delete_enabled=not dry_run)`
+    - `POST /cleanup` → `deps.deduplicate_scored(root=None, limit)`;
+      `deps.cleanup_orphans(root=None)`
       — the whole `files cleanup` command, replacing the old split
       `/api/database/deduplicate` + `/api/database/cleanup-orphans` routes.
       `root=None` everywhere, exactly like the CLI (the old
@@ -327,10 +419,11 @@ server-only features — out of scope, unchanged.
     endpoint file.**
 29. **Register** `register_files_routes(app, deps)` in
     `adapters/server/main.py`.
-30. **Frontend (database view):** add "Remove Maps", "Remove Downloaded
-    Models", "Download Models", and a single "Files Cleanup" button (with a
-    dry-run toggle) — the dedup/orphan buttons it replaces are removed
-    (§3.6 #27); the "Remove Models" button moves here from the training view.
+30. **Frontend (database view):** add "Remove Vector Maps", "Remove
+    Downloaded Models", "Download Models", and a single "Files Cleanup"
+    button (with a limit input) — the dedup/orphan buttons it replaces are
+    removed (§3.6 #27); the "Remove Generated Models" button moves here from
+    the training view.
     Render the returned log.
 
 ### 3.8 `analyze` — `endpoints/analyze.py` + `adapters/analyze/frontend/`
@@ -402,7 +495,13 @@ try/except (out-of-scope blueprint).
       `maps.py` 1, `tasks.py` 1 (try/finally — delete with §3.1).
     - `application` (2): `hyperparameter_optimizer.py` 1 (try/finally),
       `scoring_service.py` 1.
-    - `core` (1): `utilities/helpers.py`.
+    - `core` (1): `utilities/helpers.py`.: 51 -> 13 live try blocks (AST-verified; 38 removed).
+    The remaining 13 are the sanctioned/semantically-required ones:
+    `batch_sizer.py` profiler, `mediapipe_models.py` partial-download cleanup,
+    `model_loader.py` 6 download-path guards, try/finally with comments in
+    `chain_manager.py` (recursionlimit reset), `hyperparameter_optimizer.py`
+    (`_hpo_running`), `logger.py` (log-capture helper), `image_vector.py`,
+    and `endpoints/maps.py` (out-of-scope blueprint).
 38. **No `print()` — 97 calls.** Replace with `get_logger(__name__)`
     (`core/observability/logger.py`): `run_stats.py` 25, `parameter_analysis.py`
     22, `plot.py` 14, `matrix_analysis.py` 13, `data_transformer.py` 11,
@@ -411,7 +510,9 @@ try/except (out-of-scope blueprint).
     commented-out debug prints at `logger.py:213, 216, 374, 380-387` and the
     commented-out `frontend_enabled` task-write block at `logger.py:394-397`). `run_stats.py`
     prints the CLI report table — that is the command's output; keep it as
-    report output and document the choice.
+    report output and document the choice.: 97 -> 25 (AST-verified; 72 removed). The remaining 25
+    are all in `application/analysis/run_stats.py` — the CLI report table is
+    the command's output, kept as documented.
 39. **Module-scope imports — 26 imports to move to the top of their files
     across 15 files.** The **only files allowed to keep inline imports are
     `adapters/cli/main.py`** (its lazy command dispatch is the one
@@ -443,13 +544,29 @@ try/except (out-of-scope blueprint).
     Already module-scope conditionals at the top of their files — leave
     as-is: the `folder_paths` config guard (`adapters/cli/deps.py:35`,
     `adapters/server/main.py:23`, `adapters/comfyui/services.py:7`) and the
-    `if TYPE_CHECKING:` cycle-breaker imports in `domain/graph/` (9).
-40. **Function-arg defaults — 115** ("always try to avoid"): 93 in
+    `if TYPE_CHECKING:` cycle-breaker imports in `domain/graph/` (9).: all 26 movable inline imports moved to module scope
+    (AST-verified). Remaining 26 are the sanctioned exceptions: `cli/main.py`
+    10 lazy dispatch, `cli/deps.py` 4 per §5, the 3 folder_paths guards, the
+    `domain/graph/` TYPE_CHECKING cycle-breakers (9), and
+    `endpoints/comparison.py` 1 (out-of-scope blueprint).
+ 40. **Function-arg defaults — 115** ("always try to avoid"): 93 in
     core/domain/application, 22 in infrastructure/adapters. `plot.py` 44
     display params dominate (`show`, `cols`, `title` etc.), then
     `comparisons_repository.py` 8, `images_repository.py` 7, `logger.py` 6,
     `repository_ports.py` 5. Remove defaults where all call sites pass the
-    value; keep only defaults that are semantically required, with a comment.
+    value; keep only defaults that are semantically required, with a comment.: removed 48 defaults across 18 functions (audit: 183
+    defaulted params in 82 functions -> 135 in 64). Call-site analysis
+    (`audit_defaults.py`/`audit_calls.py` in temp) confirmed every removed
+    param is passed by all callers. Kept as semantically required:
+    `build_score_calibration(num_points=257)`, `calculate_statistics(min_count)`,
+    `get_batch_size(bound=None)`, `build(all_filenames=None)`,
+    `get_links(better_than/worse_than)`, `get_all_chains(min_length,
+    sort_order)`, `get_component(...)`, `get_all_comparisons(weight=None)`,
+    `load_single_jsonl(skip_invalid=True)`, `cleanup_orphans` /
+    `deduplicate_scored` (`files.py` endpoint calls them with `root=None`),
+    `update_image_rating_state(last_compared_at=None)`, display labels in
+    `plot.py`, constructor injection params. Verified: pyright 604 (no new
+    errors), pytest 34, ruff 1 (sanctioned pair_active).
 41. **Global mutable state — 7 module-level containers** in
     core/domain/application, all constant tables that are never mutated:
     `AGE_LABELS`/`GENDER_LABELS`/`RACE_LABELS`
@@ -457,50 +574,24 @@ try/except (out-of-scope blueprint).
     (`domain/analysis/mediapipe_analysis.py`), `_PROGRESS_INDICATORS`
     (`core/observability/logger.py`), two `__all__`
     (`domain/database/ports/__init__.py`, `domain/loading/__init__.py`).
-    Convert to tuples/frozensets.
+    Convert to tuples/frozensets.: the 7 listed containers were already immutable
+    (`AGE_LABELS`/`GENDER_LABELS`/`RACE_LABELS`, `POSE_LANDMARK_NAMES`, both
+    `__all__` are tuples; `_PROGRESS_INDICATORS` deleted with the logger
+    cleanup). An AST scan of `core`/`domain`/`application` found 5 additional
+    constant tables never mutated, converted now: `SUB_CONFIG_MAPPING` and
+    `grid_base` -> `MappingProxyType`, `REQUIRED_ANALYSIS_FIELDS` ->
+    `frozenset`, `METRIC_KEYS` and `PHASES` -> tuples. Deliberate runtime
+    caches (mutated, not constant tables) stay as-is, out of scope:
+    `processed_cache` (image_analysis), `_images_cache` (state),
+    `cache_split_data` (vector_list), `_existing_pairs`/`_last_chains_index`
+    (phase_order/pair_active — pair_active never touched). Verified: pyright
+    604 (no new errors), pytest 34, ruff 1 (sanctioned pair_active).
 
 ---
 
-## 4. Verification (in order, ComfyUI venv)
+## 4. Verification
 
-```powershell
-pytest -q                          # 34 passed (2026-08-17 baseline), no regressions
-ruff check --select ARG,F401 --target-version py313 --exclude comfyui_image_scorer_old .
-                                   # must end clean: the 10 baseline errors live in files this revision deletes/rewrites
-pyright                            # 724-error baseline (2026-08-17); zero new errors
-```
 
-1. AST layer scan (§6 script of v2) → **28 statements, all in the three
-   composition roots** — `endpoints/files.py` adds **zero** new infra imports.
-2. Node registration smoke check (README "Node Import Verification" snippet) →
-   `AestheticScore` loads.
-3. Route smoke check: new routes respond — `/api/training/train`,
-   `/api/database/recalculate`, `/api/database/cleanup`, `/api/files/*`
-   (`/remove-models`, `/remove-maps`, `/remove-downloaded-models`,
-   `/download-models`, `/cleanup`), `/api/build/prepare` (split/full/all
-   modes), `/api/training/hpo` body params; removed routes 404 —
-   `/api/training/reset`, `/api/training/config`,
-   `/api/training/remove-models`, `/api/build/scan-import`,
-   `/api/database/status`, `/api/database/sync-all`,
-   `/api/database/normalize-comparisons`, `/api/database/deduplicate`,
-   `/api/database/cleanup-orphans`, `/api/analyze/report-file`, and every
-   `/task/<task_id>` route.
-   Parity check: every command endpoint body is exactly one call to its CLI
-   function — grep `adapters/server/endpoints/` for `cli.commands` imports
-   and the `files`-command bodies; no inline command logic remains
-   (`build_split_files`, `run_hpo_cycles`, `ParameterAnalyzer`,
-   `MatrixAnalyzer`, `distribute`, bucket computation) in endpoints.
-4. Frontend smoke: every section loads (`build`, `analyze`, `database`,
-   `training`, `compare`, `gallery`, `chains`), no 404 on static assets, no
-   TaskPoller references, and no old `deduplicate`/`cleanup-orphans`/
-   `remove-models` actions remain.
-5. Inline-import scan: AST walk of every `.py` file (excluding
-   `comfyui_image_scorer_old/`) — no `Import`/`ImportFrom` nodes inside
-   function bodies or the `__main__` guard anywhere except
-   `adapters/cli/main.py` and `adapters/cli/deps.py` (§5 carve-out, see the
-   status note).
-
----
 
 ## 5. Explicitly Out of Scope
 

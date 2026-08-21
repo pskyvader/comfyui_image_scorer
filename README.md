@@ -12,7 +12,14 @@ No layer may import from a layer to its right. The **ComfyUI node integration is
 
 The codebase still violates parts of this documented architecture. The known violations (layer imports, `core` purity, structural defects) are enumerated in `REORGANIZATION_PLAN.md`, which is the live remediation roadmap and the source of truth for what must change.
 
-The pending revision (v4) targets `adapters/server/` (strict CLI parity — every endpoint maps to a CLI command, the rest are removed — a rename cascade to CLI command names (`build`, `analyze`, `database`, `training`, `files`), removal of the server task system, and the synchronous log-capture backend) and, per the 2026-08-17 scope decision, extends to the §3.10 rules audit across all layers (try/except, prints, inline imports, defaults, module-level containers). Nothing in this document's current layout changes until that work is done — see `REORGANIZATION_PLAN.md` for the full task list.
+The v4 revision (2026-08-17) is complete: `adapters/server/` has strict CLI
+parity — every command endpoint is one synchronous call to its CLI command
+function, all other routes are removed — with a rename cascade to CLI command
+names (`build`, `analyze`, `database`, `training`, `files`), no task system
+(`tasks.py`/`task_poller.js` deleted), and a synchronous log-capture backend
+(`capture_log_output()`). Per the 2026-08-17 scope decision it also covered
+the §3.10 rules audit across all layers (try/except, prints, inline imports,
+defaults, module-level containers). This document reflects the final state.
 
 ---
 
@@ -116,8 +123,8 @@ comfyui_image_scorer/
 │   │                                      vectors, database, files, analyze)
 │   ├── comfyui/                           ComfyUI node integration (primary deliverable)
 │   ├── server/                            Flask app (main.py) + endpoints
-│   ├── analysis/ comparison/ data_transform/ database_structure/ gallery/
-│   ├── maps/ maps2/ training_hyperparameters/
+│   ├── analyze/ build/ database/ gallery/
+│   ├── training/ maps/ maps2/
 │   │                                      server frontends, one folder per feature
 │   └── .../frontend/                      static JS/CSS/HTML per feature
 │
@@ -160,8 +167,40 @@ comfyui_image_scorer/
 **Depends on `core` + `domain` + `application`.** Translates framework protocols → domain calls.
 
 #### `adapters/server/` — Flask REST API
-- `routing/` — Blueprint registration, URL prefixes
-- `endpoints/` — Thin request/response handlers (validation → service call → JSON)
+- `main.py` — app factory, blueprint registration (`register_*_routes`), static
+  serving, section frontends
+- `endpoints/` — Thin request/response handlers; every command route is exactly
+  one call to its CLI command function, with log output captured by
+  `core.observability.logger.capture_log_output()` into the response `log`
+- `deps.py` — `ServerDeps` (superset of `CLIDeps`) + `to_cli_deps()`
+- `frontend/` — shared HTML/CSS/JS shell (index page, api/logger utils)
+
+**Commands ↔ endpoints** (parity table — each row is one synchronous call):
+
+| CLI command | Endpoint |
+|---|---|
+| `server` (frontends) | `GET /`, static assets |
+| `build split-vectors` | `POST /api/build/prepare` (`mode: "split"`) |
+| `build full-vectors` | `POST /api/build/prepare` (`mode: "full"`) |
+| `build` (all) | `POST /api/build/prepare` (`mode: "all"`, default) |
+| `files remove vectors` | `POST /api/build/delete-vectors` (all splits except `image/` are removed) |
+| `files remove generated-models` | `POST /api/files/remove-generated-models` |
+| `files remove vector-maps` | `POST /api/files/remove-vector-maps` (also deletes `split/map/`) |
+| `files remove downloaded-models` | `POST /api/files/remove-downloaded-models` |
+| `files download models` | `POST /api/files/download-models` (user-initiated only) |
+| `files cleanup` | `POST /api/files/cleanup` (`limit` body param) |
+| `training train-model` | `POST /api/training/train` |
+| `training hpo` | `POST /api/training/hpo` (`cycles`, `optimization_steps`, `max_combos` body params) |
+| `database cleanup` | `POST /api/database/cleanup` |
+| `database rebuild` | `POST /api/database/rebuild-db` |
+| `database recalculate` | `POST /api/database/recalculate` |
+| `analyze stats` | `GET /api/analyze/stats` |
+| `analyze parameters` | `POST /api/analyze/analyze-parameters` |
+| `analyze matrix` | `POST /api/analyze/analyze-matrix` |
+| *(out of scope)* | `comparison`, `gallery`, `maps` blueprints keep their routes |
+
+There is no task system: command endpoints run synchronously and return
+`{"status": "done", "result", "log"}`.
 
 #### `adapters/comfyui/` — ComfyUI Node Integration (Primary Deliverable)
 - `__init__.py` — Exports `NODE_CLASS_MAPPINGS`, `NODE_DISPLAY_NAME_MAPPINGS`
@@ -209,10 +248,12 @@ python scorer.py build split-vectors --limit 100
 | `core` | (no other layers, no ComfyUI) | `domain`, `application`, `adapters`, `infrastructure` |
 | `domain` | `core` | `application`, `adapters`, `infrastructure` |
 | `application` | `core`, `domain` | `adapters`, `infrastructure` |
-| `adapters/*` | `core`, `domain`, `application` | other `adapters/*`, `infrastructure` |
+| `adapters/*` | `core`, `domain`, `application` | `infrastructure` |
 | `infrastructure` | `core`, `domain` | `application`, `adapters` |
 
-**Violations are architectural errors.** Use dependency injection (pass implementations as arguments) to cross boundaries outward.
+**Violations are architectural errors.** Use dependency injection (pass implementations as arguments) to cross boundaries outward. Two sanctioned exceptions:
+- **Adapter wiring:** `infrastructure` is never imported by other layers — its singletons are constructed and injected at the three composition roots (`adapters/server/main.py`, `adapters/cli/deps.py`, `adapters/comfyui/`).
+- **CLI parity:** server endpoints delegate to the CLI command functions (`adapters.cli.commands.*`) — that same-layer import is the point of the architecture: the CLI is the single source of command behavior, endpoints just call it.
 
 ### Dependency Violation Test
 
@@ -252,16 +293,14 @@ def test_no_architectural_violations():
 
 **Current status:** the root `tests/` directory does not exist yet, so the
 AST layer scan in `REORGANIZATION_PLAN.md` §4 is the gate today (run
-manually). The previous plan revision closed the enumerated violations: the
-only `infrastructure` imports that remain are the 28 adapter-wiring
-statements in the three composition roots, and `pytest` passes (34 tests).
+manually). The revision closed the enumerated violations: the only
+`infrastructure` imports that remain are the 30 adapter-wiring statements in
+the three composition roots, and `pytest` passes (34 tests).
 
 Existing violations must be fixed by moving code across the boundary — never by
 relaxing the rule or deleting the check. The `core` row has an empty allowed
-set on purpose: `core` imports no other layers and no ComfyUI internals. Note that AGENTS.md documents the
-one sanctioned exception: **nothing imports `infrastructure`**, except the
-wiring at the composition roots in `adapters`, where infra singletons are
-constructed and injected.
+set on purpose: `core` imports no other layers and no ComfyUI internals.
+Nothing imports `infrastructure` except the composition roots listed above.
 
 ---
 

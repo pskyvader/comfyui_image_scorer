@@ -24,7 +24,7 @@ NodeTuple = tuple[NodeProxy, bool]
 
 
 class CrystalGraph(Protocol):
-    def get_node(self, node_id: str | None = None) -> Any: ...
+    def get_node(self, node_id: str | None) -> Any: ...
     def get_all_nodes(
         self, only_top: bool = False, only_bottom: bool = False
     ) -> list[Any]: ...
@@ -45,37 +45,49 @@ class CrystalGraph(Protocol):
 
 
 def phase_seed_coverage(
-    seed_candidates: list[NodeProxy],
+    candidate_nodes: list[NodeProxy],
     existing_pair_set: set[tuple[str, str]],
+    seed_pool: list[NodeProxy],
+    all_images_length: int,
 ) -> tuple[NodeProxy, NodeProxy] | None:
-    _start = time.perf_counter()
+    _start: float = time.perf_counter()
+    seed_percentage = int(config["ranking"]["seed_percentage"])
     seed_target = int(config["ranking"]["seed_target_comparisons"])
-    under_seed_target = sorted(
-        (node for node in seed_candidates if node.comparison_count < seed_target),
-        key=lambda node: (node.comparison_count, -node.sigma_uncertainty),
-    )
 
-    for source in under_seed_target:
-        unseen = sorted(
-            (
-                opp
-                for opp in under_seed_target
-                if opp.filename != source.filename
-                and pair_key(source.filename, opp.filename) not in existing_pair_set
-            ),
-            key=lambda opp: (opp.comparison_count, abs(opp.score - source.score)),
+    seed_size: int = all_images_length * seed_percentage // 100
+    ready_seed_pool: list[NodeProxy] = [
+        i for i in seed_pool if i.comparison_count >= seed_target
+    ]
+    ready_seed_pool_length: int = len(ready_seed_pool)
+
+    if ready_seed_pool_length >= seed_size:
+        logger.debug(
+            f"skipping phase 0: seed pool size {ready_seed_pool_length} >= {seed_size} ({seed_percentage}% of {all_images_length})",
+            start_timer=_start,
         )
-        if unseen:
-            return source, unseen[0]
-    logger.debug(
-        f"not pairs found for seed coverage, under_seed_target/ready: {len(under_seed_target)}/{len(seed_candidates)}"
+        return None
+
+    under_seed_target: list[NodeProxy] = [
+        node for node in candidate_nodes if node.comparison_count < seed_target
+    ]
+    under_seed_target.sort(key=lambda node: node.comparison_count, reverse=True)
+
+    node_a: NodeProxy = under_seed_target[0]
+    return _closest_score_pair(
+        [
+            (node_a, node_b)
+            for node_b in under_seed_target[
+                1 : (seed_size - ready_seed_pool_length + 1)
+            ]
+            if node_b.comparison_count <= node_a.comparison_count + 2
+            and pair_key(node_a.filename, node_b.filename) not in existing_pair_set
+        ]
     )
-    return None
 
 
 def phase_anchor_insert(
     candidate_images: list[NodeProxy],
-    seed_pool: set[str],
+    seed_pool_set: set[str],
     existing_pair_set: set[tuple[str, str]],
     cg: CrystalGraph,
 ) -> tuple[NodeProxy, NodeProxy] | None:
@@ -83,7 +95,9 @@ def phase_anchor_insert(
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
     reserve_count: int = config["ranking"]["reserve_count"]
 
-    candidates = [node for node in candidate_images if node.filename not in seed_pool]
+    candidates: list[NodeProxy] = [
+        node for node in candidate_images if node.filename not in seed_pool_set
+    ]
     pool_nodes: list[NodeProxy] = []
     for threshold in range(insertion_target + 1):
         pool_nodes = [node for node in candidates if node.comparison_count <= threshold]
@@ -96,7 +110,7 @@ def phase_anchor_insert(
             start_timer=_start,
         )
         return None
-    pool_nodes.sort(key=lambda node: (node.comparison_count, node.score))
+    pool_nodes.sort(key=lambda node: (node.comparison_count, node.trueskill_score))
     source_node: NodeProxy = pool_nodes[0]
 
     remaining: list[NodeProxy] = [
@@ -152,24 +166,39 @@ def _closest_score_pair(
 ) -> tuple[NodeProxy, NodeProxy] | None:
     if not pair_list:
         return None
-    pair_list.sort(key=lambda pair: abs(pair[0].mu_skill - pair[1].mu_skill))
-    return pair_list[0]
+    pair_list.sort(
+        key=lambda pair: abs(pair[0].trueskill_score - pair[1].trueskill_score)
+    )
+    selected: tuple[NodeProxy, NodeProxy] = pair_list[0]
+    best_difference: float = abs(
+        selected[0].trueskill_score - selected[1].trueskill_score
+    )
+    for pair in pair_list:
+        difference: float = abs(pair[0].trueskill_score - pair[1].trueskill_score)
+
+        if difference > selected[0].sigma_uncertainty:
+            break
+        if difference > best_difference:
+            best_difference = difference
+            selected = pair
+
+    return selected
 
 
 def phase_collapsible_pairs(
-    candidate_images: list[NodeProxy],
+    candidate_nodes: list[NodeProxy],
     cg: CrystalGraph,
     comparison_repo: ComparisonRepository,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     """Anchor on the least-compared node and return its most score-similar same-type partner."""
     _start = time.perf_counter()
 
-    insertion_target = int(config["ranking"]["insertion_target_comparisons"])
+    # insertion_target = int(config["ranking"]["insertion_target_comparisons"])
 
     candidate_names = {
         node.filename
-        for node in candidate_images
-        if node.comparison_count > insertion_target
+        for node in candidate_nodes
+        # if node.comparison_count > insertion_target
     }
 
     chains_list = cg.get_all_chains()
@@ -205,7 +234,7 @@ def phase_single_win_loss(
     _start: float = time.perf_counter()
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
 
-    for single_win, reverse in ((True, True), (False, False)):
+    for single_win in (True, False):
 
         nodes: list[NodeProxy] = []
         for node in candidate_nodes:
@@ -219,7 +248,7 @@ def phase_single_win_loss(
             if len(links) == 1:
                 nodes.append(node)
 
-            if len(nodes) > 10:
+            if len(nodes) > 100:
                 break
 
         if len(nodes) < 2:

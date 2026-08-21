@@ -1,0 +1,39 @@
+<div id="analyze-container" class="max-w-3xl mx-auto space-y-6">
+    <!-- Analysis Actions -->
+    <div class="glass rounded-2xl p-6 shadow-2xl">
+        <div class="flex items-center justify-between mb-4">
+            <div class="section-title mb-0">Analysis</div>
+            <button id="refresh-stats-btn" class="action-btn text-xs">↻ Stats</button>
+        </div>
+        <div class="space-y-2">
+            <div class="action-row">
+                <button class="action-btn" data-action="analyze-parameters">📊 Parameter Analysis</button>
+                <span class="action-desc">Analyze how each image parameter affects ranking score</span>
+            </div>
+            <div class="action-row">
+                <button class="action-btn" data-action="analyze-matrix">🔢 Matrix Analysis</button>
+                <span class="action-desc">Run cross-matrix analysis across all parameters</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Output -->
+    <div class="glass rounded-2xl p-6 shadow-2xl">
+        <div class="flex items-center justify-between mb-3">
+            <div class="section-title mb-0">Output Log</div>
+            <button id="clear-log-btn" class="text-xs text-gray-500 hover:text-white transition">Clear</button>
+        </div>
+        <div id="log-area" class="log-area" style="max-height: 300px;">
+            <div class="text-gray-500">Ready.</div>
+        </div>
+    </div>
+
+    <!-- Result Details -->
+    <div class="glass rounded-2xl p-6 shadow-2xl" id="result-panel" style="display:none;">
+        <div class="flex items-center justify-between mb-3">
+            <div class="section-title mb-0">Result Details</div>
+            <button id="clear-result-btn" class="text-xs text-gray-500 hover:text-white transition">Clear</button>
+        </div>
+        <div id="result-content" class="text-sm space-y-2"></div>
+    </div>
+</div>

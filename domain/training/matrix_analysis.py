@@ -13,6 +13,10 @@ from tqdm import tqdm
 import polars as pl
 
 from ...core.io.serialization import write_single_jsonl
+from ...core.observability.logger import get_logger, ModuleLogger
+
+
+logger: ModuleLogger = get_logger(__name__)
 
 
 class MatrixAnalyzer:
@@ -40,10 +44,7 @@ class MatrixAnalyzer:
         text = parts[0]
         weight = 1.0
         if len(parts) > 1:
-            try:
-                weight = float(parts[-1])
-            except ValueError:
-                weight = 1.0
+            weight = float(parts[-1])
         normalized_text = " ".join(str(text).split()).lower()
         return normalized_text, weight
 
@@ -113,7 +114,7 @@ class MatrixAnalyzer:
                     params.append(param_str)
 
     def build_matrix(self) -> None:
-        print(f"Processing {len(self.text_data)} text records...")
+        logger.info("Processing %d text records...", len(self.text_data))
         all_params_set: set[str] = set()
         with tqdm(
             total=len(self.text_data), desc="Extracting parameters", unit=" records", delay=3.0
@@ -123,7 +124,7 @@ class MatrixAnalyzer:
                 all_params_set.update(params)
                 pbar.update(1)
                 if len(all_params_set) > self.memory_limit:
-                    print(f"  WARNING: Parameter limit ({self.memory_limit}) reached, truncating...")
+                    logger.warning("Parameter limit (%d) reached, truncating...", self.memory_limit)
                     all_params_set = set(sorted(list(all_params_set))[:self.memory_limit])
                     break
 
@@ -131,9 +132,9 @@ class MatrixAnalyzer:
         self.param_list = sorted(list(all_params_set))
         for idx, param in enumerate(self.param_list):
             self.param_id_map[param] = idx
-        print(f"Found {len(self.param_list)} unique parameters")
+        logger.info("Found %d unique parameters", len(self.param_list))
 
-        print("Building parameter co-occurrence matrix...")
+        logger.info("Building parameter co-occurrence matrix...")
         with tqdm(
             total=len(self.text_data), desc="Building matrix", unit=" records", delay=3.0
         ) as pbar:
@@ -149,7 +150,7 @@ class MatrixAnalyzer:
                         if p1_id != p2_id:
                             self.matrix[p2_id][p1_id].append(score)
                 pbar.update(1)
-        print(f"Matrix built: {len(self.param_list)}x{len(self.param_list)} parameters")
+        logger.info("Matrix built: %dx%d parameters", len(self.param_list), len(self.param_list))
 
     def calculate_statistics(self, min_count: int = 100) -> dict[tuple[int, int], dict[str, float]]:
         flattened_data: list[tuple[int, int, float]] = []
@@ -173,12 +174,12 @@ class MatrixAnalyzer:
             pbar.n = total_possible_cells
             pbar.refresh()
 
-        print(f"Stats: Kept {kept_cells} cells, Dropped {dropped_cells} cells (Min Count: {min_count})")
+        logger.info("Stats: Kept %d cells, Dropped %d cells (Min Count: %d)", kept_cells, dropped_cells, min_count)
         if not flattened_data:
-            print("No data met the threshold.")
+            logger.warning("No data met the threshold.")
             return {}
 
-        print("Calculating Statistics via Polars (Multithreaded)...")
+        logger.info("Calculating Statistics via Polars (Multithreaded)...")
         df = pl.DataFrame(flattened_data, schema=[("p1", pl.Int32), ("p2", pl.Int32), ("score", pl.Float64)])
         stats_df = (
             df.lazy()
@@ -238,17 +239,17 @@ class MatrixAnalyzer:
                 export_data_list.append({"parameters": f"{p1_param}|{p2_param}", **stats})
                 pbar.update(1)
         write_single_jsonl(output_path, export_data_list, "w")
-        print(f"Exported {len(export_data_list)} cell statistics to {output_path}")
+        logger.info("Exported %d cell statistics to %s", len(export_data_list), output_path)
 
     def print_top_correlations(self, top_n: int = 20) -> None:
-        print(f"\nTop {top_n} strongest parameter correlations (by mean score):")
-        print("=" * 80)
+        logger.info("\nTop %d strongest parameter correlations (by mean score):", top_n)
+        logger.info("=" * 80)
         sorted_cells = sorted(self.cell_stats.items(), key=lambda x: x[1]["mean"], reverse=True)[:top_n]
         for (p1_id, p2_id), stats in sorted_cells:
             p1_param = self.param_list[p1_id] if p1_id < len(self.param_list) else str(p1_id)
             p2_param = self.param_list[p2_id] if p2_id < len(self.param_list) else str(p2_id)
-            print(f"{p1_param:40s} + {p2_param:40s}")
-            print(f"  mean: {stats['mean']:.2f} | std: {stats['std']:.2f} | count: {stats['count']}")
+            logger.info("%-40s + %-40s", p1_param, p2_param)
+            logger.info("  mean: %.2f | std: %.2f | count: %d", stats["mean"], stats["std"], stats["count"])
 
     def get_matrix_size(self) -> tuple[int, int]:
         return (len(self.param_list), len(self.param_list))

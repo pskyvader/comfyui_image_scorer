@@ -281,9 +281,9 @@ def hpo_cycle(
     X: np.ndarray,
     y: np.ndarray,
     model_trainer: Any,
-    optimization_steps: int = 100,
-    max_combos: int = 4,
-    cycle: int = 0,
+    optimization_steps: int,
+    max_combos: int,
+    cycle: int,
 ) -> dict[str, Any]:
     global _hpo_running
     if _hpo_running:
@@ -390,11 +390,11 @@ def hpo_cycle(
 
 
 def run_hpo_cycles(
-    cycles: int | None = None,
-    optimization_steps: int | None = None,
-    max_combos: int | None = None,
-    training_loader: TrainingLoader | None = None,
-    model_trainer: Any = None,
+    cycles: int | None,
+    optimization_steps: int | None,
+    max_combos: int | None,
+    training_loader: TrainingLoader | None,
+    model_trainer: Any,
 ) -> list[dict[str, Any]]:
     """Run multiple HPO cycles. Each cycle runs optimization_steps steps
     over the top1..top5 configs and breeds the next generation."""

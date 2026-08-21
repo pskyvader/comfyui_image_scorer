@@ -15,24 +15,24 @@ const router = {
             section: "chains",
         },
         tools: {
-            template: "/static/database/db.html",
+            template: "/static/database/database.html",
             section: "database",
         },
         db: {
-            template: "/static/database/db.html",
+            template: "/static/database/database.html",
             section: "database",
         },
-        data: {
-            template: "/static/data/transform.html",
-            section: "data",
+        build: {
+            template: "/static/build/build.html",
+            section: "build",
         },
         training: {
             template: "/static/training/training.html",
             section: "training",
         },
-        analysis: {
-            template: "/static/analysis/analysis.html",
-            section: "analysis",
+        analyze: {
+            template: "/static/analyze/analyze.html",
+            section: "analyze",
         },
     },
 

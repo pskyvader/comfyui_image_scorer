@@ -12,6 +12,8 @@ from typing import Any
 from ....core.configuration.settings import config
 from ...graph.node_proxy import NodeProxy
 from ...analysis.trueskill import expected_win_probability, Rating
+from ..constants import MIN_CHAIN_THRESHOLD
+from . import graph_helpers
 
 
 def _describe_one(node: NodeProxy, cg: Any) -> dict[str, Any]:
@@ -44,6 +46,7 @@ def _describe_one(node: NodeProxy, cg: Any) -> dict[str, Any]:
         "score": round(float(node.score), 4),
         "rating_mu": round(float(node.mu_skill), 4),
         "rating_sigma": round(float(node.sigma_uncertainty), 4),
+        "trueskill_score": round(float(node.trueskill_score), 4),
         "comparison_count": int(node.comparison_count),
         "wins": len(node.get_links(worse_than=True)),
         "losses": len(node.get_links(better_than=True)),
@@ -76,9 +79,6 @@ def describe_pair(
     3=single_win_loss, 4=refine, 5=chain_merge, 6=fallback). The int->label
     mapping lives on the frontend.
     """
-    from . import graph_helpers
-    from ..constants import MIN_CHAIN_THRESHOLD
-
     ranking_conf = config["ranking"]
 
     left = _describe_one(node_a, cg)

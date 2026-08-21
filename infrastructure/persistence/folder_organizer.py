@@ -14,16 +14,12 @@ def ensure_tier_structure() -> bool:
     Called once during initialization. Returns True if successful.
     """
     _start = time.perf_counter()
-    try:
-        ranked_root = get_ranked_root()
-        ranked_root.mkdir(parents=True, exist_ok=True)
+    ranked_root = get_ranked_root()
+    ranked_root.mkdir(parents=True, exist_ok=True)
 
-        for i in range(11):
-            score = i / 10.0
-            score_folder = ranked_root / f"scored_{score:.1f}"
-            score_folder.mkdir(parents=True, exist_ok=True)
+    for i in range(11):
+        score = i / 10.0
+        score_folder = ranked_root / f"scored_{score:.1f}"
+        score_folder.mkdir(parents=True, exist_ok=True)
 
-        return True
-    except Exception as e:
-        logger.error(f"Error creating score structure: {e}")
-        return False
+    return True

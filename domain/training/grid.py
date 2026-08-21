@@ -7,10 +7,11 @@ HPO loop can import it without depending on each other.
 from __future__ import annotations
 
 import random
+from types import MappingProxyType
 from typing import Any, Sequence, Union
 
 # step is relative percentage for float/int types
-grid_base: dict[str, Any] = {
+grid_base: MappingProxyType[str, Any] = MappingProxyType({
     "learning_rate": {
         # Purpose: Shrinks the contribution of each tree by learning_rate. Controls how fast the model learns.
         # Speed: Lower values slow down training significantly as more trees (n_estimators) are needed to reach convergence.
@@ -123,7 +124,7 @@ grid_base: dict[str, Any] = {
         "step": 0.1,
         "random": 0.01,
     },
-}
+})
 
 
 def around(label: str, val: Union[int, float, None]) -> Sequence[Union[int, float]]:

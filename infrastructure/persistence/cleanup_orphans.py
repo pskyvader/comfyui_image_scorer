@@ -5,8 +5,7 @@ Phase 1 - move EVERY file that lacks a companion in its own directory
 Phase 2 - at the root level only:
            * stems that now have both image + JSON -> move the pair into
              ``scored_0.5/`` (standard initialiser tier).
-           * stems that are still singletons -> delete them if ``--delete``
-             is active (default), otherwise leave them in place.
+           * stems that are still singletons -> delete them.
 """
 
 from __future__ import annotations
@@ -52,8 +51,6 @@ def _scored_root_files(root: Path) -> dict[str, list[Path]]:
 
 def cleanup_orphans(
     root: Path | None = None,
-    dry_run: bool = False,
-    delete_enabled: bool = True,
 ) -> int:
     if root is None:
         root = Path(image_root_processed)
@@ -102,8 +99,7 @@ def cleanup_orphans(
                 logger.warning("Target exists, skipping %s -> %s", f, dest)
                 pbar.update(1)
                 continue
-            if not dry_run:
-                os.replace(str(f), str(dest))
+            os.replace(str(f), str(dest))
             moved_to_root += 1
             pbar.update(1)
 
@@ -127,8 +123,7 @@ def cleanup_orphans(
         jsons = [f for f in files if f.suffix.lower() == ".json"]
 
         if images and jsons:
-            if not dry_run:
-                score_05.mkdir(parents=True, exist_ok=True)
+            score_05.mkdir(parents=True, exist_ok=True)
             with tqdm(
                 total=len(images) + len(jsons),
                 desc=f"  Moving {stem} to {score_05.name}",
@@ -141,24 +136,21 @@ def cleanup_orphans(
                     if dest.exists():
                         inner.update(1)
                         continue
-                    if not dry_run:
-                        os.replace(str(f), str(dest))
+                    os.replace(str(f), str(dest))
                     moved_to_05 += 1
                     inner.update(1)
             if len(examples) < 3:
                 examples.append(f"{stem}: pair moved to {score_05.name}")
-        elif delete_enabled:
-            if not dry_run:
-                for f in files:
-                    f.unlink(missing_ok=True)
+        else:
+            for f in files:
+                f.unlink(missing_ok=True)
             deleted += len(files)
             if len(examples) < 3:
                 examples.append(f"{stem}: {len(files)} singleton(s) deleted")
 
-    action = "Would " if dry_run else ""
     logger.info(
-        "%sMoved %d orphan(s) to root, %s moved %d to %s, %sdeleted %d",
-        action, moved_to_root, action, moved_to_05, score_05.name, action, deleted,
+        "Moved %d orphan(s) to root, moved %d to %s, deleted %d",
+        moved_to_root, moved_to_05, score_05.name, deleted,
     )
     for ex in examples:
         logger.info("  e.g. %s", ex)
@@ -172,8 +164,6 @@ def main() -> None:
         description="Cleanup orphaned image/JSON companion files inside the scored folder"
     )
     parser.add_argument("--root", default=None, help="Override root directory (default: config image_root_processed)")
-    parser.add_argument("--dry-run", action="store_true", help="Preview only, no changes")
-    parser.add_argument("--no-delete", action="store_true", help="Do NOT delete truly orphan singletons (default: delete them)")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Logging verbosity")
     args = parser.parse_args()
 
@@ -181,8 +171,6 @@ def main() -> None:
 
     count = cleanup_orphans(
         root=Path(args.root) if args.root else None,
-        dry_run=args.dry_run,
-        delete_enabled=not args.no_delete,
     )
 
     if count:

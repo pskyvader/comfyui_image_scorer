@@ -5,6 +5,7 @@ from typing import Any
 from pathlib import Path
 import pickle
 import base64
+from tqdm import tqdm
 
 
 from ...core.observability.logger import get_logger, ModuleLogger
@@ -96,32 +97,33 @@ class TrainingLoader:
 
     def _load_vectors_from_jsonl(self) -> dict[str, npt.NDArray[np.float32]]:
         keyed: dict[str, npt.NDArray[np.float32]] = {}
-        for rec in load_single_jsonl(vectors_file):
-            if not isinstance(rec, dict) or len(rec) != 1:
-                continue
-            fid, vec = next(iter(rec.items()))
-            keyed[str(fid)] = np.asarray(vec, dtype=np.float32)
+        with tqdm(
+            desc="loading vectors",
+            unit="vectors",
+            position=0,
+            leave=True,
+            delay=3.0,
+        ) as pbar:
+            for rec in load_single_jsonl(vectors_file):
+                if not isinstance(rec, dict) or len(rec) != 1:
+                    continue
+                fid, vec = next(iter(rec.items()))
+                keyed[str(fid)] = np.asarray(vec, dtype=np.float32)
+                pbar.update(1)
         return keyed
 
     def _load_vectors_from_npz(
         self,
     ) -> dict[str, npt.NDArray[np.float32]] | None:
         if os.path.exists(vectors_data):
-            try:
-                data = np.load(vectors_data, allow_pickle=True)
-                if "x" in data and "keys" in data:
-                    keys = list(data["keys"])
-                    x_array = data["x"]
-                    return {
-                        str(keys[i]): x_array[i] for i in range(len(keys))
-                    }
-            except Exception:
-                pass
+            data = np.load(vectors_data, allow_pickle=True)
+            if "x" in data and "keys" in data:
+                keys = list(data["keys"])
+                x_array = data["x"]
+                return {str(keys[i]): x_array[i] for i in range(len(keys))}
         return None
 
-    def _save_vectors_to_npz(
-        self, keyed: dict[str, npt.NDArray[np.float32]]
-    ) -> None:
+    def _save_vectors_to_npz(self, keyed: dict[str, npt.NDArray[np.float32]]) -> None:
         logger.debug("saving vectors cache...")
         os.makedirs(models_dir, exist_ok=True)
         order = list(keyed.keys())
@@ -177,17 +179,11 @@ class TrainingLoader:
 
     def _load_scores_from_npz(self) -> dict[str, float] | None:
         if os.path.exists(scores_data):
-            try:
-                data = np.load(scores_data, allow_pickle=True)
-                if "y" in data and "keys" in data:
-                    keys = list(data["keys"])
-                    y_array = data["y"]
-                    return {
-                        str(keys[i]): float(y_array[i])
-                        for i in range(len(keys))
-                    }
-            except Exception:
-                pass
+            data = np.load(scores_data, allow_pickle=True)
+            if "y" in data and "keys" in data:
+                keys = list(data["keys"])
+                y_array = data["y"]
+                return {str(keys[i]): float(y_array[i]) for i in range(len(keys))}
         return None
 
     def _save_scores_to_npz(self, keyed: dict[str, float]) -> None:
@@ -244,24 +240,21 @@ class TrainingLoader:
 
     def _load_comparisons_from_npz(self) -> list[dict[str, Any]] | None:
         if os.path.exists(comparisons_data):
-            try:
-                data = np.load(comparisons_data, allow_pickle=True)
-                if all(k in data for k in ("ids", "winners", "a", "b")):
-                    ids = data["ids"]
-                    winners = data["winners"]
-                    filename_a = data["a"]
-                    filename_b = data["b"]
-                    return [
-                        {
-                            "id": int(ids[i]),
-                            "filename_a": str(filename_a[i]),
-                            "filename_b": str(filename_b[i]),
-                            "winner": str(winners[i]),
-                        }
-                        for i in range(len(ids))
-                    ]
-            except Exception:
-                pass
+            data = np.load(comparisons_data, allow_pickle=True)
+            if all(k in data for k in ("ids", "winners", "a", "b")):
+                ids = data["ids"]
+                winners = data["winners"]
+                filename_a = data["a"]
+                filename_b = data["b"]
+                return [
+                    {
+                        "id": int(ids[i]),
+                        "filename_a": str(filename_a[i]),
+                        "filename_b": str(filename_b[i]),
+                        "winner": str(winners[i]),
+                    }
+                    for i in range(len(ids))
+                ]
         return None
 
     def _save_comparisons_to_npz(self, rows: list[dict[str, Any]]) -> None:
@@ -271,19 +264,18 @@ class TrainingLoader:
         winners = np.array([r["winner"] for r in rows], dtype=object)
         filename_a = np.array([r["filename_a"] for r in rows], dtype=object)
         filename_b = np.array([r["filename_b"] for r in rows], dtype=object)
-        np.savez_compressed(comparisons_data, ids=ids, winners=winners, a=filename_a, b=filename_b)
+        np.savez_compressed(
+            comparisons_data, ids=ids, winners=winners, a=filename_a, b=filename_b
+        )
 
     def load_feature_rule(self) -> npt.NDArray[np.intp] | None:
         if self.use_cache and self.feature_rule is not None:
             return self.feature_rule
         if os.path.exists(feature_rule):
-            try:
-                data = np.load(feature_rule)
-                if "kept_indices" in data:
-                    self.feature_rule = data["kept_indices"]
-                    return self.feature_rule
-            except Exception:
-                pass
+            data = np.load(feature_rule)
+            if "kept_indices" in data:
+                self.feature_rule = data["kept_indices"]
+                return self.feature_rule
         return None
 
     def save_feature_rule(self, kept_indices: npt.NDArray[np.intp]) -> None:
@@ -307,23 +299,20 @@ class TrainingLoader:
             if cached_threshold == threshold:
                 return rule
         if os.path.exists(comparison_rule):
-            try:
-                data = np.load(comparison_rule, allow_pickle=True)
-                if all(k in data for k in ("threshold", "keys", "scores", "counts")):
-                    if int(data["threshold"]) != threshold:
-                        return None
-                    keys = [str(f) for f in data["keys"]]
-                    score_array = data["scores"]
-                    count_array = data["counts"]
-                    rule = {
-                        keys[i]: (float(score_array[i]), int(count_array[i]))
-                        for i in range(len(keys))
-                    }
-                    if self.use_cache:
-                        self.comparison_rule = (threshold, rule)
-                    return rule
-            except Exception:
-                pass
+            data = np.load(comparison_rule, allow_pickle=True)
+            if all(k in data for k in ("threshold", "keys", "scores", "counts")):
+                if int(data["threshold"]) != threshold:
+                    return None
+                keys = [str(f) for f in data["keys"]]
+                score_array = data["scores"]
+                count_array = data["counts"]
+                rule = {
+                    keys[i]: (float(score_array[i]), int(count_array[i]))
+                    for i in range(len(keys))
+                }
+                if self.use_cache:
+                    self.comparison_rule = (threshold, rule)
+                return rule
         return None
 
     def save_comparison_rule(
@@ -352,14 +341,11 @@ class TrainingLoader:
             return self.interaction_data
 
         if os.path.exists(interaction_data):
-            try:
-                data = np.load(interaction_data)
-                if "X" in data and "interaction_indices" in data:
-                    print(f"Loading interaction data from cache: {interaction_data}")
-                    self.interaction_data = data["X"], data["interaction_indices"]
-                    return self.interaction_data
-            except Exception:
-                pass
+            data = np.load(interaction_data)
+            if "X" in data and "interaction_indices" in data:
+                logger.info("Loading interaction data from cache: %s", interaction_data)
+                self.interaction_data = data["X"], data["interaction_indices"]
+                return self.interaction_data
         return None
 
     def save_interaction_data(
@@ -422,7 +408,7 @@ class TrainingLoader:
         # Save everything to a single .npz file
         clean_data = {k: v for k, v in save_data.items() if v is not None}
         np.savez_compressed(training_model, **clean_data, allow_pickle=True)
-        print(f"Saved model and diagnostics to: {training_model}")
+        logger.info("Saved model and diagnostics to: %s", training_model)
 
 
 training_loader = TrainingLoader(True)

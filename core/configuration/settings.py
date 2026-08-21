@@ -2,6 +2,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 from collections.abc import MutableMapping, Iterator
 
@@ -11,12 +12,12 @@ PathLike = str | Path
 ConfigDict = dict[str, Any]
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 CONFIG_FILE: Path = PROJECT_ROOT.joinpath("config", "config.json")
-SUB_CONFIG_MAPPING: dict[str, str] = {
+SUB_CONFIG_MAPPING: MappingProxyType[str, str] = MappingProxyType({
     "prepare": "prepare_config",
     "training": "training_config",
     "vector": "vector_config",
     "ranking": "ranking_config",
-}
+})
 
 
 def _get_config_file(path: PathLike) -> Path:

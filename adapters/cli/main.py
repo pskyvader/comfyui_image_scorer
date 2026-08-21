@@ -150,14 +150,16 @@ def _add_files_parser(
 
     remove: argparse.ArgumentParser = files_sub.add_parser(
         "remove",
-        help="Remove specific categories of generated files (vectors, models, maps, or downloaded models)",
+        help="Remove specific categories of generated files (vectors, generated models, vector maps, or downloaded models)",
     )
     remove_sub: _SubParsers = remove.add_subparsers(dest="remove_command")
     remove_sub.add_parser(
-        "vectors", help="Remove full vector files (splits NEVER deleted)"
+        "vectors", help="Remove full vector files and all splits except image/"
     )
-    remove_sub.add_parser("models", help="Remove output/models/")
-    remove_sub.add_parser("maps", help="Remove output/maps/")
+    remove_sub.add_parser("generated-models", help="Remove output/models/")
+    remove_sub.add_parser(
+        "vector-maps", help="Remove output/maps/ and vector map splits"
+    )
     remove_sub.add_parser(
         "downloaded-models", help="Remove downloaded_models/ (mediapipe)"
     )
@@ -176,7 +178,6 @@ def _add_files_parser(
         help="Deduplicate scored entries, then move remaining orphaned files to root",
     )
     cleanup_parser.add_argument("--limit", type=int, default=0)
-    cleanup_parser.add_argument("--dry-run", action="store_true")
 
     return files_parser, remove, download
 
@@ -212,6 +213,7 @@ def main() -> int:
         prog="comfyui-scorer",
         description="Image scoring CLI for ComfyUI",
     )
+
     subparsers: _SubParsers = parser.add_subparsers(dest="command")
 
     _add_server_parser(subparsers)
@@ -227,6 +229,10 @@ def main() -> int:
     analyze_parser: argparse.ArgumentParser = _add_analyze_parser(subparsers)
 
     args: argparse.Namespace = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        return 1
 
     if args.command == "server":
         from .commands.server import run_server
@@ -292,17 +298,18 @@ def main() -> int:
             remove_models,
             remove_directory,
         )
-        from ...core.filesystem.paths import maps_dir, mediapipe_models_dir
+        from ...core.filesystem.paths import maps_dir, mediapipe_models_dir, split_dir
 
         if args.files_command == "remove":
             if args.remove_command == "vectors":
                 delete_full_vectors()
                 return 0
-            elif args.remove_command == "models":
+            elif args.remove_command == "generated-models":
                 remove_models()
                 return 0
-            elif args.remove_command == "maps":
+            elif args.remove_command == "vector-maps":
                 remove_directory(Path(maps_dir))
+                remove_directory(Path(split_dir) / "map")
                 return 0
             elif args.remove_command == "downloaded-models":
                 remove_directory(Path(mediapipe_models_dir))
@@ -322,15 +329,10 @@ def main() -> int:
         elif args.files_command == "cleanup":
             dedup_count: int = deps.deduplicate_scored(
                 root=None,
-                dry_run=args.dry_run,
                 limit=args.limit,
             )
             logger.info("Duplicates removed: %s", dedup_count)
-            orphan_count: int = deps.cleanup_orphans(
-                root=None,
-                dry_run=args.dry_run,
-                delete_enabled=not args.dry_run,
-            )
+            orphan_count: int = deps.cleanup_orphans(root=None)
             logger.info("Orphans cleaned: %s", orphan_count)
             return 0
         else:
@@ -357,10 +359,7 @@ def main() -> int:
         else:
             analyze_parser.print_help()
             return 1
-
-    else:
-        parser.print_help()
-        return 1
+    return 0
 
 
 if __name__ == "__main__":

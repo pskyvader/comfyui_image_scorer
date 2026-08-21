@@ -11,7 +11,7 @@ from ...core.configuration.settings import config
 from ...core.filesystem.paths import mediapipe_models_dir
 
 # MediaPipe Pose landmark names, in model output order (0..32).
-POSE_LANDMARK_NAMES = [
+POSE_LANDMARK_NAMES = (
     "nose",
     "left_eye_inner",
     "left_eye",
@@ -45,7 +45,7 @@ POSE_LANDMARK_NAMES = [
     "right_heel",
     "left_foot_index",
     "right_foot_index",
-]
+)
 
 
 class MediaPipeAnalyzer:

@@ -4,7 +4,6 @@ Analyzes relationships between parameters/terms and image scores.
 """
 
 import json
-import traceback
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -14,9 +13,12 @@ from sklearn.preprocessing import MinMaxScaler
 from typing import Any
 
 from ...core.io.serialization import load_single_jsonl
+from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.filesystem.paths import vectors_file, text_data_file
 
 matplotlib.use("Agg")
+
+logger: ModuleLogger = get_logger(__name__)
 
 SKLEARN_AVAILABLE = True
 MATPLOTLIB_AVAILABLE = True
@@ -36,22 +38,22 @@ class ParameterAnalyzer:
         self.scores = np.array([v.get("score", 0) for v in vectors_data])
 
     def analyze_all(self) -> None:
-        print("Starting parameter analysis...")
+        logger.info("Starting parameter analysis...")
         if MATPLOTLIB_AVAILABLE:
-            print("Analyzing parameter relationships...")
+            logger.info("Analyzing parameter relationships...")
             self.analyze_parameter_pairs()
             self.analyze_term_correlations()
-            print("Parameter analysis complete")
+            logger.info("Parameter analysis complete")
         else:
-            print("matplotlib not available - skipping visualization")
-        print("Generating analysis report...")
+            logger.warning("matplotlib not available - skipping visualization")
+        logger.info("Generating analysis report...")
         self.generate_report()
-        print(f"Analysis complete! Output saved to {self.output_dir}")
+        logger.info("Analysis complete! Output saved to %s", self.output_dir)
 
     def analyze_parameter_pairs(self) -> None:
         if not MATPLOTLIB_AVAILABLE:
             return
-        print("  - Extracting parameters...")
+        logger.info("  - Extracting parameters...")
         steps_list, cfg_list, lora_weight_list = [], [], []
         sampler_list, scheduler_list, model_list = [], [], []
 
@@ -80,9 +82,9 @@ class ParameterAnalyzer:
             if model != "unknown":
                 model_list.append(model)
 
-        print(f"    Found {len(steps_list)} entries with steps parameter")
-        print(f"    Found {len(cfg_list)} entries with CFG parameter")
-        print(f"    Found {len(lora_weight_list)} entries with LORA weight")
+        logger.info("    Found %d entries with steps parameter", len(steps_list))
+        logger.info("    Found %d entries with CFG parameter", len(cfg_list))
+        logger.info("    Found %d entries with LORA weight", len(lora_weight_list))
 
         if len(steps_list) > 1:
             self._create_scatter(np.array(steps_list), self.scores[:len(steps_list)], self.scores[:len(steps_list)], "steps_vs_score", "Sampling Steps", "Score", normalize=True)
@@ -101,7 +103,7 @@ class ParameterAnalyzer:
     def analyze_term_correlations(self) -> None:
         if not MATPLOTLIB_AVAILABLE:
             return
-        print("  - Extracting term correlations...")
+        logger.info("  - Extracting term correlations...")
         term_scores: dict[str, list[float]] = {}
         for idx, text_entry in enumerate(self.text_data):
             if idx >= len(self.scores):
@@ -126,7 +128,7 @@ class ParameterAnalyzer:
                     term_scores[term] = []
                 term_scores[term].append(score * (1 - weight))
 
-        term_stats = {}
+        term_stats: dict[str, dict[str, float | int]] = {}
         for term, scores in term_scores.items():
             if scores:
                 term_stats[term] = {
@@ -137,8 +139,8 @@ class ParameterAnalyzer:
                     "min_score": float(np.min(scores)),
                 }
         sorted_terms = sorted(term_stats.items(), key=lambda x: x[1]["avg_score"], reverse=True)
-        print(f"  - Found {len(term_stats)} unique terms")
-        print(f"  - Top positive terms: {[t[0] for t in sorted_terms[:5]]}")
+        logger.info("  - Found %d unique terms", len(term_stats))
+        logger.info("  - Top positive terms: %s", [t[0] for t in sorted_terms[:5]])
         with open(self.output_dir / "term_correlations.json", "w") as f:
             json.dump({
                 "top_positive_terms": sorted_terms[:50],
@@ -147,47 +149,41 @@ class ParameterAnalyzer:
                 "summary": {"terms_analyzed": len(term_stats), "avg_score_across_all": float(np.mean(self.scores))},
             }, f, indent=2)
 
-    def _create_scatter(self, x: np.ndarray, y: np.ndarray, colors: np.ndarray, name: str, xlabel: str, ylabel: str, normalize: bool = False) -> None:
+    def _create_scatter(self, x: np.ndarray, y: np.ndarray, colors: np.ndarray, name: str, xlabel: str, ylabel: str, normalize: bool) -> None:
         if not MATPLOTLIB_AVAILABLE or plt is None:
             return
-        try:
-            fig, ax = plt.subplots(figsize=(10, 8))
-            if normalize and SKLEARN_AVAILABLE and MinMaxScaler is not None:
-                scaler = MinMaxScaler()
-                x_plot = scaler.fit_transform(x.reshape(-1, 1)).flatten()
-            else:
-                x_plot = x
-            scatter = ax.scatter(x_plot, y, c=colors, cmap="viridis", s=50, alpha=0.6, edgecolors="k")
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel(ylabel)
-            ax.set_title(f"{xlabel} vs {ylabel}")
-            plt.colorbar(scatter, ax=ax, label="Score")
-            plt.tight_layout()
-            plt.savefig(self.output_dir / f"{name}.png", dpi=150, bbox_inches="tight")
-            plt.close()
-            print(f"    Saved {name}.png")
-        except Exception:
-            pass
+        fig, ax = plt.subplots(figsize=(10, 8))
+        if normalize and SKLEARN_AVAILABLE and MinMaxScaler is not None:
+            scaler = MinMaxScaler()
+            x_plot = scaler.fit_transform(x.reshape(-1, 1)).flatten()
+        else:
+            x_plot = x
+        scatter = ax.scatter(x_plot, y, c=colors, cmap="viridis", s=50, alpha=0.6, edgecolors="k")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"{xlabel} vs {ylabel}")
+        plt.colorbar(scatter, ax=ax, label="Score")
+        plt.tight_layout()
+        plt.savefig(self.output_dir / f"{name}.png", dpi=150, bbox_inches="tight")
+        plt.close()
+        logger.info("    Saved %s.png", name)
 
     def _create_2d_scatter(self, x: np.ndarray, y: np.ndarray, colors: np.ndarray, name: str, xlabel: str, ylabel: str, zlabel: str) -> None:
         if not MATPLOTLIB_AVAILABLE or plt is None:
             return
-        try:
-            fig, ax = plt.subplots(figsize=(12, 9))
-            scatter = ax.scatter(x, y, c=colors, cmap="coolwarm", s=100, alpha=0.7, edgecolors="k", linewidth=0.5)
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel(ylabel)
-            ax.set_title(f"{xlabel} vs {ylabel} (colored by {zlabel})")
-            plt.colorbar(scatter, ax=ax, label=zlabel)
-            if len(x) > 1:
-                corr = np.corrcoef(x, y)[0, 1]
-                ax.text(0.05, 0.95, f"Correlation: {corr:.3f}", transform=ax.transAxes, fontsize=11, verticalalignment="top", bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
-            plt.tight_layout()
-            plt.savefig(self.output_dir / f"{name}.png", dpi=150, bbox_inches="tight")
-            plt.close()
-            print(f"    Saved {name}.png")
-        except Exception:
-            pass
+        fig, ax = plt.subplots(figsize=(12, 9))
+        scatter = ax.scatter(x, y, c=colors, cmap="coolwarm", s=100, alpha=0.7, edgecolors="k", linewidth=0.5)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(f"{xlabel} vs {ylabel} (colored by {zlabel})")
+        plt.colorbar(scatter, ax=ax, label=zlabel)
+        if len(x) > 1:
+            corr = np.corrcoef(x, y)[0, 1]
+            ax.text(0.05, 0.95, f"Correlation: {corr:.3f}", transform=ax.transAxes, fontsize=11, verticalalignment="top", bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
+        plt.tight_layout()
+        plt.savefig(self.output_dir / f"{name}.png", dpi=150, bbox_inches="tight")
+        plt.close()
+        logger.info("    Saved %s.png", name)
 
     def _get_category_scores(self, categories: list[str]) -> dict[str, list[float]]:
         category_scores: dict[str, list[float]] = {}
@@ -223,25 +219,21 @@ class ParameterAnalyzer:
 """
         with open(self.output_dir / "report.md", "w") as f:
             f.write(report)
-        print(f"  Report saved to {self.output_dir / 'report.md'}")
+        logger.info("  Report saved to %s", self.output_dir / "report.md")
 
 
 def main():
-    print("Parameter Analysis - Standalone Mode")
-    print("=" * 50)
-    print("Loading data...")
-    try:
-        vectors_data = list(load_single_jsonl(vectors_file))
-        text_data = list(load_single_jsonl(text_data_file))
-        if not vectors_data:
-            print("No vectors data found. Run data preparation first.")
-            return
-        print(f"Loaded {len(vectors_data)} vector entries")
-        analyzer = ParameterAnalyzer(vectors_data, text_data)
-        analyzer.analyze_all()
-    except Exception as e:
-        print(f"Error: {e}")
-        traceback.print_exc()
+    logger.info("Parameter Analysis - Standalone Mode")
+    logger.info("=" * 50)
+    logger.info("Loading data...")
+    vectors_data = list(load_single_jsonl(vectors_file))
+    text_data = list(load_single_jsonl(text_data_file))
+    if not vectors_data:
+        logger.warning("No vectors data found. Run data preparation first.")
+        return
+    logger.info("Loaded %d vector entries", len(vectors_data))
+    analyzer = ParameterAnalyzer(vectors_data, text_data)
+    analyzer.analyze_all()
 
 
 if __name__ == "__main__":

@@ -6,16 +6,23 @@ import warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+from matplotlib.colors import Normalize
+from scipy.stats import mannwhitneyu
 
 plt: Any = plt
 from sklearn.metrics import r2_score
 from statistics import mean, stdev
+
+from ...core.observability.logger import get_logger, ModuleLogger
 
 import math
 
 from ...domain.loading import TrainingLoader
 from ...core.configuration.settings import config
 from .calibration import apply_score_calibration, extract_score_calibration
+
+logger: ModuleLogger = get_logger(__name__)
 
 
 class PlotManager:
@@ -195,7 +202,7 @@ class PlotManager:
     def prepare_plot_data(y: Any, preds: Any) -> tuple[np.ndarray, np.ndarray]:
         y_sample, preds_sample = PlotManager._prepare_finite_data(y, preds)
         if y_sample.size == 0:
-            print("No finite prediction/data pairs to plot; skipping compare plot.")
+            logger.warning("No finite prediction/data pairs to plot; skipping compare plot.")
         return y_sample, preds_sample
 
     @staticmethod
@@ -203,46 +210,46 @@ class PlotManager:
         y: Any,
         preds: Any,
         metrics: Any,
-        objective: str | None = None,
-        calibrated: bool = False,
+        objective: str | None,
+        calibrated: bool,
     ) -> None:
         objective = objective or config["training"]["objective"]
         y_sample, p_sample = PlotManager._prepare_finite_data(y, preds)
         if y_sample.size > 0:
             sample_r2 = float(r2_score(y_sample, p_sample))
             label = "calibrated sample" if calibrated else "sample"
-            print(
-                f"Comparison metrics ({label}): r2={sample_r2:.4f}, n={len(y_sample)}"
+            logger.info(
+                "Comparison metrics (%s): r2=%.4f, n=%d", label, sample_r2, len(y_sample)
             )
         if metrics is not None:
             if objective == "lambdarank":
                 if "pairwise_accuracy" in metrics:
-                    print(
-                        f"Stored metrics: pairwise_accuracy={float(metrics['pairwise_accuracy']):.4f}"
+                    logger.info(
+                        "Stored metrics: pairwise_accuracy=%.4f",
+                        float(metrics["pairwise_accuracy"]),
                     )
                 if (
                     "score" in metrics
                     and "primary_metric" in metrics
                     and metrics["primary_metric"] != "pairwise_accuracy"
                 ):
-                    try:
-                        print(
-                            f"Stored metrics: {metrics['primary_metric']}={float(metrics['score']):.4f}"
-                        )
-                    except Exception:
-                        pass
+                    logger.info(
+                        "Stored metrics: %s=%.4f",
+                        metrics["primary_metric"],
+                        float(metrics["score"]),
+                    )
             elif "r2" in metrics:
-                print(f"Stored metrics: r2={float(metrics['r2']):.4f}")
+                logger.info("Stored metrics: r2=%.4f", float(metrics["r2"]))
 
     @staticmethod
     def compare_model_vs_data(
         x: np.ndarray,
         y: np.ndarray,
         training_loader: TrainingLoader,
-        plot: bool = True,
-        limit: int = 100,
-        save_path: str | None = None,
-        show: bool = True,
+        plot: bool,
+        limit: int,
+        save_path: str | None,
+        show: bool,
     ) -> None:
         rng = np.random.default_rng()
         size = min(limit, len(x))
@@ -253,20 +260,16 @@ class PlotManager:
         model = training_loader.load_training_model()
 
         if model is None:
-            print("Warning: No trained model found. Skipping comparison.")
+            logger.warning("No trained model found. Skipping comparison.")
             return
 
-        try:
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    category=UserWarning,
-                    message=".*X does not have valid feature names.*",
-                )
-                preds = model.predict(x_sample)
-        except Exception as e:
-            print(f"Error during prediction: {e}")
-            return
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                category=UserWarning,
+                message=".*X does not have valid feature names.*",
+            )
+            preds = model.predict(x_sample)
 
         diagnostics = training_loader.load_training_model_diagnostics()
         metrics = diagnostics if diagnostics is not None else None
@@ -278,8 +281,8 @@ class PlotManager:
             preds = apply_score_calibration(preds, calibration)
             calibrated = True
         elif objective == "lambdarank":
-            print(
-                "Warning: no saved score calibration found; plotting raw ranker scores."
+            logger.warning(
+                "No saved score calibration found; plotting raw ranker scores."
             )
 
         PlotManager.print_comparison_metrics(
@@ -332,7 +335,7 @@ class PlotManager:
     def plot_metric(
         axes: list[Any],
         current_metric: dict[str, list[float]],
-        label: str = "Valid",
+        label: str,
     ) -> None:
         objective = config["training"]["objective"]
         for i, metric in enumerate(list(current_metric)):
@@ -350,61 +353,57 @@ class PlotManager:
         show: bool = True,
         training_loader: TrainingLoader | None = None,
     ) -> None:
-        try:
-            curves = None
+        curves = None
 
-            if (
-                result_metrics is not None
-                and "curves" in result_metrics
-                and result_metrics["curves"] is not None
-            ):
-                curves = result_metrics["curves"]
+        if (
+            result_metrics is not None
+            and "curves" in result_metrics
+            and result_metrics["curves"] is not None
+        ):
+            curves = result_metrics["curves"]
 
-            if curves is None and training_loader is not None:
-                data = training_loader.load_training_model_diagnostics()
-                if data is not None and "curves" in data:
-                    curves = data["curves"]
+        if curves is None and training_loader is not None:
+            data = training_loader.load_training_model_diagnostics()
+            if data is not None and "curves" in data:
+                curves = data["curves"]
 
-            if curves is None:
-                print("No curves available to plot.")
-                return
+        if curves is None:
+            logger.info("No curves available to plot.")
+            return
 
-            plt.figure(figsize=(6, 4))
-            plotted = False
+        plt.figure(figsize=(6, 4))
+        plotted = False
 
-            for dataset_name, metrics_dict in curves.items():
-                if dataset_name != "valid":
+        for dataset_name, metrics_dict in curves.items():
+            if dataset_name != "valid":
+                continue
+            for metric_name, values in metrics_dict.items():
+                values = np.asarray(values, dtype=float).ravel()
+                if values.size == 0:
                     continue
-                for metric_name, values in metrics_dict.items():
-                    values = np.asarray(values, dtype=float).ravel()
-                    if values.size == 0:
-                        continue
 
-                    plt.plot(
-                        np.arange(1, values.size + 1),
-                        values,
-                        label=f"{dataset_name}_{metric_name}",
-                        linewidth=1,
-                    )
-                    plotted = True
+                plt.plot(
+                    np.arange(1, values.size + 1),
+                    values,
+                    label=f"{dataset_name}_{metric_name}",
+                    linewidth=1,
+                )
+                plotted = True
 
-            if not plotted:
-                print("Curves are empty; nothing to plot.")
-                return
+        if not plotted:
+            logger.info("Curves are empty; nothing to plot.")
+            return
 
-            plt.xlabel("Iteration")
-            plt.ylabel("Metric Value")
-            plt.title("Training Curves")
-            plt.legend()
-            plt.grid(True)
-            plt.tight_layout()
-            if save_path:
-                plt.savefig(save_path, dpi=150, bbox_inches="tight")
-            if show:
-                plt.show()
-
-        except Exception as e:
-            print("Failed to plot curves:", e)
+        plt.xlabel("Iteration")
+        plt.ylabel("Metric Value")
+        plt.title("Training Curves")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        if show:
+            plt.show()
 
     @staticmethod
     def plot_score_distribution(
@@ -561,7 +560,7 @@ class PlotManager:
             stats_list = stats_list[:limit]
 
         if not stats_list:
-            print("No data meets the current filters.")
+            logger.info("No data meets the current filters.")
             return
 
         labels = [
@@ -866,7 +865,7 @@ class PlotManager:
     @staticmethod
     def plot_face_bbox(df_bbox: pd.DataFrame) -> None:
         if len(df_bbox) == 0:
-            print("No face bbox data")
+            logger.info("No face bbox data")
             return
         _, ax = plt.subplots(figsize=(6, 6))
         sc = ax.scatter(
@@ -938,9 +937,6 @@ class PlotManager:
         cols: int = 4,
         invert_y: bool = True,
     ) -> None:
-        from matplotlib.patches import Rectangle
-        from matplotlib.colors import Normalize
-
         names = [
             k
             for k, v in pos_data.items()
@@ -1002,8 +998,6 @@ class PlotManager:
         rh_score: list[float],
         no_rh_score: list[float],
     ) -> None:
-        from scipy.stats import mannwhitneyu
-
         fig, axes = plt.subplots(1, 3, figsize=(14, 5), sharey=True)
         detect_pairs = [
             ("Body Pose", pose_score, no_pose_score),
@@ -1068,29 +1062,23 @@ class PlotManager:
             self.last_plot_time = time_now
 
     def plot_final_results(self) -> None:
-        try:
-            label = "valid"
-            current_metrics = self.history[label]
-            num_current_metrics = len(current_metrics)
-            if num_current_metrics == 0:
-                return
+        label = "valid"
+        current_metrics = self.history[label]
+        num_current_metrics = len(current_metrics)
+        if num_current_metrics == 0:
+            return
 
-            _, axes = plt.subplots(
-                1, num_current_metrics, figsize=(5 * num_current_metrics, 5)
-            )
-            if num_current_metrics == 1:
-                axes = [axes]
-            PlotManager.plot_metric(axes, current_metrics, label=label)
+        _, axes = plt.subplots(
+            1, num_current_metrics, figsize=(5 * num_current_metrics, 5)
+        )
+        if num_current_metrics == 1:
+            axes = [axes]
+        PlotManager.plot_metric(axes, current_metrics, label=label)
 
-            plt.suptitle("Final Training Results")
-            plt.tight_layout()
+        plt.suptitle("Final Training Results")
+        plt.tight_layout()
 
-            if self.save_path:
-                try:
-                    plt.savefig(self.save_path)
-                except Exception:
-                    pass
+        if self.save_path:
+            plt.savefig(self.save_path)
 
-            plt.show()
-        except Exception as e:
-            print(f"Failed to plot final results: {e}")
+        plt.show()

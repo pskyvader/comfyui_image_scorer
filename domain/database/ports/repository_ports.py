@@ -33,7 +33,7 @@ class ImageRepository(Protocol):
         rating_mu: float,
         rating_sigma: float,
         comparison_count: int,
-        touch_timestamp: bool = True,
+        touch_timestamp: bool,
     ) -> bool:
         ...
 
@@ -53,9 +53,9 @@ class ComparisonRepository(Protocol):
         filename_a: str,
         filename_b: str,
         winner: str,
-        weight: float = 1.0,
-        transitive_depth: int = 0,
-        timestamp: str | None = None,
+        weight: float,
+        transitive_depth: int,
+        timestamp: str | None,
     ) -> int:
         ...
 
@@ -65,8 +65,8 @@ class ComparisonRepository(Protocol):
         filename_b: str,
         winner: str,
         timestamp: str,
-        weight: float = 1.0,
-        transitive_depth: int = 0,
+        weight: float,
+        transitive_depth: int,
     ) -> int:
         ...
 

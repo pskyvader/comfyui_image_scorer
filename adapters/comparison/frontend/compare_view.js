@@ -60,6 +60,7 @@ const CompareView = (() => {
         if (phase && phase.show_mu_sigma) {
             lines.push(`μ: ${node.rating_mu.toFixed(2)}`);
             lines.push(`σ: ${node.rating_sigma.toFixed(2)}`);
+            lines.push(`TS: ${node.trueskill_score.toFixed(2)}`);
         }
         if (phase && phase.show_wins_losses) {
             const wins = node.wins ?? 0;
@@ -220,6 +221,7 @@ const CompareView = (() => {
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Score</td><td class="text-white text-right font-mono">${Utils.formatScore(node.score)}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Skill (μ)</td><td class="text-white text-right">${node.rating_mu}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Uncertainty (σ)</td><td class="text-white text-right">${node.rating_sigma}</td></tr>
+            <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Trueskill Score</td><td class="text-white text-right">${node.trueskill_score}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Comparisons</td><td class="text-white text-right">${node.comparison_count}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Chain (id:size)</td><td class="text-white text-right">${node.chain_id}:${node.chain_length}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Chain Main Members</td><td class="text-white text-right">${node.chain_main_members}</td></tr>

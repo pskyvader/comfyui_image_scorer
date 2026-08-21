@@ -186,10 +186,7 @@ class ScoringService:
         features = np.asarray(filtered_vectors, dtype=np.float32)
         objective = None
         if hasattr(model, "get_params"):
-            try:
-                objective = model.get_params().get("objective")
-            except Exception:
-                objective = None
+            objective = model.get_params().get("objective")
 
         with warnings.catch_warnings():
             warnings.filterwarnings(

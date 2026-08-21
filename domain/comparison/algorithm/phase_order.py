@@ -12,7 +12,8 @@ import random
 from typing import Any
 import time
 
-from ....core.observability.logger import SharedLogger
+
+from ....core.observability.logger import get_logger, ModuleLogger
 from ....core.configuration.settings import config
 from .pair_active import (
     phase_seed_coverage,
@@ -24,13 +25,14 @@ from .pair_active import (
     phase_fallback,
 )
 from .graph_helpers import pair_key, stable_seed_pool
+from ...graph.node_proxy import NodeProxy
 
-logger = SharedLogger.get_logger(__name__)
+logger: ModuleLogger = get_logger(__name__)
 
 
 # Each entry is a dict whose first key is the phase name (mapping to its
 # function).  Remaining keys are metadata consumed by the frontend.
-PHASES: list[dict[str, Any]] = [
+PHASES: tuple[dict[str, Any], ...] = (
     {
         "seed": phase_seed_coverage,
         "phase_label": "Phase 1 / Bootstrap Seed",
@@ -95,7 +97,7 @@ PHASES: list[dict[str, Any]] = [
         "show_chain_info": False,
         "show_mu_sigma": False,
     },
-]
+)
 
 
 _skip_before: int = 0
@@ -164,15 +166,14 @@ def select_pair(
         )
         return None, None
 
-    seed_pool = stable_seed_pool(
+    seed_pool: list[NodeProxy] = stable_seed_pool(
         [
             node
             for img in all_images
             if (node := cg.get_node(img["filename"])) is not None
         ]
     )
-
-    seed_nodes = [node for node in candidate_nodes if node.filename in seed_pool]
+    seed_pool_set: set[str] = {node.filename for node in seed_pool}
 
     reserve_count = int(config["ranking"]["reserve_count"])
     total_comps: int = comparison_repo.get_total_comparisons()
@@ -188,9 +189,14 @@ def select_pair(
             continue
 
         if name == "seed":
-            result = fn(seed_nodes, existing_pairs_set)
+            result = fn(
+                candidate_nodes,
+                existing_pairs_set,
+                seed_pool,
+                len(all_images),
+            )
         elif name == "anchor":
-            result = fn(candidate_nodes, seed_pool, existing_pairs_set, cg)
+            result = fn(candidate_nodes, seed_pool_set, existing_pairs_set, cg)
         elif name == "collapsible":
             result = fn(candidate_nodes, cg, comparison_repo)
         elif name == "single_win_loss":

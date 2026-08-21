@@ -23,6 +23,7 @@ from ...core.observability.logger import get_logger, ModuleLogger, configure_pac
 from ...core.io.serialization import atomic_write_json, discover_files, load_json
 from ...core.utilities.concurrency import parallel_for
 from ...core.configuration.settings import config
+from ...core.filesystem.paths import image_root_processed as _img_root
 
 logger: ModuleLogger = get_logger(__name__)
 JsonDict = dict[str, Any]
@@ -68,11 +69,8 @@ def _merge_comparison_histories(
 
 def deduplicate_scored(
     root: Path | None = None,
-    dry_run: bool = False,
     limit: int = 0,
 ) -> int:
-    from ...core.filesystem.paths import image_root_processed as _img_root
-
     if root is None:
         root = Path(_img_root)
 
@@ -143,15 +141,14 @@ def deduplicate_scored(
                         f"{basename}: {len(same_images)} copy(ies), keeping {keeper_jf.parent.name}"
                     )
 
-                if not dry_run:
-                    for _img, _jf, ddata in discard_list:
-                        _merge_comparison_histories(keeper_data, [ddata], basename)
+                for _img, _jf, ddata in discard_list:
+                    _merge_comparison_histories(keeper_data, [ddata], basename)
 
-                    atomic_write_json(str(keeper_jf), keeper_data, indent=2)
+                atomic_write_json(str(keeper_jf), keeper_data, indent=2)
 
-                    for dimg, djf, _ddata in discard_list:
-                        dimg.unlink(missing_ok=True)
-                        djf.unlink(missing_ok=True)
+                for dimg, djf, _ddata in discard_list:
+                    dimg.unlink(missing_ok=True)
+                    djf.unlink(missing_ok=True)
 
                 total_removed += len(discard_list)
 
@@ -183,9 +180,8 @@ def deduplicate_scored(
                         )
                         continue
 
-                    if not dry_run:
-                        os.replace(str(jf), str(new_jf))
-                        os.replace(str(img), str(new_img))
+                    os.replace(str(jf), str(new_jf))
+                    os.replace(str(img), str(new_img))
 
                     total_renamed += 1
     else:
@@ -235,21 +231,19 @@ def deduplicate_scored(
                 f"keeping {keeper_jf.parent.name}"
             )
 
-        if not dry_run:
-            for _img, _jf, ddata in discard_list:
-                _merge_comparison_histories(keeper_data, [ddata], keeper_jf.stem)
-            atomic_write_json(str(keeper_jf), keeper_data, indent=2)
-            for dimg, djf, _ddata in discard_list:
-                logger.debug("Removing cross-stem duplicate %s", dimg.name)
-                dimg.unlink(missing_ok=True)
-                djf.unlink(missing_ok=True)
+        for _img, _jf, ddata in discard_list:
+            _merge_comparison_histories(keeper_data, [ddata], keeper_jf.stem)
+        atomic_write_json(str(keeper_jf), keeper_data, indent=2)
+        for dimg, djf, _ddata in discard_list:
+            logger.debug("Removing cross-stem duplicate %s", dimg.name)
+            dimg.unlink(missing_ok=True)
+            djf.unlink(missing_ok=True)
 
         total_removed += len(discard_list)
 
-    action = "Would remove" if dry_run else "Removed"
     logger.info(
-        "%s %d duplicate(s), renamed %d conflict(s)",
-        action, total_removed, total_renamed,
+        "Removed %d duplicate(s), renamed %d conflict(s)",
+        total_removed, total_renamed,
     )
     for ex in examples:
         logger.info("  e.g. %s", ex)
@@ -263,7 +257,6 @@ def main() -> None:
         description="Deduplicate scored images by MD5 comparison"
     )
     parser.add_argument("--root", default=None, help="Override scored root directory (default: config image_root_processed)")
-    parser.add_argument("--dry-run", action="store_true", help="Preview only, no changes")
     parser.add_argument("--limit", type=int, default=0, help="Process only first N duplicate groups")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Logging verbosity")
     args = parser.parse_args()
@@ -272,7 +265,6 @@ def main() -> None:
 
     count = deduplicate_scored(
         root=Path(args.root) if args.root else None,
-        dry_run=args.dry_run,
         limit=args.limit,
     )
 

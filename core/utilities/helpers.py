@@ -8,6 +8,7 @@ from torch import Tensor
 from ..observability.logger import get_logger, ModuleLogger
 from ..filesystem.paths import (
     models_dir,
+    split_dir,
     vectors_file,
     scores_file,
     comparisons_file,
@@ -26,7 +27,7 @@ def remove_directory(directory_path: Path) -> None:
 
 
 def delete_full_vectors() -> None:
-    """Delete the full vector files but keep the split/ directory intact."""
+    """Delete the full vector files and all split categories except image/."""
     for path_str in [
         vectors_file, scores_file, index_file, text_data_file, comparisons_file,
     ]:
@@ -34,6 +35,10 @@ def delete_full_vectors() -> None:
         if p.exists():
             logger.info(f"Removing {p}")
             p.unlink()
+    for split_path in Path(split_dir).iterdir():
+        if split_path.name == "image":
+            continue
+        remove_directory(split_path)
 
 
 def remove_models() -> None:
@@ -49,12 +54,9 @@ def remove_derived_caches(*paths: str) -> None:
     models/ directory or touching caches that are still valid.
     """
     for p in paths:
-        try:
-            if Path(p).exists():
-                Path(p).unlink()
-                logger.debug(f"Removed stale cache: {p}")
-        except OSError as exc:
-            logger.warning(f"Failed to remove cache {p}: {exc}")
+        if Path(p).exists():
+            Path(p).unlink()
+            logger.debug(f"Removed stale cache: {p}")
 
 
 def export_image_batch(pil_images: list[Image.Image]) -> Tensor:

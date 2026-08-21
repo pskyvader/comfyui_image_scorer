@@ -44,3 +44,6 @@ comfyui-scorer = "comfyui_image_scorer.adapters.cli.main:main"
 addopts = "-s"
 pythonpath = [".."]
 testpaths = ["tests", "adapters", "domain", "core"]
+markers = [
+    "realdata: destructive end-to-end tests against the real dataset via a live server",
+]

@@ -24,7 +24,7 @@ ImageEntry = tuple[str, dict[str, Any], str, str]
 
 processed_cache: dict[str, ImageEntry] = {}
 
-REQUIRED_ANALYSIS_FIELDS: set[str] = {
+REQUIRED_ANALYSIS_FIELDS: frozenset[str] = frozenset({
     "original_width",
     "original_height",
     "final_width",
@@ -38,9 +38,9 @@ REQUIRED_ANALYSIS_FIELDS: set[str] = {
     "gender",
     "race",
     "nsfw_score",
-}
+})
 
-METRIC_KEYS: list[str] = [
+METRIC_KEYS: tuple[str, ...] = (
     "contrast",
     "sharpness",
     "noise_score",
@@ -48,7 +48,7 @@ METRIC_KEYS: list[str] = [
     "artifact_score",
     "edge_density",
     "texture_lbp",
-]
+)
 
 
 def process_single_batch(
@@ -360,10 +360,7 @@ class ImageAnalysis(ImageVector):
         elif isinstance(lora, list):
             lora = {str(name): 1.0 for name in lora if name}
         elif isinstance(lora, str) and lora:
-            try:
-                w = float(weight) if weight is not None else 1.0
-            except (TypeError, ValueError):
-                w = 1.0
+            w = float(weight) if weight is not None else 1.0
             lora = {lora: w}
         else:
             lora = entry.get("lora")

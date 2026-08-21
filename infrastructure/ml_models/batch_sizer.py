@@ -136,7 +136,7 @@ class BatchSizer:
         width: int,
         height: int,
         rebuild: bool,
-        bound: int | None = None,
+        bound: int | None,
     ) -> int:
         _start = time.perf_counter()
         profile = self._active

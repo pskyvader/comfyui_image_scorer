@@ -110,11 +110,7 @@ class ModelTrainer:
         if objective != "lambdarank":
             return None
 
-        try:
-            target_scores = training_loader.load_scores_array()
-        except Exception as exc:
-            logger.warning("Skipping score calibration: failed to load scores: %s", exc)
-            return None
+        target_scores = training_loader.load_scores_array()
 
         if len(target_scores) != len(X):
             logger.warning(
@@ -267,36 +263,30 @@ class ModelTrainer:
             self.result_metrics["accuracy"] = acc
 
             # F1-scores (better for imbalanced datasets)
-            try:
-                macro_f1 = float(
-                    f1_score(y_test, predictions, average="macro", zero_division="0")
+            macro_f1 = float(
+                f1_score(y_test, predictions, average="macro", zero_division="0")
+            )
+            weighted_f1 = float(
+                f1_score(y_test, predictions, average="weighted", zero_division="0")
+            )
+            macro_precision = float(
+                precision_score(
+                    y_test, predictions, average="macro", zero_division="0"
                 )
-                weighted_f1 = float(
-                    f1_score(y_test, predictions, average="weighted", zero_division="0")
+            )
+            macro_recall = float(
+                recall_score(
+                    y_test, predictions, average="macro", zero_division="0"
                 )
-                macro_precision = float(
-                    precision_score(
-                        y_test, predictions, average="macro", zero_division="0"
-                    )
-                )
-                macro_recall = float(
-                    recall_score(
-                        y_test, predictions, average="macro", zero_division="0"
-                    )
-                )
-                self.result_metrics["macro_f1"] = macro_f1
-                self.result_metrics["weighted_f1"] = weighted_f1
-                self.result_metrics["macro_precision"] = macro_precision
-                self.result_metrics["macro_recall"] = macro_recall
-            except Exception:
-                pass
+            )
+            self.result_metrics["macro_f1"] = macro_f1
+            self.result_metrics["weighted_f1"] = weighted_f1
+            self.result_metrics["macro_precision"] = macro_precision
+            self.result_metrics["macro_recall"] = macro_recall
 
             # log loss only if probabilities available
-            try:
-                ll = float(log_loss(y_test, y_pred))
-                self.result_metrics["log_loss"] = ll
-            except Exception:
-                pass
+            ll = float(log_loss(y_test, y_pred))
+            self.result_metrics["log_loss"] = ll
 
         elif objective == "lambdarank":
             pairwise_accuracy = self._pairwise_accuracy(y_test, y_pred)
@@ -311,7 +301,7 @@ class ModelTrainer:
         if evaluation_results:
             target_set = "valid" if "valid" in evaluation_results else None
             if not target_set:
-                print(f"Warning: not valid set found, trying training...")
+                logger.warning("No valid set found in evaluation results, trying training set...")
                 target_set = "train" if "train" in evaluation_results else None
             if target_set:
                 metric_dict = evaluation_results[target_set]

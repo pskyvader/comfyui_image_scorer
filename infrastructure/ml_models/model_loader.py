@@ -24,6 +24,10 @@ from transformers import (
 )
 from huggingface_hub import snapshot_download
 
+from ...core.observability.logger import get_logger, ModuleLogger
+
+logger: ModuleLogger = get_logger(__name__)
+
 
 def _missing_model_error(description: str) -> RuntimeError:
     return RuntimeError(
@@ -100,13 +104,13 @@ class ModelLoader:
         return ModelLoader._IMAGENET_NORM
 
     def load_vision_model(
-        self, model_key: str = "convnext"
+        self, model_key: str
     ) -> tuple[nn.Module, int, int, transforms.Compose]:
         cached = self.vision_model_cache.get(model_key)
         if cached is not None:
             return cached
 
-        vision_models: dict = self.prepare_config["vision_models"]
+        vision_models: dict[str, dict[str, Any]] = self.prepare_config["vision_models"]
         if model_key not in vision_models:
             raise KeyError(
                 f"Vision model key '{model_key}' not found in prepare_config. "
@@ -123,7 +127,7 @@ class ModelLoader:
         if device != "cuda":
             raise RuntimeError("device not set to 'cuda'")
 
-        print(f"Loading Vision Model ({model_key}): {name}...")
+        logger.info("Loading Vision Model (%s): %s...", model_key, name)
 
         try:
             model: nn.Module = timm.create_model(
@@ -138,7 +142,7 @@ class ModelLoader:
         model = model.eval()
         model.to(device)
 
-        print(f"Vision model '{model_key}' loaded on device: {device} ")
+        logger.info("Vision model '%s' loaded on device: %s", model_key, device)
 
         props = torch.cuda.get_device_properties(device)
         total_memory = int(props.total_memory)
@@ -206,7 +210,7 @@ class ModelLoader:
         return result
 
     def _load_hf_vision_model_impl(self, model_key: str) -> tuple[nn.Module, int, Any]:
-        attribute_models: dict = self.prepare_config["attribute_models"]
+        attribute_models: dict[str, dict[str, Any]] = self.prepare_config["attribute_models"]
         if model_key not in attribute_models:
             raise KeyError(
                 f"Attribute model key '{model_key}' not found in prepare_config. "
@@ -218,7 +222,7 @@ class ModelLoader:
         output_dim: int = model_config["output_dim"]
         device: str = model_config["device"]
 
-        print(f"Loading Attribute Model ({model_key}): {name}...")
+        logger.info("Loading Attribute Model (%s): %s...", model_key, name)
 
         try:
             if model_key == "face_attributes":
@@ -237,14 +241,14 @@ class ModelLoader:
                 model.load_state_dict(state_dict, strict=False)
                 model = model.eval()
                 model.to(device)
-                print(f"Attribute model '{model_key}' loaded on device: {device}")
+                logger.info("Attribute model '%s' loaded on device: %s", model_key, device)
                 result = (model, output_dim, processor)
             elif model_key == "nsfw":
                 processor = AutoImageProcessor.from_pretrained(name)
                 model = AutoModelForImageClassification.from_pretrained(name)
                 model = model.eval()
                 model.to(device)
-                print(f"NSFW model '{model_key}' loaded on device: {device}")
+                logger.info("NSFW model '%s' loaded on device: %s", model_key, device)
                 result = (model, output_dim, processor)
             else:
                 raise KeyError(f"Unknown attribute model key: {model_key}")
