@@ -263,7 +263,8 @@ each import to its top-level layer, and assert it is in that layer's allowed set
 contract is:
 
 ```python
-# tests/test_architecture.py  (not on disk yet — test authoring is on hold)
+# tests/test_architecture.py  (not on disk yet — future work; new test
+# files are permitted since the 2026-08-22 rule 5 amendment)
 import ast
 from pathlib import Path
 
@@ -291,11 +292,16 @@ def test_no_architectural_violations():
                     raise AssertionError(f"{path.relative_to(ROOT)}: {layer} imports {target}")
 ```
 
-**Current status:** the root `tests/` directory does not exist yet, so the
-AST layer scan in `REORGANIZATION_PLAN.md` §4 is the gate today (run
-manually). The revision closed the enumerated violations: the only
-`infrastructure` imports that remain are the 30 adapter-wiring statements in
-the three composition roots, and `pytest` passes (34 tests).
+**Current status:** `tests/` exists with `test_general.py` (the general
+suite — runs only on explicit user prompt), plus
+three colocated suites (`domain/vectors/tests/test_terms.py`,
+`domain/graph/tests/test_chain_manager.py`,
+`adapters/server/tests/test_compressed_image.py`) — 34 tests, all passing.
+The AST layer scan in `REORGANIZATION_PLAN.md` §4 remains the architecture
+gate until `test_architecture.py` is authored (permitted since the
+2026-08-22 rule 5 amendment). The revision closed the enumerated violations:
+the only `infrastructure` imports that remain are the 30 adapter-wiring
+statements in the three composition roots.
 
 Existing violations must be fixed by moving code across the boundary — never by
 relaxing the rule or deleting the check. The `core` row has an empty allowed
@@ -331,9 +337,9 @@ Nothing imports `infrastructure` except the composition roots listed above.
 
 ## Development Conventions
 
-1. **Imports:** always relative, otherwise comfyui will struggle. At module scope. The CLI command modules use lazy inline imports for heavy dependencies — that established pattern is allowed, but do not spread it to new code.
-2. **No `try`/`except` blocks:** let failures surface with clear errors; no fallbacks. The only exception is the batch size profiler (`infrastructure/ml_models/batch_sizer.py`), where it is part of the function's working.
-3. **Tests:** Colocated `tests/` subdirectory next to tested module (e.g., `domain/comparison/tests/test_trueskill.py`).
+1. **Imports:** always relative, otherwise comfyui will struggle. At module scope. Only `adapters/cli/main.py`'s lazy parser dispatch uses inline imports — that one established pattern is allowed, but do not spread it to new code.
+2. **No error-swallowing `try`/`except` blocks:** let failures surface with clear errors; no fallbacks. Permitted forms only (see REORGANIZATION_PLAN §3.10 #37): finally-only cleanup with a comment naming what it restores; except used solely to translate-and-reraise a clearer error (`raise ... from e`, never suppressed); and `except torch.cuda.OutOfMemoryError` where OOM-adaptive batching is the working of the function (batch-size profiler, image-vector retry loop).
+3. **Tests:** Colocated `tests/` subdirectory next to tested module (e.g., `domain/comparison/tests/test_trueskill.py`). By default run only the colocated suites for the module under change; the general suite at the root `tests/` directory (`test_general.py` — full command↔endpoint contract) runs only on explicit user prompt.
 4. **Typing:** Full type hints on public APIs. `pyright` must pass in strict mode (`"typeCheckingMode": "strict"` in `pyrightconfig.json`). The stale `typings/` folder interferes with analysis — its cleanup is tracked in REORGANIZATION_PLAN.
 5. **No global mutable state** in `core`/`domain`/`application`. State lives in `adapters` or `infrastructure`.
 6. **Configuration** enters only via `core.configuration` — no `os.getenv` scattered in domain code.
@@ -374,7 +380,7 @@ for name, cls in NODE_CLASS_MAPPINGS.items():
 print('All nodes valid.')
 ```
 
-**4. Unit test** (colocated — pending test authoring, same as `tests/test_architecture.py`):
+**4. Unit test** (colocated — same convention as the existing colocated suites):
 ```python
 # adapters/comfyui/nodes/aesthetic_score/tests/test_node_import.py
 from comfyui_image_scorer.adapters.comfyui import NODE_CLASS_MAPPINGS

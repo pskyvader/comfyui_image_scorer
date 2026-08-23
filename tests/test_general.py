@@ -1,4 +1,9 @@
-"""Dynamic command/endpoint architecture test for comfyui_image_scorer.
+"""General test for comfyui_image_scorer — covers the whole module.
+
+**Agent guidance:** this is the general suite. Run it ONLY when the user
+explicitly prompts for it. For routine verification of a change, run only
+the colocated tests next to the module under change
+(e.g. `pytest domain/graph/tests`).
 
 Tiers:
 - default run: Tier 0 (structural parity, dynamic discovery, dry-run guard)
@@ -7,9 +12,9 @@ Tiers:
   destructive: removes then rebuilds a limit=100 subset of the real dataset,
   ~30-45 min).
 
-Rule lifts (user-authorized, REORGANIZATION_PLAN.md v5 amendment):
-- plan §0.5 "no new test files": this file is the sanctioned architecture
-  test.
+Rule notes:
+- plan §0.5 was amended 2026-08-22 to permit new test files; this file is
+  the sanctioned general/architecture test.
 - "tests use fakes, not real infrastructure": Tiers 2-3 use the real dataset
   through the live server by explicit user request.
 """

@@ -31,6 +31,10 @@ rule here conflicts with the root file, this file wins for this module.
 - Static typing: `pyright` must pass in strict mode (`pyrightconfig.json`,
   `"typeCheckingMode": "strict"`).
 - Tests: `pytest` (colocated `tests/` next to the module under test).
+  **Test scope:** by default run only the colocated suites for the module
+  under change (e.g. `pytest domain/graph/tests`). The general suite at the
+  root `tests/` directory (`test_general.py` — the full command↔endpoint
+  contract) runs only when the user explicitly prompts for it.
 - Verification order after a change: `pytest` → `ruff` (ARG/F401) → `pyright`
   → AST layer scan (REORGANIZATION_PLAN §4) → node registration smoke check.
 
@@ -57,12 +61,16 @@ rule here conflicts with the root file, this file wins for this module.
 
 ## Python Style
 
-- Relative imports, at module scope. The CLI command modules use lazy inline
-  imports for heavy dependencies — that established pattern is allowed, but do
-  not spread it to new code.
-- No `try`/`except` blocks. Let failures surface with clear errors. No
-  fallbacks. The only exception is the batch size profiler, which is part of
-  the actual working of the function.
+- Relative imports, at module scope. Only `adapters/cli/main.py`'s lazy
+  parser dispatch uses inline imports — that one established pattern is
+  allowed, but do not spread it to new code.
+- No error-swallowing `try`/`except` blocks. Let failures surface with clear
+  errors. No fallbacks. Permitted forms only (see REORGANIZATION_PLAN.md
+  §3.10 #37): finally-only cleanup with a comment naming what it restores;
+  except used solely to translate-and-reraise a clearer error (`raise ...
+  from e`, never suppressed); and `except torch.cuda.OutOfMemoryError`
+  where OOM-adaptive batching is the working of the function (batch-size
+  profiler, image-vector retry loop).
 - No workarounds for pinned library versions.
 - Let unsupported formats, invalid states, and bad data fail clearly instead
   of silently degrading quality.

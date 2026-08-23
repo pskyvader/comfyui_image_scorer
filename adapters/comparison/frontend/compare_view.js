@@ -31,12 +31,22 @@ const CompareView = (() => {
         return `Phase ${phaseIndex}`;
     }
 
-    function phaseCardClass(phaseIndex) {
+    function hexToRgba(hex, alpha) {
+        const n = parseInt(hex.slice(1), 16);
+        return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+    }
+
+    // Card tint comes from the single backend color per phase; the fallback
+    // phase (no color) keeps a muted variant.
+    function renderPhaseCards(leftCard, rightCard, phaseIndex) {
         const p = _phases[phaseIndex];
-        if (p && p.card_class) {
-            return p.card_class;
+        const muted = !p || !p.color;
+        const color = muted ? "#9ca3af" : p.color;
+        for (const card of [leftCard, rightCard]) {
+            card.style.borderColor = hexToRgba(color, muted ? 0.3 : 0.6);
+            card.style.backgroundColor = hexToRgba(color, muted ? 0.1 : 0.14);
+            card.style.boxShadow = `0 0 20px ${hexToRgba(color, muted ? 0.05 : 0.15)}`;
         }
-        return "card-fallback";
     }
 
     // Per-image detail is phase-driven. What to show is decided by phase + data.
@@ -95,16 +105,6 @@ const CompareView = (() => {
         } else if (badge) {
             badge.remove();
         }
-    }
-
-    function renderPhaseCards(leftCard, rightCard, phaseIndex) {
-        const allCardClasses = _phases.map(p => p.card_class)
-            .concat(["collapsible-card"]);
-        leftCard.classList.remove(...allCardClasses);
-        rightCard.classList.remove(...allCardClasses);
-        const cls = phaseCardClass(phaseIndex);
-        leftCard.classList.add(cls);
-        rightCard.classList.add(cls);
     }
 
     function renderFooter(pair, left, right) {
@@ -326,20 +326,20 @@ const CompareView = (() => {
         const sigmaThreshold = fmt(labels?.sigma_threshold);
         const header = "<div class=\"text-[9px] uppercase tracking-widest font-bold mb-2 opacity-40\">Pair Selection Strategy</div>";
         const items = _phases.map((p) => {
-            const cls = p.description_class || "text-gray-400";
+            const color = p.color || "#9ca3af";
             const label = p.phase_label || "";
             const desc = (p.description || "")
                 .replace(/\{seed_size\}/g, seedSize)
                 .replace(/\{seed_target\}/g, seedTarget)
                 .replace(/\{insertion_target\}/g, insertionTarget)
                 .replace(/\{sigma_threshold\}/g, sigmaThreshold);
-            return `<div><span class="${cls} font-bold">${label}</span> — ${desc}</div>`;
+            return `<div><span class="font-bold" style="color:${color}">${label}</span> — ${desc}</div>`;
         })
             .join("\n");
         container.innerHTML = header + items;
     }
 
-    return { render, phaseLabel, phaseCardClass, setPhases, renderDescriptions };
+    return { render, phaseLabel, setPhases, renderDescriptions };
 })();
 
 window.CompareView = CompareView;

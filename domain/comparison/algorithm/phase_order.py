@@ -1,7 +1,7 @@
 """Phase ordering configuration.
 
 The single source of truth for which phases exist, in which order they run,
-and the metadata (labels, CSS classes, descriptions, conditional flags) that
+and the metadata (labels, colors, descriptions, conditional flags) that
 the frontend uses to render them.  Reorder the PHASES list to change the
 execution order — the list index IS the phase number.
 """
@@ -36,8 +36,7 @@ PHASES: tuple[dict[str, Any], ...] = (
     {
         "seed": phase_seed_coverage,
         "phase_label": "Phase 1 / Bootstrap Seed",
-        "card_class": "card-bootstrap",
-        "description_class": "text-purple-400",
+        "color": "#f87171",
         "description": "ensures seed images (top {seed_size} by comparisons) reach {seed_target} comparisons each, preferring cross-path opponents with similar scores",
         "show_chain_info": False,
         "show_mu_sigma": False,
@@ -45,8 +44,7 @@ PHASES: tuple[dict[str, Any], ...] = (
     {
         "anchor": phase_anchor_insert,
         "phase_label": "Phase 2 / Anchor Insert",
-        "card_class": "card-anchor",
-        "description_class": "text-blue-400",
+        "color": "#facc15",
         "description": "integrates new images with \u2264{insertion_target} comparisons by pairing them with the closest mu (skill) from a different crystal path, preferring different components",
         "show_chain_info": False,
         "show_mu_sigma": False,
@@ -54,8 +52,7 @@ PHASES: tuple[dict[str, Any], ...] = (
     {
         "collapsible": phase_collapsible_pairs,
         "phase_label": "Phase 3 / Collapsible",
-        "card_class": "card-collapsible",
-        "description_class": "text-emerald-400",
+        "color": "#4ade80",
         "description": "finds two tops or two bottoms in the same component not yet transitively connected; one click resolves ranking for entire branches",
         "show_chain_info": True,
         "show_mu_sigma": False,
@@ -63,8 +60,7 @@ PHASES: tuple[dict[str, Any], ...] = (
     {
         "single_win_loss": phase_single_win_loss,
         "phase_label": "Phase 4 / Single Win-Loss",
-        "card_class": "card-single",
-        "description_class": "text-cyan-400",
+        "color": "#22d3ee",
         "description": "compares images with exactly one win (highest score first) or exactly one loss (lowest score first), picking the closest-score adjacent pair until one image remains in each group",
         "show_chain_info": False,
         "show_mu_sigma": False,
@@ -73,8 +69,7 @@ PHASES: tuple[dict[str, Any], ...] = (
     {
         "refine": phase_uncertainty_refine,
         "phase_label": "Phase 5 / Uncertainty Refine",
-        "card_class": "card-refine",
-        "description_class": "text-amber-400",
+        "color": "#60a5fa",
         "description": "reduces uncertainty by comparing images above \u03c3 \u2265 {sigma_threshold} against the closest-mu seed images",
         "show_chain_info": False,
         "show_mu_sigma": True,
@@ -82,8 +77,7 @@ PHASES: tuple[dict[str, Any], ...] = (
     {
         "chain_merge": phase_chain_merge,
         "phase_label": "Phase 6 / Chain Merge",
-        "card_class": "card-chain-merge",
-        "description_class": "text-red-400",
+        "color": "#a78bfa",
         "description": "merges the longest chains by comparing internal mid-chain nodes, reducing the total number of chains",
         "show_chain_info": True,
         "show_mu_sigma": True,
@@ -91,8 +85,7 @@ PHASES: tuple[dict[str, Any], ...] = (
     {
         "fallback": phase_fallback,
         "phase_label": "Fallback",
-        "card_class": "card-fallback",
-        "description_class": "text-purple-300/60",
+        "color": "#9ca3af",
         "description": "last-resort scan for any unseen pair when all heuristics fail",
         "show_chain_info": False,
         "show_mu_sigma": False,

@@ -9,7 +9,7 @@
     "timeout_ms": 30000,
     "seed_percentage": 5,
     "seed_target_comparisons": 10,
-    "insertion_target_comparisons": 1,
+    "insertion_target_comparisons": 2,
     "score_steepness": 1.5,
     "sigma_threshold": 3.0,
     "compress_images": false
