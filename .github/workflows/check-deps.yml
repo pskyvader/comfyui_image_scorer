@@ -21,4 +21,4 @@ jobs:
 
       - name: Check requirements.txt matches pyproject.toml
         run: |
-          uv pip compile pyproject.toml --output-file=- | diff - requirements.txt
+          uv pip compile pyproject.toml --universal --output-file=- | diff - requirements.txt
