@@ -18,11 +18,7 @@ const router = {
             template: "/static/maps3/maps.html",
             section: "maps3",
         },
-        tools: {
-            template: "/static/database/database.html",
-            section: "database",
-        },
-        db: {
+        database: {
             template: "/static/database/database.html",
             section: "database",
         },
