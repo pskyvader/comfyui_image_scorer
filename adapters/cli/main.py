@@ -176,11 +176,10 @@ def _add_files_parser(
         help="Download all models in prepare config (HF/timm/torch.hub + mediapipe)",
     )
 
-    cleanup_parser: argparse.ArgumentParser = files_sub.add_parser(
+    files_sub.add_parser(
         "cleanup",
         help="Deduplicate scored entries, then move remaining orphaned files to root",
     )
-    cleanup_parser.add_argument("--limit", type=int, default=0)
 
     return files_parser, remove, download
 
@@ -336,7 +335,6 @@ def main() -> int:
         elif args.files_command == "cleanup":
             dedup_count: int = deps.deduplicate_scored(
                 root=None,
-                limit=args.limit,
             )
             logger.info("Duplicates removed: %s", dedup_count)
             orphan_count: int = deps.cleanup_orphans(root=None)

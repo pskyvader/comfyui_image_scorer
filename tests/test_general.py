@@ -386,7 +386,7 @@ def test_cli_database_commands_with_fake_deps():
         ("POST", "/api/database/rebuild-db", None),
         ("POST", "/api/database/recalculate", None),
         ("POST", "/api/database/cleanup", None),
-        ("POST", "/api/files/cleanup", {"limit": 3}),
+        ("POST", "/api/files/cleanup", None),
         ("POST", "/api/files/download-models", None),
         ("GET", "/api/analyze/stats", None),
     ],
@@ -405,7 +405,7 @@ def test_endpoints_with_fake_deps(
     assert isinstance(payload["log"], list)
 
     if route == "/api/files/cleanup":
-        assert deps.deduplicate_scored.calls == [((), {"root": None, "limit": 3})]
+        assert deps.deduplicate_scored.calls == [((), {"root": None})]
         assert deps.cleanup_orphans.calls == [((), {"root": None})]
     elif route == "/api/files/download-models":
         assert len(deps.download_configured_models.calls) == 1
@@ -534,9 +534,10 @@ def test_live_server_smoke():
 
 @pytest.mark.realdata
 def test_real_data_pipeline():
-    """Runs every command endpoint against the real dataset, in the
-    dependency order: removes -> downloads -> build (limit=100 subset) ->
-    train -> hpo -> analyze -> database -> cleanup. Destructive."""
+    """Runs every command endpoint against the real dataset, grouped by
+    section: files (strip, dedup, download) -> database (cleanup/rebuild/
+    recalculate on the stripped tree) -> build (limit=100 subset) ->
+    training -> analyze. Destructive."""
     port = 8322
     proc, log_path = _start_server(port)
     try:
@@ -548,17 +549,17 @@ def test_real_data_pipeline():
             ("remove-vector-maps", "POST", "/api/files/remove-vector-maps", None, False, _check_maps_removed),
             ("remove-downloaded-models", "POST", "/api/files/remove-downloaded-models", None, False, None),
             ("delete-vectors", "POST", "/api/build/delete-vectors", None, False, _check_vectors_removed),
+            ("files-cleanup", "POST", "/api/files/cleanup", None, True, None),
             ("download-models", "POST", "/api/files/download-models", None, True, None),
+            ("db-cleanup", "POST", "/api/database/cleanup", None, True, None),
+            ("db-rebuild", "POST", "/api/database/rebuild-db", None, True, None),
+            ("db-recalculate", "POST", "/api/database/recalculate", None, True, None),
             ("build-all-100", "POST", "/api/build/prepare", {"mode": "all", "limit": 100, "batch": False}, True, _check_vectors_rebuilt),
             ("train-model", "POST", "/api/training/train", None, True, None),
             ("hpo", "POST", "/api/training/hpo", {"cycles": 2, "optimization_steps": 2, "max_combos": 2}, True, None),
             ("analyze-parameters", "POST", "/api/analyze/analyze-parameters", None, True, None),
             ("analyze-matrix", "POST", "/api/analyze/analyze-matrix", None, True, None),
-            ("db-cleanup", "POST", "/api/database/cleanup", None, True, None),
-            ("db-rebuild", "POST", "/api/database/rebuild-db", None, True, None),
-            ("db-recalculate", "POST", "/api/database/recalculate", None, True, None),
             ("stats", "GET", "/api/analyze/stats", None, False, None),
-            ("files-cleanup", "POST", "/api/files/cleanup", {"limit": 100}, True, None),
         ]
 
         try:

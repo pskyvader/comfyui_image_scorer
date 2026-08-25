@@ -260,9 +260,9 @@ def phase_single_win_loss(
             #     break
 
         if len(nodes) < 2:
-            logger.info(
-                f"skipping single win={single_win}, filtered_only={filtered_only}: only {len(nodes)} candidates"
-            )
+            # logger.info(
+            #     f"skipping single win={single_win}, filtered_only={filtered_only}: only {len(nodes)} candidates"
+            # )
             continue
 
         nodes.sort(
@@ -276,9 +276,9 @@ def phase_single_win_loss(
                 if node.comparison_count >= node_a.comparison_count + 1
             ]
             if len(filtered_nodes) < reserve_count:
-                logger.info(
-                    f"skipping single win={single_win}, filtered_only={filtered_only}: only {len(filtered_nodes)} candidates with comparison_count={node_a.comparison_count}"
-                )
+                # logger.info(
+                #     f"skipping single win={single_win}, filtered_only={filtered_only}: only {len(filtered_nodes)} candidates with comparison_count={node_a.comparison_count}"
+                # )
                 continue
             nodes = filtered_nodes
 

@@ -6,20 +6,12 @@ Every route body is the exact body CLI `main.py` runs for the matching
 
 from pathlib import Path
 
-from flask import Blueprint, Flask, jsonify, request
-
-from pydantic import BaseModel, Field
+from flask import Blueprint, Flask, jsonify
 
 from ....core.filesystem.paths import maps_dir, mediapipe_models_dir, split_dir
 from ....core.observability.logger import capture_log_output, get_logger, ModuleLogger
 from ....core.utilities.helpers import remove_directory, remove_models
 from ..deps import ServerDeps, get_server_deps
-
-
-class FilesCleanupRequest(BaseModel):
-    """Payload for POST /api/files/cleanup."""
-
-    limit: int = Field(default=0, ge=0)
 
 
 files_bp = Blueprint("files", __name__, url_prefix="/api/files")
@@ -64,12 +56,9 @@ def download_models():
 
 @files_bp.route("/cleanup", methods=["POST"])
 def cleanup():
-    req = FilesCleanupRequest.model_validate(
-        request.get_json(silent=True) or {}, strict=False
-    )
     deps = get_server_deps()
     with capture_log_output() as lines:
-        dedup_count = deps.deduplicate_scored(root=None, limit=req.limit)
+        dedup_count = deps.deduplicate_scored(root=None)
         logger.info("Duplicates removed: %s", dedup_count)
         orphan_count = deps.cleanup_orphans(root=None)
         logger.info("Orphans cleaned: %s", orphan_count)

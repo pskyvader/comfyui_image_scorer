@@ -69,7 +69,6 @@ def _merge_comparison_histories(
 
 def deduplicate_scored(
     root: Path | None = None,
-    limit: int = 0,
 ) -> int:
     if root is None:
         root = Path(_img_root)
@@ -116,13 +115,7 @@ def deduplicate_scored(
     if duplicates:
         logger.info("Found %d duplicate basename(s) to resolve", len(duplicates))
 
-        if limit and limit < len(duplicates):
-            logger.info("Processing first %d of %d group(s)", limit, len(duplicates))
-
-        items_iter = (
-            sorted(duplicates.items())[:limit] if limit else sorted(duplicates.items())
-        )
-        for basename, items in tqdm(items_iter, desc="Resolving duplicates", unit="group", delay=3.0):
+        for basename, items in tqdm(sorted(duplicates.items()), desc="Resolving duplicates", unit="group", delay=3.0):
             md5_groups: dict[str, list[EntryTriple]] = defaultdict(list)
             for img, jf, data in items:
                 key = _md5(img)
@@ -257,7 +250,6 @@ def main() -> None:
         description="Deduplicate scored images by MD5 comparison"
     )
     parser.add_argument("--root", default=None, help="Override scored root directory (default: config image_root_processed)")
-    parser.add_argument("--limit", type=int, default=0, help="Process only first N duplicate groups")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Logging verbosity")
     args = parser.parse_args()
 
@@ -265,7 +257,6 @@ def main() -> None:
 
     count = deduplicate_scored(
         root=Path(args.root) if args.root else None,
-        limit=args.limit,
     )
 
     if count:
