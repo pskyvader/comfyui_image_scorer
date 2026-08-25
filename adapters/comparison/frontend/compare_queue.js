@@ -226,7 +226,7 @@ class QueueManager {
         try {
             await CompareApi.submitComparison(entry.filenameA, entry.filenameB, entry.winnerFilename, this._timeoutMs);
             this._submissionCount++;
-            this.onSubmissionComplete();
+            this.onSubmissionComplete(entry);
         } catch (e) {
             const isTimeout = e.name === "AbortError";
             const reason = isTimeout ? "timed out" : e.message || String(e);

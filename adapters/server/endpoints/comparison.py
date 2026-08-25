@@ -5,21 +5,37 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from flask import Blueprint, current_app, jsonify, request
 
 from ....core.observability.logger import get_logger, ModuleLogger
 from ....core.configuration.settings import config
 from ....domain.comparison.algorithm import merge_sort_ranker
-from ....domain.comparison import state
 from ....domain.comparison.algorithm.view import (
     describe_image,
     describe_pair,
 )
 from ....domain.comparison.algorithm.phase_order import get_phases
+from ....domain.comparison.comparison_recorder import ComparisonRecorder
 from ..deps import ServerDeps, get_server_deps
 
 ranking_bp = Blueprint("ranking_v2", __name__, url_prefix="/api/ranking")
 logger: ModuleLogger = get_logger(__name__)
+
+
+class SkipRequest(BaseModel):
+    """Payload for POST /api/ranking/skip."""
+
+    filename: str = Field(..., min_length=1)
+
+
+class SubmitComparisonRequest(BaseModel):
+    """Payload for POST /api/ranking/submit-comparison."""
+
+    filename_a: str = Field(..., min_length=1)
+    filename_b: str = Field(..., min_length=1)
+    winner: str = Field(..., min_length=1)
 
 
 def _get_processor():
@@ -56,7 +72,7 @@ def _get_level_progress_stats(
 def get_ranking_config():
     _start = time.perf_counter()
     ranking_conf = config["ranking"]
-    all_images = get_server_deps().image_repo.get_all_images()
+    all_images = get_server_deps().graph.get_all_images()
     seed_percentage = int(ranking_conf["seed_percentage"])
     seed_size = max(1, len(all_images) * seed_percentage // 100)
     result = jsonify(
@@ -85,7 +101,7 @@ def get_ranking_phases():
 def get_status():
     _start = time.perf_counter()
     deps = get_server_deps()
-    all_images = deps.image_repo.get_all_images()
+    all_images = deps.graph.get_all_images()
     total = len(all_images)
     if total == 0:
         result = jsonify(
@@ -115,8 +131,8 @@ def get_status():
             "total_images": total,
             "ranked_images": ranked,
             "unranked_images": total - ranked,
-            "total_comparisons": deps.comparison_repo.get_total_comparisons(),
-            "skipped_comparisons": deps.comparison_repo.get_skipped_comparison_count(),
+            "total_comparisons": deps.graph.get_total_comparisons(),
+            "skipped_comparisons": deps.graph.get_skipped_comparison_count(),
             "min_images": 2,
             "current_target": level_stats["current_target"],
             "baseline_comparisons": level_stats["base_level"],
@@ -141,7 +157,7 @@ def get_next_pair():
         with processor.recent_lock:
             recent_files_ordered = list(processor.recent_images)
 
-    total_images = deps.image_repo.get_image_count()
+    total_images = deps.graph.get_image_count()
     if total_images < 2:
         result = (
             jsonify(
@@ -155,13 +171,9 @@ def get_next_pair():
         return result
 
     full_exclude = set(recent_files_ordered)
-    if not state.is_images_cache_valid():
-        state.set_images_cache(deps.image_repo.get_all_images())
-
     pair, phase_index = merge_sort_ranker.select_pair_for_comparison(
         exclude_set=full_exclude,
         crystal_graph=deps.graph,
-        comparison_repo=deps.comparison_repo,
     )
     logger.debug(f"phase {phase_index}", start_timer=_start)
     if not pair:
@@ -212,12 +224,11 @@ def reset_ranking_queue():
 @ranking_bp.route("/skip", methods=["POST"])
 def skip_image():
     _start = time.perf_counter()
-    payload = request.get_json(silent=True) or {}
-    filename = payload.get("filename")
+    req = SkipRequest.model_validate(request.get_json(silent=True) or {}, strict=False)
     processor = _get_processor()
-    if processor and filename:
+    if processor and req.filename:
         with processor.recent_lock:
-            processor.recent_images.append(filename)
+            processor.recent_images.append(req.filename)
     result = jsonify({"status": "ok"})
     return result
 
@@ -227,47 +238,27 @@ def submit_comparison():
     _start = time.perf_counter()
     deps = get_server_deps()
     processor = _get_processor()
-
-    payload = request.get_json()
-    if not payload:
-        result = jsonify({"error": "Missing request body"}), 400
-        return result
-
-    filename_a = payload["filename_a"]
-    filename_b = payload["filename_b"]
-    winner = payload["winner"]
-    if not all([filename_a, filename_b, winner]):
-        result = jsonify({"error": "Missing required fields"}), 400
-
-        return result
-    if filename_a == filename_b:
+    req = SubmitComparisonRequest.model_validate(request.get_json(), strict=False)
+    if req.filename_a == req.filename_b:
         result = jsonify({"error": "Cannot compare image to itself"}), 400
-
         return result
-    if winner not in [filename_a, filename_b]:
+    if req.winner not in (req.filename_a, req.filename_b):
         result = jsonify({"error": "Winner must be one of the images"}), 400
-
         return result
-
-    from ....domain.comparison.comparison_recorder import ComparisonRecorder
 
     recorder = ComparisonRecorder(
-        comparison_repo=deps.comparison_repo,
-        image_repo=deps.image_repo,
         path_syncer=deps.path_resolver,
         graph_service=deps.graph,
     )
-    success = recorder.record_comparison(filename_a, filename_b, winner, 1.0, 0)
+    success = recorder.record_comparison(req.filename_a, req.filename_b, req.winner, 1.0, 0)
     if not success:
         result = jsonify({"error": "Failed to record comparison"}), 500
         return result
 
     processor.clear_old_cache(force=False)
 
-    if not state.is_images_cache_valid():
-        state.set_images_cache(deps.image_repo.get_all_images())
-    data_a = state.get_cached_image(filename_a)
-    data_b = state.get_cached_image(filename_b)
+    data_a = deps.graph.get_image(req.filename_a)
+    data_b = deps.graph.get_image(req.filename_b)
     if data_a is None or data_b is None:
         result = jsonify({"error": "Image not found"}), 404
         return result
@@ -276,11 +267,11 @@ def submit_comparison():
         {
             "ok": True,
             "images": {
-                filename_a: {
+                req.filename_a: {
                     "score": round(float(data_a["score"]), 3),
                     "comparison_count": int(data_a["comparison_count"]),
                 },
-                filename_b: {
+                req.filename_b: {
                     "score": round(float(data_b["score"]), 3),
                     "comparison_count": int(data_b["comparison_count"]),
                 },
@@ -294,8 +285,8 @@ def submit_comparison():
 def sync_all_to_json():
     _start = time.perf_counter()
     deps = get_server_deps()
-    images = deps.image_repo.get_all_images()
-    all_comparisons = deps.comparison_repo.get_all_comparisons()
+    images = deps.graph.get_all_images()
+    all_comparisons = deps.graph.get_all_comparisons()
     count = 0
     errors = 0
     for img in images:

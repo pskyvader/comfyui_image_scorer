@@ -6,7 +6,6 @@ from typing import Any, Protocol
 import time
 
 from ....core.observability.logger import get_logger, ModuleLogger
-from ..state import get_cached_all_images
 from .graph_helpers import (
     filter_excluded_images,
 )
@@ -32,12 +31,24 @@ class CrystalGraph(Protocol):
     def get_graph_stats(self) -> dict[str, Any]: ...
     def are_in_same_path(self, img1: str, img2: str) -> bool: ...
     def get_main_chain_member_count(self, chain_id: int) -> int: ...
+    def get_total_comparisons(self) -> int: ...
+    def get_images_with_only_wins(self) -> list[str]: ...
+    def get_images_with_only_losses(self) -> list[str]: ...
+    def reset_selection_state(self) -> None: ...
+    def get_skip_before(self) -> int: ...
+    def set_skip_before(self, value: int) -> None: ...
+    def get_existing_pairs(self) -> set[tuple[str, str]]: ...
+    def set_existing_pairs(self, pairs: set[tuple[str, str]]) -> None: ...
+    def get_recent_chain_ids(self) -> list[int]: ...
+    def set_recent_chain_ids(self, chain_ids: list[int]) -> None: ...
+    def get_all_images(self) -> list[dict[str, Any]]: ...
+    def get_images_snapshot(self) -> list[dict[str, Any]] | None: ...
+    def set_images_snapshot(self, images: list[dict[str, Any]]) -> None: ...
 
 
 def select_pair_for_comparison(
     exclude_set: set[str] | None,
     crystal_graph: CrystalGraph,
-    comparison_repo: Any,
 ) -> tuple[tuple[str, str] | None, int | None]:
     """Select the next pair of images to compare.
 
@@ -47,7 +58,10 @@ def select_pair_for_comparison(
     6=fallback) or ``None``.
     """
     _start = time.perf_counter()
-    cached = get_cached_all_images()
+    cached = crystal_graph.get_images_snapshot()
+    if cached is None:
+        cached = crystal_graph.get_all_images()
+        crystal_graph.set_images_snapshot(cached)
     if len(cached) < 2:
         logger.warning(
             f"select_pair_for_comparison: <2 images ({time.perf_counter() - _start:.4f}s)"
@@ -72,7 +86,7 @@ def select_pair_for_comparison(
         )
         return None, None
 
-    pair, phase_index = select_pair(cached, candidate_images, cg, comparison_repo)
+    pair, phase_index = select_pair(cached, candidate_images, cg)
 
     if not pair:
         logger.warning(f"no pair", start_timer=_start)

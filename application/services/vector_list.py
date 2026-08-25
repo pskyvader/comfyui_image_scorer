@@ -1,3 +1,4 @@
+"""Vector listing helpers over the split/full vector files."""
 from typing import Any, Iterator
 import numpy as np
 import numpy.typing as npt
@@ -18,10 +19,9 @@ from ...domain.vectors.person_map_vector import PersonMapVector
 from ...core.filesystem.paths import split_dir
 from ...core.io.serialization import load_single_jsonl, write_single_jsonl
 from ...domain.loading import BatchSizerFactory, MapsProvider, ModelLoader
+from ...domain.ports.cache import CacheProvider
 
 logger: ModuleLogger = get_logger(__name__)
-
-cache_split_data: dict[str, list[dict[str, Any]]] = {}
 
 
 class VectorList:
@@ -41,6 +41,7 @@ class VectorList:
         model_loader: ModelLoader,
         batch_sizer_factory: BatchSizerFactory,
         maps_provider: MapsProvider,
+        cache: CacheProvider,
     ) -> None:
 
         self.image_paths: dict[str, str] = {}
@@ -53,6 +54,7 @@ class VectorList:
         self._model_loader = model_loader
         self._batch_sizer_factory = batch_sizer_factory
         self._maps_provider = maps_provider
+        self._cache = cache
 
         self.configure_sorted_vectors()
 
@@ -350,7 +352,6 @@ class VectorList:
     def load_split_files(self) -> None:
         _start = time.perf_counter()
 
-        global cache_split_data
         invalid_entries: dict[str, list[Any]] = {}
         maps_provider = self._maps_provider
         with tqdm(
@@ -374,8 +375,11 @@ class VectorList:
                 raw_vals: dict[str, Any] = {}
                 vec_vals: dict[str, list[float]] = {}
                 invalid: list[dict[str, Any]] = []
-                if name in cache_split_data:
-                    reader: Iterator[dict[str, Any]] = iter(cache_split_data[name])
+                cached_split: list[dict[str, Any]] | None = self._cache.get(
+                    f"split:{name}"
+                )
+                if cached_split is not None:
+                    reader: Iterator[dict[str, Any]] = iter(cached_split)
                 else:
                     reader: Iterator[dict[str, Any]] = load_single_jsonl(split_path)
 
@@ -428,7 +432,6 @@ class VectorList:
             )
 
     def export_split_files(self) -> None:
-        global cache_split_data
         logger.info("Exporting split data files...")
         with tqdm(
             total=len(self.sorted_vectors),
@@ -479,6 +482,6 @@ class VectorList:
                     vec_val = current_vector.vector_list[uid]
                     split_data.append({"id": uid, "raw": raw_val, "vector": vec_val})
 
-                cache_split_data[name] = split_data
+                self._cache.set(f"split:{name}", split_data)
                 write_single_jsonl(out_file, split_data, mode="w")
                 pbar.update(1)

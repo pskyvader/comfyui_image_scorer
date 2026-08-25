@@ -179,4 +179,62 @@ def atomic_write_json(path: str, data: Any, *, indent: int | None) -> None:
     os.replace(tmp, p)
 
 
+def extract_prompt_tags(data: dict[str, Any]) -> str | None:
+    if "positive_prompt" in data:
+        prompt = data["positive_prompt"]
+        if isinstance(prompt, str) and prompt:
+            return prompt
+    for value in data.values():
+        if isinstance(value, dict):
+            result = extract_prompt_tags(value)
+            if result:
+                return result
+    return None
 
+
+def clean_json_metadata(
+    json_data: dict[str, Any],
+    default_score: float,
+    filename: str,
+    initial_mu: float,
+    initial_sigma: float,
+) -> dict[str, Any]:
+    """Normalize a companion JSON entry into the canonical ranked-metadata shape."""
+    remove_fields = {
+        "score",
+        "score_modifier",
+        "volatility",
+        "confidence",
+        "image",
+        "comparison_count",
+        "rating_mu",
+        "rating_sigma",
+    }
+
+    if not isinstance(json_data, dict) or not json_data:
+        base: dict[str, Any] = {}
+    else:
+        if len(json_data) == 1:
+            only_value = next(iter(json_data.values()))
+            if isinstance(only_value, dict) and "positive_prompt" in only_value:
+                json_data = only_value
+        base = {k: v for k, v in json_data.items() if k not in remove_fields}
+        if not base:
+            for _, value in json_data.items():
+                if isinstance(value, dict):
+                    base = {
+                        k: v for k, v in value.items() if k not in remove_fields
+                    }
+                    break
+
+    base["score"] = round(float(default_score), 3)
+    base["rating_mu"] = initial_mu
+    base["rating_sigma"] = initial_sigma
+    base["comparison_count"] = 0
+    base["comparison_history"] = []
+
+    if filename:
+        base["filename"] = filename
+
+    base["prompt_tags"] = extract_prompt_tags(json_data)
+    return base

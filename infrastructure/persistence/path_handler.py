@@ -11,6 +11,7 @@ from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.configuration.settings import config
 from ...core.io.serialization import atomic_write_json, load_json
 from ...core.filesystem.paths import image_root_processed
+from ..cache.memory_cache import InMemoryCache
 from .comparisons_repository import (
     get_all_comparisons,
 )
@@ -20,7 +21,7 @@ from .images_repository import (
 
 logger: ModuleLogger = get_logger(__name__)
 
-_folder_listdir_cache: dict[str, tuple[int, bool]] = {}
+_folder_listdir_cache = InMemoryCache()
 
 
 def prewarm_folder_cache(ranked_root: Path) -> None:
@@ -33,7 +34,7 @@ def prewarm_folder_cache(ranked_root: Path) -> None:
         has_subfolders = any(
             item.startswith("scored_") and (base / item).is_dir() for item in items
         )
-        _folder_listdir_cache[str(base)] = (len(items), has_subfolders)
+        _folder_listdir_cache.set(str(base), (len(items), has_subfolders))
 
 
 def clear_folder_cache() -> None:
@@ -66,7 +67,7 @@ def compute_path_from_filename(filename: str, score: float) -> Path:
             item.startswith("scored_") and (base_folder / item).is_dir()
             for item in items
         )
-        _folder_listdir_cache[cache_key] = (file_count, has_subfolders)
+        _folder_listdir_cache.set(cache_key, (file_count, has_subfolders))
     else:
         file_count = 0
         has_subfolders = False

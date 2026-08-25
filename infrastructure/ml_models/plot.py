@@ -20,7 +20,7 @@ import math
 
 from ...domain.loading import TrainingLoader
 from ...core.configuration.settings import config
-from .calibration import apply_score_calibration, extract_score_calibration
+from ...domain.training.calibration import apply_score_calibration, extract_score_calibration
 
 logger: ModuleLogger = get_logger(__name__)
 

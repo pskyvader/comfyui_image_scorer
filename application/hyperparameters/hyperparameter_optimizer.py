@@ -1,3 +1,4 @@
+"""Hyperparameter optimization runner (single-flight via HpoRunner)."""
 from __future__ import annotations
 
 import random
@@ -21,7 +22,6 @@ NUM_CONFIGS = 5
 
 # Guard to prevent re-entrant or concurrent HPO loop runs. The HPO loop must
 # be started explicitly and may not be invoked more than once at a time.
-_hpo_running = False
 
 
 def generate_random_config() -> dict[str, Any]:
@@ -95,10 +95,11 @@ def _load_state() -> dict[str, Any]:
 
 
 def _save_state(state: dict[str, Any]) -> None:
-    training_config = config["training"]
+    data = config.section_data("training")
     for i in range(NUM_CONFIGS):
-        training_config[f"top{i + 1}"] = state["configs"][i]
-    training_config["used_keys"] = state["used_keys"]
+        data[f"top{i + 1}"] = state["configs"][i]
+    data["used_keys"] = state["used_keys"]
+    config.save_section("training", data)
 
 
 def reset_hyperparameters() -> dict[str, Any]:
@@ -285,108 +286,99 @@ def hpo_cycle(
     max_combos: int,
     cycle: int,
 ) -> dict[str, Any]:
-    global _hpo_running
-    if _hpo_running:
+    state = _load_state()
+    if (
+        not state
+        or "configs" not in state
+        or len(state.get("configs", [])) != NUM_CONFIGS
+    ):
         raise RuntimeError(
-            "HPO loop is already running. Concurrent or nested runs are not allowed."
+            "HPO state missing or invalid. Call reset_hyperparameters() to initialize."
         )
-    _hpo_running = True
-    try:
-        state = _load_state()
-        if (
-            not state
-            or "configs" not in state
-            or len(state.get("configs", [])) != NUM_CONFIGS
-        ):
-            raise RuntimeError(
-                "HPO state missing or invalid. Call reset_hyperparameters() to initialize."
-            )
 
-        configs = state["configs"]
-        used_keys = state.get("used_keys", [])
-        step_start = state.get("step", 0)
+    configs = state["configs"]
+    used_keys = state.get("used_keys", [])
+    step_start = state.get("step", 0)
 
-        logger.info("\n" + "=" * 80)
+    logger.info("\n" + "=" * 80)
+    logger.info(
+        "HPO Cycle %s — Starting from step %s/%s",
+        cycle + 1,
+        step_start,
+        optimization_steps,
+    )
+
+    for i in range(step_start, optimization_steps):
+        idx = i % NUM_CONFIGS
+        logger.info("\n" + "---" * 25)
+        logger.info("Step %s/%s  —  Config %s", i + 1, optimization_steps, idx + 1)
+        cfg = configs[idx]
         logger.info(
-            "HPO Cycle %s — Starting from step %s/%s",
-            cycle + 1,
-            step_start,
-            optimization_steps,
+            "best_score=%s  training_time=%.2fs",
+            f"{cfg['best_score']:.6f}",
+            cfg.get("training_time"),
         )
+        logger.info(" %s", cfg)
 
-        for i in range(step_start, optimization_steps):
-            idx = i % NUM_CONFIGS
-            logger.info("\n" + "---" * 25)
-            logger.info("Step %s/%s  —  Config %s", i + 1, optimization_steps, idx + 1)
-            cfg = configs[idx]
-            logger.info(
-                "best_score=%s  training_time=%.2fs",
-                f"{cfg['best_score']:.6f}",
-                cfg.get("training_time"),
-            )
-            logger.info(" %s", cfg)
+        configs[idx], used_keys = _run_step_on_config(
+            configs[idx], used_keys, X, y, max_combos, model_trainer
+        )
+        state["step"] = i + 1
+        state["configs"] = configs
+        state["used_keys"] = used_keys
+        _save_state(state)
 
-            configs[idx], used_keys = _run_step_on_config(
-                configs[idx], used_keys, X, y, max_combos, model_trainer
-            )
-            state["step"] = i + 1
-            state["configs"] = configs
-            state["used_keys"] = used_keys
-            _save_state(state)
+    logger.info("\n" + "=" * 80)
+    logger.info("Cycle complete — Sorting configs by score")
 
-        logger.info("\n" + "=" * 80)
-        logger.info("Cycle complete — Sorting configs by score")
+    training_objective = config["training"]["objective"]
+    directions = model_trainer.METRIC_DIRECTIONS.get(training_objective, {})
+    if directions:
+        higher_is_better = any(bool(v) for v in directions.values())
+    else:
+        higher_is_better = True
 
-        training_objective = config["training"]["objective"]
-        directions = model_trainer.METRIC_DIRECTIONS.get(training_objective, {})
-        if directions:
-            higher_is_better = any(bool(v) for v in directions.values())
-        else:
-            higher_is_better = True
-
+    logger.info(
+        "Sorting configs with higher_is_better=%s (objective=%s)",
+        higher_is_better,
+        training_objective,
+    )
+    configs.sort(
+        key=lambda c: c.get("best_score", -1000000.0),
+        reverse=higher_is_better,
+    )
+    for i, c in enumerate(configs):
         logger.info(
-            "Sorting configs with higher_is_better=%s (objective=%s)",
-            higher_is_better,
-            training_objective,
+            "  Rank %s: score=%s  time=%.2fs",
+            i + 1,
+            f"{c.get('best_score', -1):.6f}",
+            c.get("training_time", 0),
         )
-        configs.sort(
-            key=lambda c: c.get("best_score", -1000000.0),
-            reverse=higher_is_better,
-        )
-        for i, c in enumerate(configs):
-            logger.info(
-                "  Rank %s: score=%s  time=%.2fs",
-                i + 1,
-                f"{c.get('best_score', -1):.6f}",
-                c.get("training_time", 0),
-            )
 
-        logger.info(
-            "\nBreeding next generation — keeping top 2, creating 2 children via crossover"
-        )
-        parents = [configs[0], configs[1]]
-        child1 = crossover_config(dict(parents[0]), dict(parents[1]))
-        child2 = crossover_config(dict(parents[0]), dict(parents[1]))
-        random_child = generate_random_config()
-        logger.info("  Parent 1:  score=%s", f"{parents[0].get('best_score', -1):.6f}")
-        logger.info("  Parent 2:  score=%s", f"{parents[1].get('best_score', -1):.6f}")
+    logger.info(
+        "\nBreeding next generation — keeping top 2, creating 2 children via crossover"
+    )
+    parents = [configs[0], configs[1]]
+    child1 = crossover_config(dict(parents[0]), dict(parents[1]))
+    child2 = crossover_config(dict(parents[0]), dict(parents[1]))
+    random_child = generate_random_config()
+    logger.info("  Parent 1:  score=%s", f"{parents[0].get('best_score', -1):.6f}")
+    logger.info("  Parent 2:  score=%s", f"{parents[1].get('best_score', -1):.6f}")
 
-        new_configs = [parents[0], parents[1], child1, child2, random_child]
-        new_state = {
-            "configs": new_configs,
-            "step": 0,
-            "cycle": cycle + 1,
-            "used_keys": used_keys,
-        }
-        _save_state(new_state)
+    new_configs = [parents[0], parents[1], child1, child2, random_child]
+    new_state = {
+        "configs": new_configs,
+        "step": 0,
+        "cycle": cycle + 1,
+        "used_keys": used_keys,
+    }
+    _save_state(new_state)
 
-        logger.info(
-            "\nCycle %s complete. Trigger again to start next cycle.", cycle + 1
-        )
-        logger.info("=" * 80 + "\n")
-        return new_state
-    finally:
-        _hpo_running = False
+    logger.info(
+        "\nCycle %s complete. Trigger again to start next cycle.", cycle + 1
+    )
+    logger.info("=" * 80 + "\n")
+    return new_state
 
 
 def run_hpo_cycles(
@@ -427,3 +419,35 @@ def run_hpo_cycles(
         )
         results.append(res)
     return results
+
+
+class HpoRunner:
+    """Single-flight runner for HPO cycles; guards against concurrent runs."""
+
+    def __init__(self) -> None:
+        self._running = False
+
+    def run(
+        self,
+        cycles: int | None,
+        optimization_steps: int | None,
+        max_combos: int | None,
+        training_loader: TrainingLoader | None,
+        model_trainer: Any,
+    ) -> list[dict[str, Any]]:
+        if self._running:
+            raise RuntimeError(
+                "HPO loop is already running. Concurrent or nested runs are not allowed."
+            )
+        self._running = True
+        # #37a: restore the runner's idle state even when a cycle fails
+        try:
+            return run_hpo_cycles(
+                cycles=cycles,
+                optimization_steps=optimization_steps,
+                max_combos=max_combos,
+                training_loader=training_loader,
+                model_trainer=model_trainer,
+            )
+        finally:
+            self._running = False

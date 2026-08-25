@@ -76,7 +76,7 @@ class BuildView {
                     this._renderResponse(result);
                     return;
                 case "delete-vectors":
-                    if (!confirm("This will DELETE the full vector files from disk. Split data is kept. This cannot be undone. Continue?")) {
+                    if (!confirm("This will DELETE the full vector files, the vector maps, and every split category except image/ from disk. Recovery requires re-analysis. This cannot be undone. Continue?")) {
                         this.logger.info("Delete vectors cancelled by user.");
                         return;
                     }

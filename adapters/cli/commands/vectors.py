@@ -1,3 +1,4 @@
+"""Build commands: split-vectors, full-vectors, scores, and all."""
 from ....application.data_transform.prepare_data import (
     build_full_files,
     build_split_files,
@@ -34,6 +35,8 @@ def run_split_vectors(limit: int, batch: bool, deps: CLIDeps) -> int:
                 model_loader=deps.model_loader,
                 batch_sizer_factory=deps.batch_sizer_factory,
                 maps_provider=deps.maps_provider,
+                cache=deps.cache,
+                mediapipe=deps.mediapipe,
             )
             if int(summary["new"]) == 0:
                 break
@@ -45,6 +48,8 @@ def run_split_vectors(limit: int, batch: bool, deps: CLIDeps) -> int:
             model_loader=deps.model_loader,
             batch_sizer_factory=deps.batch_sizer_factory,
             maps_provider=deps.maps_provider,
+            cache=deps.cache,
+            mediapipe=deps.mediapipe,
         )
         changed = int(summary["new"]) > 0
 
@@ -75,6 +80,8 @@ def run_full_vectors(deps: CLIDeps) -> int:
         model_loader=deps.model_loader,
         batch_sizer_factory=deps.batch_sizer_factory,
         maps_provider=deps.maps_provider,
+        cache=deps.cache,
+        mediapipe=deps.mediapipe,
     )
     logger.info("Full vectors done: %s", result)
     return 0
@@ -82,7 +89,7 @@ def run_full_vectors(deps: CLIDeps) -> int:
 
 def run_scores(deps: CLIDeps) -> int:
     logger.info("Building scores + comparisons...")
-    result = run_rebuild_scores_only(comparison_repo=deps.comparison_repo)
+    result = run_rebuild_scores_only(graph=deps.graph)
     logger.info("Scores done: %s", result)
     return 0
 

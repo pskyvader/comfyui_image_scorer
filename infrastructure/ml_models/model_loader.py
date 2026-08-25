@@ -10,6 +10,17 @@ import huggingface_hub.constants as _hub_constants
 _hub_constants.HF_HUB_OFFLINE = os.environ["HF_HUB_OFFLINE"] == "1"
 _hub_constants.HF_HUB_DISABLE_TELEMETRY = os.environ["HF_HUB_DISABLE_TELEMETRY"] == "1"
 
+
+def set_hub_offline(enabled: bool) -> None:
+    """Flip HF hub offline mode after the import-time constants were mirrored.
+
+    huggingface_hub computes ``HF_HUB_OFFLINE`` from the environment once at
+    import; flipping ``os.environ`` alone has no effect afterwards.
+    """
+    value = "1" if enabled else "0"
+    os.environ["HF_HUB_OFFLINE"] = value
+    _hub_constants.HF_HUB_OFFLINE = value == "1"
+
 import torch
 from torch import nn
 from safetensors.torch import load_file as load_safetensors

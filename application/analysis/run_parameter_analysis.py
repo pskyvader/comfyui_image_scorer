@@ -1,7 +1,7 @@
 from ...core.io.serialization import load_single_jsonl
 from ...core.filesystem.paths import vectors_file, text_data_file
 from ...core.observability.logger import get_logger
-from ...domain.training.parameter_analysis import ParameterAnalyzer
+from .parameter_analysis import ParameterAnalyzer
 
 logger = get_logger(__name__)
 

@@ -19,6 +19,28 @@ const CompareView = (() => {
 
     let _phases = [];
 
+    // Session-only prediction accuracy tracking (#45): incremented after each
+    // successful submit-comparison; resets on page reload.
+    let prediction_correct = 0;
+    let prediction_incorrect = 0;
+
+    function recordPrediction(correct) {
+        if (correct) {
+            prediction_correct++;
+        } else {
+            prediction_incorrect++;
+        }
+    }
+
+    function accuracyText() {
+        const total = prediction_correct + prediction_incorrect;
+        if (total === 0) {
+            return "\u2014";
+        }
+        const pct = Math.round((prediction_correct / total) * 100);
+        return `${pct}% (${prediction_correct}/${total})`;
+    }
+
     function setPhases(phaseList) {
         _phases = phaseList;
     }
@@ -242,6 +264,7 @@ const CompareView = (() => {
                         <tr class="h-6"><td class="text-gray-500 pr-4">Collapsible</td><td class="text-white">${pair.collapsable ? "yes" : "no"}</td></tr>
                         <tr class="h-6"><td class="text-gray-500 pr-4">Same Component</td><td class="text-white">${sameComponent}</td></tr>
                         <tr class="h-6"><td class="text-gray-500 pr-4">${winnerText} / right (${Math.round(probB * 100)}%)</td><td class="text-white text-right">left ${probA.toFixed(4)}</td></tr>
+                        <tr class="h-6"><td class="text-gray-500 pr-4">Prediction Accuracy</td><td class="text-white text-right">${accuracyText()}</td></tr>
                     </tbody>
                 </table>
                 <table class="w-full text-left border-collapse">
@@ -339,7 +362,7 @@ const CompareView = (() => {
         container.innerHTML = header + items;
     }
 
-    return { render, phaseLabel, setPhases, renderDescriptions };
+    return { render, phaseLabel, setPhases, renderDescriptions, recordPrediction };
 })();
 
 window.CompareView = CompareView;

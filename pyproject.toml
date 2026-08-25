@@ -5,6 +5,7 @@ requires-python = ">=3.13"
 description = "Image scoring for ComfyUI optimized for Python 3.14 and CUDA 13.0"
 dependencies = [
     "flask>=3.1.2",
+    "pydantic>=2.12.5",
     "lightgbm>=4.6.0",
     "numpy>=2.4.0rc1",
     "onnxmltools>=1.15.0",
@@ -41,7 +42,7 @@ build-backend = "setuptools.build_meta"
 comfyui-scorer = "comfyui_image_scorer.adapters.cli.main:main"
 
 [tool.pytest.ini_options]
-addopts = "-s"
+addopts = "-s -m 'not realdata'"
 pythonpath = [".."]
 testpaths = ["tests", "adapters", "domain", "core"]
 markers = [

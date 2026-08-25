@@ -29,7 +29,7 @@ class PositionVector:
         i = self._config_index()
         if needed > self.vector_config[i]["slot_size"]:
             self.vector_config[i]["slot_size"] = needed
-            config["vector"]["vectors"] = self.vector_config
+            config.save_section("vector", {"vectors": self.vector_config})
 
     def parse_value_list(
         self,

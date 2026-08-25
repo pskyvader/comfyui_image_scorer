@@ -23,8 +23,11 @@ class CompareMode {
         // Wire queue callbacks
         this._queue.onQueueChange = () => this._updateQueueIndicator();
         this._queue.onUndoUIUpdate = () => this._updateUndoUI();
-        this._queue.onSubmissionComplete = () => {
+        this._queue.onSubmissionComplete = (entry) => {
             this._hasSubmitted = true;
+            if (entry.predictedWinner !== undefined) {
+                CompareView.recordPrediction(entry.winnerFilename === entry.predictedWinner);
+            }
             if (this._queue._submissionCount % (this._config.reserve_count || 1) === 0) {
                 this.updateStats();
             }
@@ -549,7 +552,11 @@ class CompareMode {
         const leftSrc = this.currentPair._preloadedLeft?.src;
         const rightSrc = this.currentPair._preloadedRight?.src;
 
-        this._queue.enqueue({ filenameA, filenameB, winnerFilename, leftSrc, rightSrc });
+        // The probable winner from the next-pair data (#45)
+        const probA = this.currentPair.pair?.probability_a_beats_b ?? 0.5;
+        const predictedWinner = probA >= 0.5 ? filenameA : filenameB;
+
+        this._queue.enqueue({ filenameA, filenameB, winnerFilename, predictedWinner, leftSrc, rightSrc });
         this._showUndoButton();
 
         // Mark as submitted immediately so cache filling starts right away

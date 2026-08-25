@@ -1,3 +1,4 @@
+"""Server command: boots the Flask ranking server from the CLI."""
 import os
 import subprocess
 import sys

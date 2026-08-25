@@ -1,3 +1,4 @@
+"""Application service owning graph-level selection memory accessors."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ from ...domain.graph.chain_manager import ChainManager
 from ...domain.graph.node_proxy import NodeProxy
 from ...domain.graph.chain_proxy import ChainProxy
 from ...domain.graph.component_proxy import ComponentProxy
+from ...domain.ports.cache import CacheProvider
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -29,6 +31,7 @@ class CrystalGraph:
         self,
         image_repo: ImageRepository | None = None,
         comparison_repo: ComparisonRepository | None = None,
+        cache: CacheProvider | None = None,
     ) -> None:
         self._chain: ChainManager = ChainManager()
         self._images: dict[str, dict[str, Any]] = {}
@@ -37,6 +40,12 @@ class CrystalGraph:
         self._creating_chain_map: bool = False
         self._image_repo = image_repo
         self._comparison_repo = comparison_repo
+        self._cache = cache
+        # Selection working memory (#49/#50): replaces the former module-level
+        # _skip_before/_existing_pairs/_last_chains_index globals.
+        self._skip_before: int = 0
+        self._existing_pairs: set[tuple[str, str]] = set()
+        self._recent_chain_ids: list[int] = []
 
     # -- Lifecycle ------------------------------------------------------
     def get_node_chain_length(self, filename: str) -> int:
@@ -97,6 +106,45 @@ class CrystalGraph:
 
     def apply_comparison(self, winner: str, loser: str) -> None:
         self._chain.apply_comparison(winner, loser)
+
+    # -- Selection working memory (#49/#50) ------------------------------
+
+    def reset_selection_state(self) -> None:
+        self._skip_before = 0
+        self._existing_pairs = set()
+
+    def get_skip_before(self) -> int:
+        return self._skip_before
+
+    def set_skip_before(self, value: int) -> None:
+        self._skip_before = value
+
+    def get_existing_pairs(self) -> set[tuple[str, str]]:
+        return self._existing_pairs
+
+    def set_existing_pairs(self, pairs: set[tuple[str, str]]) -> None:
+        self._existing_pairs = pairs
+
+    def get_recent_chain_ids(self) -> list[int]:
+        return self._recent_chain_ids
+
+    def set_recent_chain_ids(self, chain_ids: list[int]) -> None:
+        self._recent_chain_ids = chain_ids
+
+    # -- Images snapshot cache (replaces domain/comparison/state.py) -----
+
+    def get_images_snapshot(self) -> list[dict[str, Any]] | None:
+        if self._cache is None:
+            return None
+        return self._cache.get("images")
+
+    def set_images_snapshot(self, images: list[dict[str, Any]]) -> None:
+        assert self._cache is not None
+        self._cache.set("images", images)
+
+    def invalidate_images_snapshot(self) -> None:
+        if self._cache is not None:
+            self._cache.invalidate("images")
 
     # -- Cache ----------------------------------------------------------
 
@@ -255,6 +303,140 @@ class CrystalGraph:
         if self._chain._can_reach(img2, img1):
             return True
         return False
+
+    # -- Repository facade (#47): the single DB-facing surface ----------
+
+    def get_all_images(self) -> list[dict[str, Any]]:
+        assert self._image_repo is not None
+        return self._image_repo.get_all_images()
+
+    def get_image(self, filename: str) -> dict[str, Any] | None:
+        assert self._image_repo is not None
+        return self._image_repo.get_image(filename)
+
+    def get_image_count(self) -> int:
+        assert self._image_repo is not None
+        return self._image_repo.get_image_count()
+
+    def add_image(
+        self,
+        filename: str,
+        score: float,
+        comparison_count: int,
+        prompt_tags: str | None,
+        rating_mu: float,
+        rating_sigma: float,
+    ) -> bool:
+        assert self._image_repo is not None
+        return self._image_repo.add_image(
+            filename=filename,
+            score=score,
+            comparison_count=comparison_count,
+            prompt_tags=prompt_tags,
+            rating_mu=rating_mu,
+            rating_sigma=rating_sigma,
+        )
+
+    def update_image_rating_state(
+        self,
+        filename: str,
+        score: float,
+        rating_mu: float,
+        rating_sigma: float,
+        comparison_count: int,
+        touch_timestamp: bool,
+    ) -> bool:
+        assert self._image_repo is not None
+        return self._image_repo.update_image_rating_state(
+            filename=filename,
+            score=score,
+            rating_mu=rating_mu,
+            rating_sigma=rating_sigma,
+            comparison_count=comparison_count,
+            touch_timestamp=touch_timestamp,
+        )
+
+    def update_image_tags(self, filename: str, prompt_tags: str) -> None:
+        assert self._image_repo is not None
+        self._image_repo.update_image_tags(filename, prompt_tags)
+
+    def clear_all_images(self) -> None:
+        assert self._image_repo is not None
+        self._image_repo.clear_all_images()
+
+    def reset_all_image_ratings(self, score: float) -> Any:
+        assert self._image_repo is not None
+        return self._image_repo.reset_all_image_ratings(score)
+
+    def get_total_comparisons(self) -> int:
+        assert self._comparison_repo is not None
+        return self._comparison_repo.get_total_comparisons()
+
+    def get_skipped_comparison_count(self) -> int:
+        assert self._comparison_repo is not None
+        return self._comparison_repo.get_skipped_comparison_count()
+
+    def get_all_comparisons(self, weight: float | None = None) -> list[dict[str, Any]]:
+        assert self._comparison_repo is not None
+        return self._comparison_repo.get_all_comparisons(weight)
+
+    def get_images_with_only_wins(self) -> list[str]:
+        assert self._comparison_repo is not None
+        return self._comparison_repo.get_images_with_only_wins()
+
+    def get_images_with_only_losses(self) -> list[str]:
+        assert self._comparison_repo is not None
+        return self._comparison_repo.get_images_with_only_losses()
+
+    def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool:
+        assert self._comparison_repo is not None
+        return self._comparison_repo.comparison_exists_for_pair(filename_a, filename_b)
+
+    def add_comparison(
+        self,
+        filename_a: str,
+        filename_b: str,
+        winner: str,
+        weight: float,
+        transitive_depth: int,
+        timestamp: str,
+    ) -> Any:
+        assert self._comparison_repo is not None
+        return self._comparison_repo.add_comparison(
+            filename_a=filename_a,
+            filename_b=filename_b,
+            winner=winner,
+            weight=weight,
+            transitive_depth=transitive_depth,
+            timestamp=timestamp,
+        )
+
+    def add_historical_comparison(
+        self,
+        filename_a: str,
+        filename_b: str,
+        winner: str,
+        timestamp: str,
+        weight: float,
+        transitive_depth: int,
+    ) -> Any:
+        assert self._comparison_repo is not None
+        return self._comparison_repo.add_historical_comparison(
+            filename_a=filename_a,
+            filename_b=filename_b,
+            winner=winner,
+            timestamp=timestamp,
+            weight=weight,
+            transitive_depth=transitive_depth,
+        )
+
+    def clean_comparisons(self) -> Any:
+        assert self._comparison_repo is not None
+        return self._comparison_repo.clean_comparisons()
+
+    def clear_all_comparisons(self) -> None:
+        assert self._comparison_repo is not None
+        self._comparison_repo.clear_all_comparisons()
 
     def get_chains_map(self) -> dict[int, ChainDict]:
         if self._chain_map is not None:

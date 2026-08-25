@@ -87,7 +87,8 @@ rule here conflicts with the root file, this file wins for this module.
   avoid them.
 - Tests: colocated `tests/` directory next to the tested module. Tests may
   import across layers but must satisfy the dependency table (use fakes, not
-  real infrastructure).
+  real infrastructure). Tests and stubs touch temp directories only
+  (`tmp_path`) — never real `output/`, ranked roots, or `config/`.
 
 ## Model, Device, and Memory
 

@@ -23,7 +23,7 @@ def list_images():
     if per_page < 1 or per_page > 100:
         per_page = 20
 
-    scored = deps.image_repo.get_all_images()
+    scored = deps.graph.get_all_images()
     score_min = request.args.get("score_min", 0.0, type=float)
     score_max = request.args.get("score_max", 1.0, type=float)
     comparisons_min = request.args.get("comparisons_min", 0, type=int)
@@ -110,7 +110,7 @@ def list_images():
 
 @gallery_bp.route("/image/<path:filename>", methods=["GET"])
 def get_image_info(filename: str):
-    img = get_server_deps().image_repo.get_image(filename)
+    img = get_server_deps().graph.get_image(filename)
     if not img:
         result = jsonify({"error": "Image not found"}), 404
         return result
@@ -134,7 +134,7 @@ def search_images():
     score_max = request.args.get("score_max", 1.0, type=float)
 
     results = []
-    for img in get_server_deps().image_repo.get_all_images():
+    for img in get_server_deps().graph.get_all_images():
         if query and query not in img["filename"].lower():
             continue
         if not (score_min <= float(img["score"]) <= score_max):
@@ -156,13 +156,13 @@ def get_image_history(filename: str):
     deps = get_server_deps()
     wins = []
     losses = []
-    for comp in deps.comparison_repo.get_all_comparisons():
+    for comp in deps.graph.get_all_comparisons():
         if comp["filename_a"] != filename and comp["filename_b"] != filename:
             continue
         opponent = (
             comp["filename_b"] if comp["filename_a"] == filename else comp["filename_a"]
         )
-        opponent_data = deps.image_repo.get_image(opponent)
+        opponent_data = deps.graph.get_image(opponent)
         item = {
             "opponent": opponent,
             "opponent_score": float(opponent_data["score"]) if opponent_data else 0.5,

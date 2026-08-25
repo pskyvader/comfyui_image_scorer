@@ -273,7 +273,7 @@ class Recorder:
         return self._result
 
 
-class StubImageRepo:
+class StubGraph:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
@@ -289,6 +289,14 @@ class StubImageRepo:
             }
         ]
 
+    def get_all_comparisons(self, *_: Any, **__: Any) -> list[dict[str, Any]]:
+        self.calls.append("get_all_comparisons")
+        return []
+
+    def clean_comparisons(self, **_: Any) -> int:
+        self.calls.append("clean_comparisons")
+        return 0
+
     def reset_all_image_ratings(self, **_: Any) -> bool:
         self.calls.append("reset_all_image_ratings")
         return True
@@ -298,27 +306,13 @@ class StubImageRepo:
         return True
 
 
-class StubComparisonRepo:
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def get_all_comparisons(self) -> list[dict[str, Any]]:
-        self.calls.append("get_all_comparisons")
-        return []
-
-    def clean_comparisons(self, **_: Any) -> int:
-        self.calls.append("clean_comparisons")
-        return 0
-
-
 class FakeDeps:
     """Stub dependency container shaped like both CLIDeps and ServerDeps."""
 
     def __init__(self) -> None:
         from comfyui_image_scorer.adapters.cli.deps import CLIDeps
 
-        self.image_repo = StubImageRepo()
-        self.comparison_repo = StubComparisonRepo()
+        self.graph = StubGraph()
         self.processor: Any = SimpleNamespace(
             rebuild_database_from_ranked=Recorder()
         )
@@ -327,27 +321,35 @@ class FakeDeps:
         self.maps_provider: Any = None
         self.training_loader: Any = None
         self.model_trainer: Any = None
+        self.cache = StubGraph()  # cache provider stub; never read by these paths
+        self.hpo_runner = Recorder()
+        self.plot_manager: Any = None
+        self.mediapipe: Any = None
         self.vacuum_database = Recorder()
         self.deduplicate_scored = Recorder()
         self.cleanup_orphans = Recorder()
         self.download_configured_models = Recorder()
         self.download_mediapipe_models = Recorder()
+        self.set_hub_offline = Recorder()
         self.path_resolver: Any = None
-        self.graph: Any = None
         self._cli_deps = CLIDeps(
-            image_repo=self.image_repo,
-            comparison_repo=self.comparison_repo,
             processor=self.processor,  # type: ignore[arg-type]
+            graph=self.graph,  # type: ignore[arg-type]
             model_loader=self.model_loader,  # type: ignore[arg-type]
             batch_sizer_factory=self.batch_sizer_factory,  # type: ignore[arg-type]
             maps_provider=self.maps_provider,  # type: ignore[arg-type]
             training_loader=self.training_loader,
             model_trainer=self.model_trainer,
+            cache=self.cache,  # type: ignore[arg-type]
+            hpo_runner=self.hpo_runner,  # type: ignore[arg-type]
+            plot_manager=self.plot_manager,
+            mediapipe=self.mediapipe,
             vacuum_database=self.vacuum_database,
             deduplicate_scored=self.deduplicate_scored,
             cleanup_orphans=self.cleanup_orphans,
             download_configured_models=self.download_configured_models,
             download_mediapipe_models=self.download_mediapipe_models,
+            set_hub_offline=self.set_hub_offline,
         )
 
     def to_cli_deps(self):
@@ -368,14 +370,14 @@ def test_cli_database_commands_with_fake_deps():
     deps = _make_fake_deps()
     cli = deps.to_cli_deps()
     assert cleanup(cli) == 0
-    assert deps.comparison_repo.calls.count("clean_comparisons") == 1
+    assert deps.graph.calls.count("clean_comparisons") == 1
     assert len(deps.vacuum_database.calls) == 1
 
     assert rebuild(cli) == 0
     assert len(deps.processor.rebuild_database_from_ranked.calls) == 1
 
     assert recalculate(cli) == 0
-    assert deps.image_repo.calls.count("reset_all_image_ratings") == 1
+    assert deps.graph.calls.count("reset_all_image_ratings") == 1
 
 
 @pytest.mark.parametrize(
@@ -411,10 +413,10 @@ def test_endpoints_with_fake_deps(
     elif route == "/api/database/rebuild-db":
         assert len(deps.processor.rebuild_database_from_ranked.calls) == 1
     elif route == "/api/database/cleanup":
-        assert deps.comparison_repo.calls.count("clean_comparisons") == 1
+        assert deps.graph.calls.count("clean_comparisons") == 1
         assert len(deps.vacuum_database.calls) == 1
     elif route == "/api/database/recalculate":
-        assert deps.image_repo.calls.count("reset_all_image_ratings") == 1
+        assert deps.graph.calls.count("reset_all_image_ratings") == 1
 
 
 # ---------------------------------------------------------------------------

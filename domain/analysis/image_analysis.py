@@ -10,19 +10,19 @@ from typing import Any
 from skimage.feature import local_binary_pattern
 
 from .mediapipe_analysis import MediaPipeAnalyzer, POSE_LANDMARK_NAMES
+from ..ports.ml_providers import MediaPipePort
 from .attribute_analysis import FaceAttributeAnalyzer, NSFWAnalyzer
 from ...core.configuration.settings import config
 from ...core.io.serialization import atomic_write_json
 from ...core.observability.logger import get_logger, ModuleLogger
 from ...domain.loading import BatchSizerFactory, ModelLoader
+from ...domain.ports.cache import CacheProvider
 from ..vectors.image_vector import ImageVector
 
 logger: ModuleLogger = get_logger(__name__)
 
 # Type Alias for the shared data structure
 ImageEntry = tuple[str, dict[str, Any], str, str]
-
-processed_cache: dict[str, ImageEntry] = {}
 
 REQUIRED_ANALYSIS_FIELDS: frozenset[str] = frozenset({
     "original_width",
@@ -74,6 +74,8 @@ class ImageAnalysis(ImageVector):
         raw_data: list[ImageEntry],
         model_loader: ModelLoader,
         batch_sizer_factory: BatchSizerFactory,
+        cache: CacheProvider,
+        mediapipe: MediaPipePort,
     ) -> None:
         image_entries = [v for v in config["vector"]["vectors"] if v["type"] == "image"]
         if not image_entries:
@@ -89,7 +91,8 @@ class ImageAnalysis(ImageVector):
         )
         self.raw_data: list[ImageEntry] = raw_data
         self.processed_data: list[ImageEntry] = []
-        self._mediapipe = MediaPipeAnalyzer()
+        self._cache = cache
+        self._mediapipe = MediaPipeAnalyzer(mediapipe)
         self._face_attr = FaceAttributeAnalyzer(model_loader)
         self._nsfw = NSFWAnalyzer(model_loader)
 
@@ -372,7 +375,6 @@ class ImageAnalysis(ImageVector):
     def analyze_images_from_paths(
         self, batch_size: int, max_workers: int
     ) -> list[ImageEntry]:
-        global processed_cache
         new_path: list[str] = []
         new_raw: list[ImageEntry] = []
         result: list[ImageEntry] = []
@@ -385,8 +387,9 @@ class ImageAnalysis(ImageVector):
         for id, path in self.path_list.items():
             current_raw: ImageEntry = next((d for d in self.raw_data if d[3] == id))
 
-            if id in processed_cache:
-                result.append(processed_cache[id])
+            cached_entry: ImageEntry | None = self._cache.get(f"analysis:{id}")
+            if cached_entry is not None:
+                result.append(cached_entry)
                 continue
 
             if self._entry_has_required_fields(current_raw[1]):
@@ -443,12 +446,12 @@ class ImageAnalysis(ImageVector):
             logger.info("NSFW done: %d images in %.1fs", total, _nsfw_end - _nsfw_start)
 
         for entry in result:
-            processed_cache[entry[3]] = entry
+            self._cache.set(f"analysis:{entry[3]}", entry)
 
         self.processed_data = [
             entry
-            for id, entry in list(processed_cache.items())
-            if id in set(self.path_list.keys())
+            for id in self.path_list.keys()
+            if (entry := self._cache.get(f"analysis:{id}")) is not None
         ]
 
         return result

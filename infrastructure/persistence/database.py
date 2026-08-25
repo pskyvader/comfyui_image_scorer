@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+import os
 import sqlite3
 from pathlib import Path
 
@@ -13,9 +15,35 @@ logger: ModuleLogger = get_logger(__name__)
 MU0 = 25.0
 SIGMA0 = MU0 / 3.0
 
+_MODULE_ROOT = Path(__file__).resolve().parents[2]
+_PROXY_ENTRY_WHITELIST = (
+    os.path.normcase(str(_MODULE_ROOT / "domain" / "graph")),
+    os.path.normcase(str(_MODULE_ROOT / "infrastructure" / "persistence")),
+)
+
+
+def _check_proxy_entry() -> None:
+    """Raise when get_db_connection is entered from outside the graph proxies."""
+    helper_frame = inspect.currentframe()
+    conn_frame = helper_frame.f_back if helper_frame else None
+    caller = conn_frame.f_back if conn_frame else None
+    if caller is None:
+        return
+    caller_file: str = caller.f_code.co_filename
+    normalized = os.path.normcase(caller_file)
+    for prefix in _PROXY_ENTRY_WHITELIST:
+        if normalized.startswith(prefix + os.sep):
+            return
+    raise RuntimeError(
+        f"DB function called from non-proxy file: {caller_file}. Direct "
+        "repository access detected. Route DB access through the graph "
+        "proxies (CrystalGraph) instead."
+    )
+
 
 def get_db_connection() -> sqlite3.Connection:
     """Create and return SQLite connection with row factory."""
+    _check_proxy_entry()
     db_path = Path(cache_file)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), timeout=60.0)

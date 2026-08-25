@@ -1,3 +1,4 @@
+"""Application service orchestrating vector export and model scoring."""
 from __future__ import annotations
 
 from typing import Any
@@ -6,9 +7,9 @@ import numpy as np
 import torch
 import warnings
 from PIL.Image import Image
+from collections.abc import Callable
 
 from ...core.configuration.settings import config
-from ...core.utilities.helpers import export_image_batch
 from ...domain.analysis.image_analysis import ImageAnalysis
 from ...domain.vectors.image_vector import ImageVector
 from ...domain.data_transformation.data_transformer import DataTransformer
@@ -22,6 +23,8 @@ from ...domain.loading.ports import (
     MapsProvider,
     TrainingLoader,
 )
+from ...domain.ports.cache import CacheProvider
+from ...domain.ports.ml_providers import MediaPipePort
 from .vector_list import VectorList
 
 
@@ -35,6 +38,9 @@ class ScoringService:
         training_loader: TrainingLoader,
         model_trainer: Any,
         maps_provider: MapsProvider,
+        cache: CacheProvider,
+        mediapipe: MediaPipePort,
+        export_batch: Callable[[list[Image]], torch.Tensor],
         *,
         batch_size: int = 10,
     ) -> None:
@@ -43,6 +49,9 @@ class ScoringService:
         self._training_loader = training_loader
         self._model_trainer = model_trainer
         self._maps_provider = maps_provider
+        self._cache = cache
+        self._mediapipe = mediapipe
+        self._export_batch = export_batch
         self._batch_size = int(batch_size)
 
     def score(
@@ -93,6 +102,8 @@ class ScoringService:
             [],
             model_loader=self._model_loader,
             batch_sizer_factory=self._batch_sizer,
+            cache=self._cache,
+            mediapipe=self._mediapipe,
         )
         images_list: list[Image] = image_analysis.prepare_image_batch(image)
         data_list = [("", entry, "", str(i)) for i, _img in enumerate(images_list)]
@@ -110,6 +121,8 @@ class ScoringService:
             model_loader=self._model_loader,
             batch_sizer_factory=self._batch_sizer,
             maps_provider=self._maps_provider,
+            cache=self._cache,
+            mediapipe=self._mediapipe,
         )
         vector_list.create_vectors()
 
@@ -174,8 +187,8 @@ class ScoringService:
         discarded_images = [images_list[i] for i in discarded]
 
         return (
-            export_image_batch(selected_images),
-            export_image_batch(discarded_images),
+            self._export_batch(selected_images),
+            self._export_batch(discarded_images),
             len(selected_images) > 0,
             all_scores,
         )

@@ -1,3 +1,5 @@
+"""AestheticScore ComfyUI node: scores input images with the trained model."""
+
 import torch
 from typing import Any
 from .....application.services.scoring_service import ScoringService
@@ -6,6 +8,8 @@ from ...services import verify_models_present
 
 
 class AestheticScoreNode:
+    """ComfyUI node returning an aesthetic score and above-threshold boolean per image."""
+
     def __init__(self):
         # Construct ScoringService from the adapter wiring module (composition root)
         self._scoring_service: ScoringService = get_scoring_service()

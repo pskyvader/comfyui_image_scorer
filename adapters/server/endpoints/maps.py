@@ -30,7 +30,7 @@ def get_graph_data():
                 ):
                     node_to_height[filename] = proxy.length
 
-        img_dict = {img["filename"]: img for img in deps.image_repo.get_all_images()}
+        img_dict = {img["filename"]: img for img in deps.graph.get_all_images()}
         nodes = []
         for node in deps.graph.get_all_nodes():
             filename = node.filename

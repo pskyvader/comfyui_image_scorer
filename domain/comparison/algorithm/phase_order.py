@@ -93,16 +93,6 @@ PHASES: tuple[dict[str, Any], ...] = (
 )
 
 
-_skip_before: int = 0
-_existing_pairs: set[tuple[str, str]] = set()
-
-
-def reset_skip() -> None:
-    global _skip_before, _existing_pairs
-    _skip_before = 0
-    _existing_pairs = set()
-
-
 def get_phases() -> list[dict[str, Any]]:
     """Return a JSON-serializable version of PHASES (callables stripped).
 
@@ -127,9 +117,7 @@ def select_pair(
     all_images: list[dict[str, Any]],
     candidate_images: list[dict[str, Any]],
     cg: Any,
-    comparison_repo: Any,
 ) -> tuple[tuple[str, str] | None, int | None]:
-    global _skip_before, _existing_pairs
     _start = time.perf_counter()
 
     if len(candidate_images) < 2:
@@ -138,11 +126,12 @@ def select_pair(
         )
         return None, None
 
-    if len(_existing_pairs) == 0:
-        _existing_pairs = {
+    existing_pairs_set: set[tuple[str, str]] = cg.get_existing_pairs()
+    if len(existing_pairs_set) == 0:
+        existing_pairs_set = {
             pair_key(winner, loser) for winner, loser in cg.get_all_links()
         }
-    existing_pairs_set: set[tuple[str, str]] = _existing_pairs
+        cg.set_existing_pairs(existing_pairs_set)
     logger.debug(f"existing pairs: {len(existing_pairs_set)}", start_timer=_start)
 
     random.shuffle(candidate_images)
@@ -169,16 +158,18 @@ def select_pair(
     seed_pool_set: set[str] = {node.filename for node in seed_pool}
 
     reserve_count = int(config["ranking"]["reserve_count"])
-    total_comps: int = comparison_repo.get_total_comparisons()
+    total_comps: int = cg.get_total_comparisons()
 
     if total_comps % reserve_count == 0:
-        reset_skip()
+        cg.reset_selection_state()
+
+    skip_before: int = cg.get_skip_before()
 
     for idx, phase in enumerate(PHASES):
         name = next(k for k, v in phase.items() if callable(v))
         fn = phase[name]
 
-        if _skip_before > idx:
+        if skip_before > idx:
             continue
 
         if name == "seed":
@@ -191,7 +182,7 @@ def select_pair(
         elif name == "anchor":
             result = fn(candidate_nodes, seed_pool_set, existing_pairs_set, cg)
         elif name == "collapsible":
-            result = fn(candidate_nodes, cg, comparison_repo)
+            result = fn(candidate_nodes, cg)
         elif name == "single_win_loss":
             result = fn(candidate_nodes, cg)
         elif name == "refine":
@@ -204,7 +195,7 @@ def select_pair(
             result = None
 
         if result:
-            _skip_before = idx
+            cg.set_skip_before(idx)
             return (result[0].filename, result[1].filename), idx
 
     logger.warning("No pair found after all phases")

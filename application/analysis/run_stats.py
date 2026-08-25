@@ -1,5 +1,6 @@
+from typing import Any
+
 from ...core.observability.logger import get_logger
-from ...domain.database.ports import ComparisonRepository, ImageRepository
 
 logger = get_logger(__name__)
 
@@ -23,11 +24,9 @@ def _distribute(values: list[float], bins: int) -> dict[str, int]:
     return buckets
 
 
-def run_stats(
-    image_repo: ImageRepository, comparison_repo: ComparisonRepository
-) -> int:
-    images = image_repo.get_all_images()
-    comparisons = comparison_repo.get_all_comparisons()
+def run_stats(graph: Any) -> int:
+    images = graph.get_all_images()
+    comparisons = graph.get_all_comparisons()
 
     scores = [img.get("score", 0) for img in images]
     mus = [img.get("rating_mu", 0) for img in images]

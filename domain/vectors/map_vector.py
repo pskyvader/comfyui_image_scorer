@@ -34,7 +34,7 @@ class MapVector:
         i = self._config_index()
         if size > self.vector_config[i]["slot_size"]:
             self.vector_config[i]["slot_size"] = size
-            config["vector"]["vectors"] = self.vector_config
+            config.save_section("vector", {"vectors": self.vector_config})
 
     def _normalize(self, value: Any) -> dict[str, float]:
         if value is None:

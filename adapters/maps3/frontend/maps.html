@@ -1,0 +1,45 @@
+<div class="glass rounded-2xl shadow-2xl relative overflow-hidden">
+    <div class="px-6 md:px-8 pt-6 md:pt-8 pb-2">
+        <h2 class="text-2xl font-bold text-white">Score Map</h2>
+        <p class="text-gray-400 text-sm">Score-ranked graph visualization: high scores on top, low scores on the bottom, components as horizontal bands.</p>
+    </div>
+
+    <div class="px-6 md:px-8 pb-4 flex gap-2 w-full md:w-auto justify-center md:justify-end items-center">
+        <button id="maps3-reset-view-btn" class="px-6 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition text-sm font-bold shadow-lg">Reset View</button>
+        <button id="maps3-refresh-btn" class="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg transition text-sm font-bold shadow-lg">Refresh</button>
+    </div>
+
+    <div class="px-6 md:px-8 pb-8">
+        <div id="maps3-container" class="relative group rounded-xl overflow-hidden border border-white/5 shadow-inner bg-[#0b0b14] min-h-[500px] md:min-h-[70vh]">
+            <canvas id="maps3-canvas" class="absolute inset-0 w-full h-full"></canvas>
+            <div id="maps3-loader" class="absolute inset-0 flex items-center justify-center bg-black/50 z-30">
+                <div class="flex flex-col items-center">
+                    <div class="w-12 h-12 border-4 border-purple-500/20 border-t-purple-500 rounded-full animate-spin mb-2"></div>
+                    <p class="text-purple-300">Building score map...</p>
+                </div>
+            </div>
+            <div id="maps3-tooltip" class="tooltip hidden"></div>
+        </div>
+    </div>
+
+    <div class="px-6 md:px-8 pb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="stats-panel glass p-4 rounded-xl border border-white/5">
+            <h4 class="text-purple-400 font-bold text-xs uppercase mb-2">Network Stats</h4>
+            <div class="flex flex-wrap gap-4 text-[10px]">
+                <div class="flex items-center gap-1.5"><span class="text-gray-500">Total:</span> <span id="maps3-stat-nodes" class="text-white font-bold">-</span></div>
+                <div class="flex items-center gap-1.5"><span class="text-gray-500">Comparisons:</span> <span id="maps3-stat-comparisons" class="text-white font-bold">-</span></div>
+                <div class="flex items-center gap-1.5"><span class="text-gray-500">Components:</span> <span id="maps3-stat-components" class="text-white font-bold">-</span></div>
+                <div class="flex items-center gap-1.5"><span class="text-gray-500">Chains:</span> <span id="maps3-stat-chains" class="text-white font-bold">-</span></div>
+            </div>
+        </div>
+        <div class="legend-panel glass p-4 rounded-xl border border-white/5 md:col-span-2">
+            <h4 class="text-pink-400 font-bold text-xs uppercase mb-2">Legend</h4>
+            <div class="flex flex-wrap gap-4 text-[11px] text-gray-400">
+                <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-emerald-400"></div><span>High Score (top)</span></div>
+                <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-sky-400"></div><span>Low Score (bottom)</span></div>
+                <div class="flex items-center gap-2"><div class="w-6 h-0.5 bg-cyan-300"></div><span>Main Chain Links</span></div>
+                <div class="flex items-center gap-2 opacity-60"><div class="w-6 h-0.5 bg-gray-500" style="background-image: repeating-linear-gradient(90deg, #6b7280 0 4px, transparent 4px 7px);"></div><span>Regular Links</span></div>
+            </div>
+        </div>
+    </div>
+</div>

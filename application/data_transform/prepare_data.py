@@ -21,8 +21,9 @@ from ...core.io.serialization import (
 from ...core.configuration.settings import config
 from ...domain.analysis.image_analysis import ImageAnalysis
 from ...domain.analysis.trueskill import replay_ratings, public_score_from_rating
-from ...domain.database.ports import ComparisonRepository
 from ...domain.loading import BatchSizerFactory, MapsProvider, ModelLoader
+from ...domain.ports.cache import CacheProvider
+from ...domain.ports.ml_providers import MediaPipePort
 from ...application.services.vector_list import VectorList
 from ...application.data_transform.config.maps import register_map_values
 
@@ -34,6 +35,8 @@ def build_split_files(
     model_loader: ModelLoader,
     batch_sizer_factory: BatchSizerFactory,
     maps_provider: MapsProvider,
+    cache: CacheProvider,
+    mediapipe: MediaPipePort,
 ) -> dict[str, int]:
     logger.info("Starting image processing...")
 
@@ -46,7 +49,7 @@ def build_split_files(
 
     logger.debug("loading already-processed ids from split files...")
     split_ids = VectorList(
-        [], read_only=False, model_loader=model_loader, batch_sizer_factory=batch_sizer_factory, maps_provider=maps_provider
+        [], read_only=False, model_loader=model_loader, batch_sizer_factory=batch_sizer_factory, maps_provider=maps_provider, cache=cache
     )
     processed_files: set[str] | None = None
     for c in split_ids.sorted_vectors.values():
@@ -74,7 +77,13 @@ def build_split_files(
         return result
 
     logger.info("analyzing images ...")
-    image_analysis = ImageAnalysis(collected_data, model_loader, batch_sizer_factory)
+    image_analysis = ImageAnalysis(
+        collected_data,
+        model_loader=model_loader,
+        batch_sizer_factory=batch_sizer_factory,
+        cache=cache,
+        mediapipe=mediapipe,
+    )
     processed_data = image_analysis.analyze_images_from_paths(batch_size, max_workers)
     register_map_values(processed_data, maps_provider)
     logger.info(f"processed data:{len(processed_data)}. Creating vector list object...")
@@ -84,6 +93,7 @@ def build_split_files(
         model_loader=model_loader,
         batch_sizer_factory=batch_sizer_factory,
         maps_provider=maps_provider,
+        cache=cache,
     )
 
     vectors_list_parser.create_vectors()
@@ -104,6 +114,7 @@ def build_full_files(
     model_loader: ModelLoader,
     batch_sizer_factory: BatchSizerFactory,
     maps_provider: MapsProvider,
+    cache: CacheProvider,
 ) -> dict[str, Any]:
     os.makedirs(vectors_dir, exist_ok=True)
 
@@ -113,6 +124,7 @@ def build_full_files(
         model_loader=model_loader,
         batch_sizer_factory=batch_sizer_factory,
         maps_provider=maps_provider,
+        cache=cache,
     )
 
     if not vector_list.unique_ids:
@@ -133,10 +145,8 @@ def build_full_files(
     }
 
 
-def run_rebuild_scores_only(
-    comparison_repo: ComparisonRepository,
-) -> dict[str, Any]:
-    rows = comparison_repo.get_all_comparisons()
+def run_rebuild_scores_only(graph: Any) -> dict[str, Any]:
+    rows = graph.get_all_comparisons()
 
     comparisons = [
         {

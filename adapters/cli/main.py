@@ -1,6 +1,9 @@
+"""CLI entry point - argparse dispatch to the section command modules.
+
+The only module allowed lazy inline imports (parser-dispatch pattern).
+"""
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any, Protocol
@@ -319,9 +322,13 @@ def main() -> int:
                 return 1
         elif args.files_command == "download":
             if args.download_command == "models":
-                os.environ["HF_HUB_OFFLINE"] = "0"
-                deps.download_configured_models()
-                deps.download_mediapipe_models()
+                deps.set_hub_offline(False)
+                # #37a: restore the process's offline default even when a download fails
+                try:
+                    deps.download_configured_models()
+                    deps.download_mediapipe_models()
+                finally:
+                    deps.set_hub_offline(True)
                 return 0
             else:
                 files_download_parser.print_help()
@@ -353,9 +360,7 @@ def main() -> int:
         elif args.analyze_command == "stats":
             from ...application.analysis.run_stats import run_stats
 
-            return run_stats(
-                image_repo=deps.image_repo, comparison_repo=deps.comparison_repo
-            )
+            return run_stats(graph=deps.graph)
         else:
             analyze_parser.print_help()
             return 1

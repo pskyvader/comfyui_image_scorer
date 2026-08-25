@@ -1,262 +1,160 @@
+"""Validated configuration — read-only typed sections plus one explicit save API.
+
+Root config.json maps section names to their JSON files. Every section parses
+into a frozen pydantic model at first access; writes go exclusively through
+``Config.set_root`` / ``Config.save_section`` which validate and persist.
+"""
+
 from __future__ import annotations
+
 import json
-import os
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any
-from collections.abc import MutableMapping, Iterator
+
+from pydantic import BaseModel, ConfigDict
 
 from ..io.serialization import load_json
 
 PathLike = str | Path
-ConfigDict = dict[str, Any]
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 CONFIG_FILE: Path = PROJECT_ROOT.joinpath("config", "config.json")
-SUB_CONFIG_MAPPING: MappingProxyType[str, str] = MappingProxyType({
+SUB_CONFIG_MAPPING: dict[str, str] = {
     "prepare": "prepare_config",
     "training": "training_config",
     "vector": "vector_config",
     "ranking": "ranking_config",
-})
+}
+
+
+class SectionModel(BaseModel):
+    """Base for section models: immutable, bracket-accessible, unknown-key tolerant."""
+
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def __contains__(self, key: str) -> bool:
+        return hasattr(self, key)
+
+
+class PrepareSection(SectionModel):
+    """prepare_config.json."""
+
+    max_workers: int
+    batch_size: int
+    memory_usage: float
+
+
+class RankingSection(SectionModel):
+    """ranking_config.json."""
+
+    subfolder_threshold: int
+    transitive_depth: int
+    lru_size: int
+    max_workers: int
+    default_score: float
+    reserve_count: int
+    parallel_requests: bool
+    timeout_ms: int
+    seed_percentage: int
+    seed_target_comparisons: int
+    insertion_target_comparisons: int
+    score_steepness: float
+    sigma_threshold: float
+
+
+class TrainingSection(SectionModel):
+    """training_config.json; HPO results (top1..N, used_keys) ride as extras."""
+
+    random_state: int
+    optimization_steps: int
+    cycles: int
+    max_combos: int
+    device: str
+    objective: str
+    min_comparisons_threshold: int
+    verbosity: int
+
+
+class VectorSection(SectionModel):
+    """vector_config.json; the vectors list rides as an extra."""
+
+
+SECTION_MODELS: dict[str, type[SectionModel]] = {
+    "prepare": PrepareSection,
+    "ranking": RankingSection,
+    "training": TrainingSection,
+    "vector": VectorSection,
+}
 
 
 def _get_config_file(path: PathLike) -> Path:
     p = Path(path)
     if not p.is_absolute():
-        p: Path = PROJECT_ROOT.joinpath(p)
+        p = PROJECT_ROOT.joinpath(p)
     return p
 
 
-def _load_raw_config(path: PathLike) -> ConfigDict:
-    config_file: Path = _get_config_file(path)
-    if not config_file.exists():
-        return {}
-    data, err = load_json(str(config_file), expect=dict)
-    if err:
-        return {}
-    return data or {}
-
-
-def _save_raw_config(data: ConfigDict, path: PathLike) -> None:
-    config_file: Path = _get_config_file(path)
-    ensure_dir(config_file.parent)
+def _save_raw(data: dict[str, Any], path: PathLike) -> None:
+    config_file = _get_config_file(path)
+    config_file.parent.mkdir(parents=True, exist_ok=True)
     with open(config_file, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
 
 
-def ensure_dir(path: PathLike) -> None:
-    os.makedirs(Path(path), exist_ok=True)
+class Config:
+    """Read-only validated view over config.json with explicit persistence."""
 
-
-_sentinel = object()
-
-
-class AutoSaveDict(MutableMapping):
-    def __init__(self, data: dict[str, Any], save_callback: Any) -> None:
-        self._data: dict[str, Any] = data
-        self._save_callback = save_callback
-
-    def get(self, key: str, default: Any = _sentinel) -> Any:
-        if default is not _sentinel:
-            # We strictly ban default values to avoid hidden hardcoded behavior
-            raise ValueError(
-                f"Providing a default value for '{key}' is not allowed. All config values must be present in the configuration files."
-            )
-
-        # If no default is provided, it behaves like __getitem__ (raises KeyError if missing)
-        return self[key]
-
-    def __getitem__(self, key: str) -> Any:
-        value: Any = self._data[key]
-        if isinstance(value, dict):
-            return AutoSaveDict(value, self._save_callback)
-        return value
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        if isinstance(value, AutoSaveDict):
-            value = value._data
-        self._data[key] = value
-        self._save_callback()
-
-    def __delitem__(self, key: str) -> None:
-        del self._data[key]
-        self._save_callback()
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self._data)
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-    def copy(self) -> dict[str, Any]:
-        return self._data.copy()
-
-    def __repr__(self) -> str:
-        return repr(self._data)
-
-
-class Config(MutableMapping):
-    """
-    Configuration Manager.
-
-    STRICT POLICY:
-    It is strictly forbidden to provide a default value when accessing configuration keys.
-    The goal is to ensure that ALL configuration values are loaded explicitly from the
-    configuration files (JSON) and absolutely nowhere else.
-
-    This prevents hidden hardcoded values in the codebase and ensures that the
-    configuration files are the single source of truth.
-
-    Usage of .get(key, default) will raise a ValueError.
-    Use .get(key) (without default) or direct access [key]. Both will raise KeyError if missing.
-    """
-
-    def __init__(self, config_file: PathLike = CONFIG_FILE) -> None:
+    def __init__(self, config_file: PathLike) -> None:
         self._root_path: Path = _get_config_file(config_file)
-        self._cache: dict[str, Any] = {}
-        self._root_data: ConfigDict | None = None
-        self._wrappers: dict[str, AutoSaveDict] = {}
+        self._root_raw: dict[str, Any] = self._read_json(self._root_path)
+        self._sections: dict[str, SectionModel] = {}
+        self._section_raw: dict[str, dict[str, Any]] = {}
 
-    def get(self, key: str, default: Any = _sentinel) -> Any:
-        if default is not _sentinel:
-            # We strictly ban default values to avoid hidden hardcoded behavior
-            raise ValueError(
-                f"Providing a default value for '{key}' is not allowed. All config values must be present in the configuration files."
-            )
+    @staticmethod
+    def _read_json(path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        data, err = load_json(str(path), expect=dict)
+        if err:
+            raise RuntimeError(f"Malformed config file {path}: {err}")
+        return data or {}
 
-        # If no default is provided, it behaves like __getitem__ (raises KeyError if missing)
-        return self[key]
-
-    def _get_root(self) -> ConfigDict:
-        if self._root_data is None:
-            self._root_data = _load_raw_config(self._root_path)
-        return self._root_data
-
-    def _save_root(self) -> None:
-        if self._root_data is not None:
-            _save_raw_config(self._root_data, self._root_path)
-
-    def _get_sub(self, section: str) -> ConfigDict | None:
-        pointer: str | None = SUB_CONFIG_MAPPING.get(section)
-        if not pointer:
-            return None
-
-        root: dict[str, Any] = self._get_root()
-        if pointer not in root:
-            return None
-
-        path = root[pointer]
-        if section not in self._cache:
-            self._cache[section] = _load_raw_config(path)
-            # If valid wrapper exists but points to old data (unlikely if strictly controlled), invalidating is safe.
-            if section in self._wrappers:
-                del self._wrappers[section]
-
-        return self._cache[section]
-
-    def _save_sub(self, section: str) -> None:
-        if section not in self._cache:
-            return
-
-        pointer: str | None = SUB_CONFIG_MAPPING.get(section)
-        if pointer is None:
-            return
-        root: dict[str, Any] = self._get_root()
-        path = root[pointer]
-        _save_raw_config(self._cache[section], path)
+    def _section_file(self, section: str) -> Path:
+        pointer = SUB_CONFIG_MAPPING[section]
+        return _get_config_file(self._root_raw[pointer])
 
     def __getitem__(self, key: str) -> Any:
-        # Check subconfig mappings
+        if key == "image_root":
+            return self._root_raw["image_root"]
         if key in SUB_CONFIG_MAPPING:
-            data: dict[str, Any] | None = self._get_sub(key)
-            if data is None:
-                raise KeyError(f"Subconfig '{key}' not configured")
-            if key not in self._wrappers:
-                self._wrappers[key] = AutoSaveDict(data, lambda: self._save_sub(key))
-            return self._wrappers[key]
-
-        # Check root
-        root: dict[str, Any] = self._get_root()
-        if key in root:
-            val: Any = root[key]
-            if isinstance(val, dict):
-                # We could cache root wrappers too if needed, but usually root items are simple strings/paths
-                return AutoSaveDict(val, self._save_root)
-            return val
-
-        # Check deep keys in subconfigs
-        for section in SUB_CONFIG_MAPPING:
-            data: dict[str, Any] | None = self._get_sub(section)
-            if data and key in data:
-                # We return a wrapper for the sub-dict, but this wrapper is ephemeral.
-                # Logic for caching ephemeral deep wrappers is complex.
-                # Users generally shouldn't rely on 'is' identity for deep random access.
-                sub_wrapper = AutoSaveDict(data, lambda s=section: self._save_sub(s))
-                return sub_wrapper[key]
-
-        raise KeyError(f"Key '{key}' not found")
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        # If key is section name
-        if key in SUB_CONFIG_MAPPING:
-            if not isinstance(value, dict):
-                raise ValueError(
-                    f"Subconfig must be a dict, current type: {type(value)}"
+            if key not in self._sections:
+                if key not in self._section_raw:
+                    self._section_raw[key] = self._read_json(self._section_file(key))
+                self._sections[key] = SECTION_MODELS[key].model_validate(
+                    self._section_raw[key]
                 )
-            self._cache[key] = value
-            if key in self._wrappers:
-                del self._wrappers[key]
-            self._save_sub(key)
-            return
+            return self._sections[key]
+        return self._root_raw[key]
 
-        # If key in root
-        root: dict[str, Any] = self._get_root()
+    def set_root(self, key: str, value: Any) -> None:
+        """Persist a root-level value (e.g. image_root bootstrap)."""
+        self._root_raw[key] = value
+        _save_raw(self._root_raw, self._root_path)
 
-        # Check if overwrite subconfig deep key
-        for section in SUB_CONFIG_MAPPING:
-            data: dict[str, Any] | None = self._get_sub(section)
-            if data is not None and key in data:
-                data[key] = value
-                self._save_sub(section)
-                return
+    def section_data(self, section: str) -> dict[str, Any]:
+        """Raw copy of a section's data for read-modify-write via save_section."""
+        if section not in self._section_raw:
+            self._section_raw[section] = self._read_json(self._section_file(section))
+        return json.loads(json.dumps(self._section_raw[section]))
 
-        root[key] = value
-        self._save_root()
-
-    def __delitem__(self, key: str) -> None:
-        root: dict[str, Any] = self._get_root()
-        if key in root:
-            del root[key]
-            self._save_root()
-            return
-
-        for section in SUB_CONFIG_MAPPING:
-            data: dict[str, Any] | None = self._get_sub(section)
-            if data and key in data:
-                del data[key]
-                self._save_sub(section)
-                return
-
-        raise KeyError(key)
-
-    def __iter__(self) -> Iterator[str]:
-        keys: set[str] = set(self._get_root().keys())
-        keys.update(SUB_CONFIG_MAPPING.keys())
-        for section in SUB_CONFIG_MAPPING:
-            data: dict[str, Any] | None = self._get_sub(section)
-            if data:
-                keys.update(data.keys())
-        return iter(keys)
-
-    def __len__(self) -> int:
-        return len(list(iter(self)))
-
-    def clear(self) -> None:
-        """Clear cache to force reload from disk."""
-        self._root_data = None
-        self._cache.clear()
-        self._wrappers.clear()
+    def save_section(self, section: str, data: dict[str, Any]) -> None:
+        """Validate and persist a whole section, refreshing cached reads."""
+        SECTION_MODELS[section].model_validate(data)
+        self._section_raw[section] = data
+        self._sections.pop(section, None)
+        _save_raw(data, self._section_file(section))
 
 
-# Global singleton
 config = Config(CONFIG_FILE)

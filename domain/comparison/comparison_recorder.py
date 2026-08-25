@@ -11,13 +11,34 @@ from ..analysis.trueskill import (
     rating_from_row,
     update_ratings,
 )
-from ..database.ports import ComparisonRepository, ImageRepository, PathResolver
+from ..database.ports import PathResolver
 
 logger: ModuleLogger = get_logger(__name__)
 
 
 class GraphService(Protocol):
     def apply_comparison(self, winner: str, loser: str) -> None: ...
+    def get_all_comparisons(self) -> list[dict[str, Any]]: ...
+    def get_image(self, filename: str) -> dict[str, Any] | None: ...
+    def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool: ...
+    def add_comparison(
+        self,
+        filename_a: str,
+        filename_b: str,
+        winner: str,
+        weight: float,
+        transitive_depth: int,
+        timestamp: str,
+    ) -> Any: ...
+    def update_image_rating_state(
+        self,
+        filename: str,
+        score: float,
+        rating_mu: float,
+        rating_sigma: float,
+        comparison_count: int,
+        touch_timestamp: bool,
+    ) -> bool: ...
 
 
 def update_scores_after_comparison(
@@ -43,18 +64,14 @@ def update_scores_after_comparison(
 class ComparisonRecorder:
     def __init__(
         self,
-        comparison_repo: ComparisonRepository,
-        image_repo: ImageRepository,
         path_syncer: PathResolver,
         graph_service: GraphService,
     ) -> None:
-        self._comparison_repo = comparison_repo
-        self._image_repo = image_repo
         self._path_syncer = path_syncer
-        self._graph_service = graph_service
+        self._graph = graph_service
 
     def _persist_image_state(self, filename: str, data: dict[str, Any]) -> bool:
-        return self._image_repo.update_image_rating_state(
+        return self._graph.update_image_rating_state(
             filename=filename,
             score=float(data["score"]),
             rating_mu=float(data["rating_mu"]),
@@ -72,15 +89,15 @@ class ComparisonRecorder:
         transitive_depth: int,
     ) -> bool:
         """Record one direct comparison and update both image ratings."""
-        if self._comparison_repo.comparison_exists_for_pair(filename_a, filename_b):
+        if self._graph.comparison_exists_for_pair(filename_a, filename_b):
             logger.warning(
                 "duplicate pair comparison for %s vs %s. remember to clean up later",
                 filename_a,
                 filename_b,
             )
 
-        data_a = self._image_repo.get_image(filename_a)
-        data_b = self._image_repo.get_image(filename_b)
+        data_a = self._graph.get_image(filename_a)
+        data_b = self._graph.get_image(filename_b)
         if not data_a or not data_b or filename_a == filename_b:
             return False
 
@@ -96,7 +113,7 @@ class ComparisonRecorder:
         )
 
         ts = datetime.now(timezone.utc).isoformat()
-        comp_id = self._comparison_repo.add_comparison(
+        comp_id = self._graph.add_comparison(
             filename_a=filename_a,
             filename_b=filename_b,
             winner=winner,
@@ -118,7 +135,7 @@ class ComparisonRecorder:
         if not self._persist_image_state(loser_filename, loser_data):
             return False
 
-        all_comparisons = self._comparison_repo.get_all_comparisons()
+        all_comparisons = self._graph.get_all_comparisons()
         saved_winner = self._path_syncer.sync_image_metadata_to_json(
             filename=winner_filename,
             score=float(winner_data["score"]),
@@ -144,6 +161,6 @@ class ComparisonRecorder:
             )
             return False
 
-        self._graph_service.apply_comparison(winner_filename, loser_filename)
+        self._graph.apply_comparison(winner_filename, loser_filename)
 
         return True

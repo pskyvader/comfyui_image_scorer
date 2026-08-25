@@ -1,1 +1,1 @@
-"""Configuration management — hierarchical JSON settings with auto-saving sub-configs, lazy loading, caching, and the AutoSaveDict mutable-mapping wrapper."""
+"""Configuration management — validated read-only section models with an explicit save API (Config.set_root / Config.save_section)."""

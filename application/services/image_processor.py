@@ -17,7 +17,12 @@ from tqdm import tqdm
 
 from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.configuration.settings import config
-from ...core.io.serialization import collect_valid_files, discover_files
+from ...core.io.serialization import (
+    clean_json_metadata,
+    collect_valid_files,
+    discover_files,
+    extract_prompt_tags,
+)
 from ...core.utilities.concurrency import parallel_for
 from ...core.filesystem.paths import image_root_processed, output_dir
 from ...domain.analysis.trueskill import (
@@ -26,11 +31,7 @@ from ...domain.analysis.trueskill import (
     public_score_from_rating,
     replay_ratings,
 )
-from ...domain.database.ports import ComparisonRepository, ImageRepository
-from ...domain.comparison.algorithm.phase_order import reset_skip
 from .graph_service import CrystalGraph
-from ...domain.comparison.state import invalidate_images_cache
-
 logger: ModuleLogger = get_logger(__name__)
 
 
@@ -53,8 +54,6 @@ class ImageProcessor:
     def __init__(
         self,
         max_workers: int,
-        image_repo: ImageRepository,
-        comparison_repo: ComparisonRepository,
         graph: CrystalGraph,
         path_ops: PathOps,
     ) -> None:
@@ -63,8 +62,6 @@ class ImageProcessor:
         self.default_score = float(ranking_conf["default_score"])
         self.reserve_count = int(ranking_conf["reserve_count"])
 
-        self._image_repo = image_repo
-        self._comparison_repo = comparison_repo
         self._graph = graph
         self._path_ops = path_ops
 
@@ -81,61 +78,7 @@ class ImageProcessor:
         self.sync_processed_images_from_db()
 
     def _extract_prompt_tags(self, data: dict[str, Any]) -> str | None:
-        if "positive_prompt" in data:
-            prompt = data["positive_prompt"]
-            if isinstance(prompt, str) and prompt:
-                return prompt
-        for value in data.values():
-            if isinstance(value, dict):
-                result = self._extract_prompt_tags(value)
-                if result:
-                    return result
-        return None
-
-    def clean_json_metadata(
-        self,
-        json_data: dict[str, Any],
-        default_score: float,
-        filename: str,
-    ) -> dict[str, Any]:
-        remove_fields = {
-            "score",
-            "score_modifier",
-            "volatility",
-            "confidence",
-            "image",
-            "comparison_count",
-            "rating_mu",
-            "rating_sigma",
-        }
-
-        if not isinstance(json_data, dict) or not json_data:
-            base: dict[str, Any] = {}
-        else:
-            if len(json_data) == 1:
-                only_value = next(iter(json_data.values()))
-                if isinstance(only_value, dict) and "positive_prompt" in only_value:
-                    json_data = only_value
-            base = {k: v for k, v in json_data.items() if k not in remove_fields}
-            if not base:
-                for _, value in json_data.items():
-                    if isinstance(value, dict):
-                        base = {
-                            k: v for k, v in value.items() if k not in remove_fields
-                        }
-                        break
-
-        base["score"] = round(float(default_score), 3)
-        base["rating_mu"] = INITIAL_MEAN
-        base["rating_sigma"] = INITIAL_UNCERTAINTY
-        base["comparison_count"] = 0
-        base["comparison_history"] = []
-
-        if filename:
-            base["filename"] = filename
-
-        base["prompt_tags"] = self._extract_prompt_tags(json_data)
-        return base
+        return extract_prompt_tags(data)
 
     def process_image_file(
         self, image_path: Path
@@ -162,11 +105,15 @@ class ImageProcessor:
         with open(json_path, "r", encoding="utf-8") as handle:
             json_data = json.load(handle)
 
-        cleaned_json = self.clean_json_metadata(
-            json_data, default_score=self.default_score, filename=filename
+        cleaned_json = clean_json_metadata(
+            json_data,
+            default_score=self.default_score,
+            filename=filename,
+            initial_mu=INITIAL_MEAN,
+            initial_sigma=INITIAL_UNCERTAINTY,
         )
 
-        db_entry = self._image_repo.get_image(filename)
+        db_entry = self._graph.get_image(filename)
         if db_entry:
             chosen_score = float(db_entry["score"])
             cleaned_json["score"] = round(chosen_score, 3)
@@ -241,7 +188,7 @@ class ImageProcessor:
         )
 
     def sync_processed_images_from_db(self) -> None:
-        all_imgs = self._image_repo.get_all_images()
+        all_imgs = self._graph.get_all_images()
         with self.processed_lock:
             self.processed_images.clear()
             for img in all_imgs:
@@ -275,7 +222,7 @@ class ImageProcessor:
             return {"status": "skipped", "message": "Already processing"}
 
         self.is_processing = True
-        db_count = self._image_repo.get_image_count()
+        db_count = self._graph.get_image_count()
         total_goal = getattr(self, "total_discovered", 0)
 
         if self.total_discovered == 0:
@@ -342,7 +289,7 @@ class ImageProcessor:
                         stats["processed"] += 1
                         db_name = dest_name or filename
                         if score is not None and not db_exists:
-                            if self._image_repo.add_image(
+                            if self._graph.add_image(
                                 filename=db_name,
                                 score=score,
                                 comparison_count=0,
@@ -375,8 +322,8 @@ class ImageProcessor:
         ranked_root: Path = self._path_ops.ranked_root()
         self._path_ops.deduplicate_scored(root=ranked_root, limit=0)
         self._path_ops.cleanup_orphans(root=ranked_root)
-        self._comparison_repo.clear_all_comparisons()
-        self._image_repo.clear_all_images()
+        self._graph.clear_all_comparisons()
+        self._graph.clear_all_images()
 
         dir_file_pairs = discover_files(str(ranked_root))
 
@@ -388,10 +335,14 @@ class ImageProcessor:
         )
 
         for img_path, entry, _timestamp, _file_id in all_entries:
-            cleaned = self.clean_json_metadata(
-                entry, default_score=self.default_score, filename=Path(img_path).name
+            cleaned = clean_json_metadata(
+                entry,
+                default_score=self.default_score,
+                filename=Path(img_path).name,
+                initial_mu=INITIAL_MEAN,
+                initial_sigma=INITIAL_UNCERTAINTY,
             )
-            self._image_repo.add_image(
+            self._graph.add_image(
                 filename=Path(img_path).name,
                 score=self.default_score,
                 comparison_count=0,
@@ -400,7 +351,7 @@ class ImageProcessor:
                 rating_sigma=INITIAL_UNCERTAINTY,
             )
 
-        valid_filenames = {img["filename"] for img in self._image_repo.get_all_images()}
+        valid_filenames = {img["filename"] for img in self._graph.get_all_images()}
 
         with tqdm(
             total=len(all_entries),
@@ -411,15 +362,19 @@ class ImageProcessor:
             for img_path, entry, _timestamp, file_id in all_entries:
                 filename = Path(img_path).name
 
-                cleaned = self.clean_json_metadata(
-                    entry, default_score=self.default_score, filename=filename
+                cleaned = clean_json_metadata(
+                    entry,
+                    default_score=self.default_score,
+                    filename=filename,
+                    initial_mu=INITIAL_MEAN,
+                    initial_sigma=INITIAL_UNCERTAINTY,
                 )
-                prompt_tags = cleaned["prompt_tags"] or self._extract_prompt_tags(
+                prompt_tags = cleaned["prompt_tags"] or extract_prompt_tags(
                     cleaned
                 )
-                existing = self._image_repo.get_image(filename)
+                existing = self._graph.get_image(filename)
                 if existing and prompt_tags and existing["prompt_tags"] != prompt_tags:
-                    self._image_repo.update_image_tags(filename, prompt_tags)
+                    self._graph.update_image_tags(filename, prompt_tags)
 
                 if filename in valid_filenames:
                     history = entry.get("comparison_history")
@@ -434,7 +389,7 @@ class ImageProcessor:
                             winner_file = filename if comp["winner"] else other
                             if winner_file not in valid_filenames:
                                 continue
-                            self._comparison_repo.add_historical_comparison(
+                            self._graph.add_historical_comparison(
                                 filename_a=filename,
                                 filename_b=other,
                                 winner=winner_file,
@@ -445,12 +400,12 @@ class ImageProcessor:
 
                 pbar.update(1)
 
-        self._comparison_repo.clean_comparisons()
+        self._graph.clean_comparisons()
 
         self._recompute_ratings_from_database_history()
 
-        all_comparisons = self._comparison_repo.get_all_comparisons()
-        all_images = self._image_repo.get_all_images()
+        all_comparisons = self._graph.get_all_comparisons()
+        all_images = self._graph.get_all_images()
 
         filename_to_path: dict[str, Path] = {}
         filename_to_entry: dict[str, dict[str, Any]] = {}
@@ -502,9 +457,9 @@ class ImageProcessor:
         self.sync_processed_images_from_db()
 
     def _recompute_ratings_from_database_history(self) -> int:
-        self._image_repo.reset_all_image_ratings(score=self.default_score)
+        self._graph.reset_all_image_ratings(score=self.default_score)
 
-        replayed = replay_ratings(self._comparison_repo.get_all_comparisons())
+        replayed = replay_ratings(self._graph.get_all_comparisons())
 
         updated = 0
         with tqdm(
@@ -515,7 +470,7 @@ class ImageProcessor:
             delay=3.0,
         ) as pbar:
             for filename, (rating, count) in replayed.items():
-                if self._image_repo.update_image_rating_state(
+                if self._graph.update_image_rating_state(
                     filename=filename,
                     score=public_score_from_rating(rating),
                     rating_mu=rating.mu_skill,
@@ -608,5 +563,5 @@ class ImageProcessor:
 
         if should_clear:
             self._graph.rebuild_from_database()
-            reset_skip()
-            invalidate_images_cache()
+            self._graph.reset_selection_state()
+            self._graph.invalidate_images_snapshot()

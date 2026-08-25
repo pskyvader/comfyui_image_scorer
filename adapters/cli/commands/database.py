@@ -1,3 +1,4 @@
+"""Database maintenance commands: rebuild, recalculate, cleanup."""
 from ....core.configuration.settings import config
 from ....core.observability.logger import get_logger
 from ....domain.analysis.trueskill import replay_ratings, public_score_from_rating
@@ -7,7 +8,7 @@ logger = get_logger(__name__)
 
 
 def cleanup(deps: CLIDeps) -> int:
-    comp_result = deps.comparison_repo.clean_comparisons()
+    comp_result = deps.graph.clean_comparisons()
     logger.info("Comparisons cleaned: %s", comp_result)
 
     deps.vacuum_database()
@@ -22,19 +23,19 @@ def rebuild(deps: CLIDeps) -> int:
 
 
 def recalculate(deps: CLIDeps) -> int:
-    if not deps.image_repo.reset_all_image_ratings(
+    if not deps.graph.reset_all_image_ratings(
         score=float(config["ranking"]["default_score"])
     ):
         logger.error("Failed to reset ratings")
         return 1
 
-    all_comparisons = deps.comparison_repo.get_all_comparisons()
+    all_comparisons = deps.graph.get_all_comparisons()
 
     replayed = replay_ratings(all_comparisons)
 
     updated = 0
     for filename, (rating, count) in replayed.items():
-        if deps.image_repo.update_image_rating_state(
+        if deps.graph.update_image_rating_state(
             filename=filename,
             score=public_score_from_rating(rating),
             rating_mu=rating.mu_skill,

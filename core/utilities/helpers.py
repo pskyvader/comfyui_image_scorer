@@ -1,10 +1,7 @@
-import numpy as np
 import shutil
 import time
 from pathlib import Path
-from PIL import Image
-import torch
-from torch import Tensor
+
 from ..observability.logger import get_logger, ModuleLogger
 from ..filesystem.paths import (
     models_dir,
@@ -57,19 +54,3 @@ def remove_derived_caches(*paths: str) -> None:
         if Path(p).exists():
             Path(p).unlink()
             logger.debug(f"Removed stale cache: {p}")
-
-
-def export_image_batch(pil_images: list[Image.Image]) -> Tensor:
-    _start = time.perf_counter()
-    if not pil_images:
-        result = torch.zeros((1, 1, 1, 3), dtype=torch.float32)  # type: ignore[reportPrivateImportUsage]
-    else:
-        tensors: list[Tensor] = []
-        for img in pil_images:
-            np_img = np.array(img.convert("RGB"))
-            np_img = np_img.astype(np.float32) / 255.0
-            t = torch.from_numpy(np_img).unsqueeze(0)  # type: ignore[reportPrivateImportUsage]
-            tensors.append(t)
-        result = torch.cat(tensors, dim=0)  # type: ignore[reportPrivateImportUsage]
-
-    return result

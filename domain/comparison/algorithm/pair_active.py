@@ -12,8 +12,6 @@ from ...graph.node_proxy import NodeProxy
 
 from ....core.configuration.settings import config
 
-from ...database.ports import ComparisonRepository
-
 from ..constants import MIN_CHAIN_THRESHOLD
 
 from .graph_helpers import pair_key, stable_seed_pool
@@ -40,6 +38,10 @@ class CrystalGraph(Protocol):
     def get_graph_stats(self) -> dict[str, Any]: ...
     def are_in_same_path(self, img1: str, img2: str) -> bool: ...
     def get_all_links(self) -> set[tuple[str, str]]: ...
+    def get_images_with_only_wins(self) -> list[str]: ...
+    def get_images_with_only_losses(self) -> list[str]: ...
+    def get_recent_chain_ids(self) -> list[int]: ...
+    def set_recent_chain_ids(self, chain_ids: list[int]) -> None: ...
 
     _chain: Any
 
@@ -188,7 +190,6 @@ def _closest_score_pair(
 def phase_collapsible_pairs(
     candidate_nodes: list[NodeProxy],
     cg: CrystalGraph,
-    comparison_repo: ComparisonRepository,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     """Anchor on the least-compared node and return its most score-similar same-type partner."""
     _start = time.perf_counter()
@@ -204,14 +205,14 @@ def phase_collapsible_pairs(
     chains_list = cg.get_all_chains()
     chains: list[ChainProxy] = [c[0] for c in chains_list]
 
-    check_list = comparison_repo.get_images_with_only_losses()
+    check_list = cg.get_images_with_only_losses()
     use_bottom = True
     nodes: list[NodeProxy] = _collect_chain_extremes(
         chains, candidate_names, check_list, use_bottom, cg
     )
 
     if len(nodes) < 2:
-        check_list = comparison_repo.get_images_with_only_wins()
+        check_list = cg.get_images_with_only_wins()
         use_bottom = False
         nodes = _collect_chain_extremes(
             chains, candidate_names, check_list, use_bottom, cg
@@ -229,12 +230,19 @@ def phase_collapsible_pairs(
 
 def phase_single_win_loss(
     candidate_nodes: list[NodeProxy],
-    cg: CrystalGraph,
+    _cg: CrystalGraph,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     _start: float = time.perf_counter()
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
+    reserve_count: int = config["ranking"]["reserve_count"]
+    for single_win, filtered_only in (
+        (True, True),
+        (False, True),
+        (True, False),
+        (False, False),
+    ):
 
-    for single_win in (True, False):
+        logger.info(f"single_win={single_win}, filtered_only={filtered_only}")
 
         nodes: list[NodeProxy] = []
         for node in candidate_nodes:
@@ -248,15 +256,34 @@ def phase_single_win_loss(
             if len(links) == 1:
                 nodes.append(node)
 
-            if len(nodes) > 100:
-                break
+            # if len(nodes) > 100:
+            #     break
 
         if len(nodes) < 2:
+            logger.info(
+                f"skipping single win={single_win}, filtered_only={filtered_only}: only {len(nodes)} candidates"
+            )
             continue
 
-        nodes.sort(key=lambda node: node.comparison_count)  # , reverse=reverse)
+        nodes.sort(
+            key=lambda node: (node.comparison_count, node.mu_skill)
+        )  # , reverse=reverse)
+        node_a: NodeProxy = nodes[0]
+        if filtered_only:
+            filtered_nodes: list[NodeProxy] = [
+                node
+                for node in nodes
+                if node.comparison_count >= node_a.comparison_count + 1
+            ]
+            if len(filtered_nodes) < reserve_count:
+                logger.info(
+                    f"skipping single win={single_win}, filtered_only={filtered_only}: only {len(filtered_nodes)} candidates with comparison_count={node_a.comparison_count}"
+                )
+                continue
+            nodes = filtered_nodes
+
         pair_list: list[tuple[NodeProxy, NodeProxy]] = [
-            (nodes[i], nodes[i + 1]) for i in range(len(nodes) - 1)
+            (node_a, nodes[i + 1]) for i in range(len(nodes) - 1)
         ]
         result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(pair_list)
         if result:
@@ -269,19 +296,17 @@ def phase_single_win_loss(
     return None
 
 
-_last_chains_index: list[int] = []
-
-
 def phase_chain_merge(
     candidate_images: list[NodeProxy],
     cg: CrystalGraph,
 ) -> tuple[NodeProxy, NodeProxy] | None:
-    global _last_chains_index
     score_threshold = 0.01
     min_comparisons = int(config["ranking"]["insertion_target_comparisons"])
 
-    if len(_last_chains_index) > MIN_CHAIN_THRESHOLD:
-        _last_chains_index = _last_chains_index[MIN_CHAIN_THRESHOLD // 2 :]
+    last_chains_index: list[int] = cg.get_recent_chain_ids()
+    if len(last_chains_index) > MIN_CHAIN_THRESHOLD:
+        last_chains_index = last_chains_index[MIN_CHAIN_THRESHOLD // 2 :]
+        cg.set_recent_chain_ids(last_chains_index)
 
     _start = time.perf_counter()
     candidate_names = {node.filename for node in candidate_images}
@@ -301,7 +326,7 @@ def phase_chain_merge(
     top_n: int = min(MIN_CHAIN_THRESHOLD * 10, len(chains))
 
     for i in range(top_n - 1):
-        if i in _last_chains_index:
+        if i in last_chains_index:
             continue
         a_nodes: list[NodeProxy] = [
             n[0]
@@ -315,7 +340,7 @@ def phase_chain_merge(
         a_mid: NodeProxy = a_nodes[len(a_nodes) // 2]
 
         for j in range(len(chains) - 1, i, -1):
-            if j in _last_chains_index:
+            if j in last_chains_index:
                 continue
             b_nodes: list[NodeProxy] = [
                 n[0] for n in chains[j] if n[0].filename in candidate_names and n[1]
@@ -342,8 +367,9 @@ def phase_chain_merge(
                 if cg.are_in_same_path(node_a.filename, node_b.filename):
                     continue
 
-                _last_chains_index.append(i)
-                _last_chains_index.append(j)
+                last_chains_index.append(i)
+                last_chains_index.append(j)
+                cg.set_recent_chain_ids(last_chains_index)
                 logger.debug(f"I={i},j={j}", start_timer=_start)
                 logger.debug(
                     f"chain i={len(a_nodes)}({len(chains[i])}),chain j={len(b_nodes)}({len(chains[j])})",

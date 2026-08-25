@@ -276,7 +276,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | Name | Description |
 |---|---|
 | `remove_directory(directory_path)` | — |
-| `delete_full_vectors()` | Delete the full vector files but keep the split/ directory intact. |
+| `delete_full_vectors()` | Delete the full vector files and all split categories except image/. |
 | `remove_models()` | — |
 | `remove_derived_caches(*paths)` | Delete only the named derived cache files. Each file is removed |
 | `export_image_batch(pil_images)` | — |
@@ -352,7 +352,6 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 |---|---|
 | `logger` | `get_logger(__name__)` |
 | `ImageEntry` | Type Alias for the shared data structure |
-| `processed_cache` | `{}` |
 | `REQUIRED_ANALYSIS_FIELDS` | `{'original_width', 'original_height', 'final_width', 'final_height', 'final_aspect_ratio', 'original_aspect_ratio', 'analysis', 'bbox', *POSE_LANDMARK_NAMES, 'age', 'gender', 'race', 'nsfw_score'}` |
 | `METRIC_KEYS` | `['contrast', 'sharpness', 'noise_score', 'colorfulness', 'artifact_score', 'edge_density', 'texture_lbp']` |
 
@@ -471,7 +470,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 | Name | Description |
 |---|---|
-| `select_pair_for_comparison(exclude_set, crystal_graph, comparison_repo)` | Select the next pair of images to compare. |
+| `select_pair_for_comparison(exclude_set, crystal_graph)` | Select the next pair of images to compare. |
 
 ### Module-level constants
 
@@ -505,7 +504,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | `phase_anchor_insert(candidate_images, seed_pool, existing_pair_set, cg)` | — |
 | `_collect_chain_extremes(chains, candidate_names, check_list, use_bottom, cg)` | Return up to 10 qualifying chain extremes, least-compared first. |
 | `_closest_score_pair(pair_list)` | — |
-| `phase_collapsible_pairs(candidate_images, cg, comparison_repo)` | Anchor on the least-compared node and return its most score-similar same-type partner. |
+| `phase_collapsible_pairs(candidate_images, cg)` | Anchor on the least-compared node and return its most score-similar same-type partner. |
 | `_single_nodes(cg, candidate_names, insertion_target, single_win)` | — |
 | `phase_single_win_loss(candidate_images, cg)` | — |
 | `phase_chain_merge(candidate_images, cg)` | — |
@@ -542,7 +541,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 |---|---|
 | `reset_skip()` | — |
 | `get_phases()` | Return a JSON-serializable version of PHASES (callables stripped). |
-| `select_pair(all_images, candidate_images, cg, comparison_repo)` | — |
+| `select_pair(all_images, candidate_images, cg)` | — |
 
 ### Module-level constants
 
@@ -592,7 +591,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 | Name | Description |
 |---|---|
-| `__init__(comparison_repo, image_repo, path_syncer, graph_service)` | — |
+| `__init__(path_syncer, graph_service)` | — |
 | `_persist_image_state(filename, data)` | — |
 | `record_comparison(filename_a, filename_b, winner, impact_factor, transitive_depth)` | Record one direct comparison and update both image ratings. |
 
@@ -608,28 +607,6 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | `IMAGES_CACHE_TTL` | `10` |
 | `MAX_PAIR_CANDIDATES` | `100` |
 | `MIN_CHAIN_THRESHOLD` | `20` |
-
-
-## `domain\comparison\state.py`
-
-> Centralised mutable state for the ranking algorithm.
-
-### Module-level functions
-
-| Name | Description |
-|---|---|
-| `set_images_cache(images)` | Store the all_images list with a fresh timestamp. |
-| `is_images_cache_valid()` | Return True when the cached all_images list is present and fresh. |
-| `get_cached_all_images()` | Return the cached all_images list; call only when is_images_cache_valid(). |
-| `get_cached_image(filename)` | Return a single image from the cached list, or None. |
-| `invalidate_images_cache()` | — |
-
-### Module-level constants
-
-| Symbol | Description |
-|---|---|
-| `logger` | `get_logger(__name__)` |
-| `_images_cache` | `{'data': None, 'timestamp': 0.0}` |
 
 
 ## `domain\data_transformation\__init__.py`
@@ -1357,7 +1334,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | Name | Description |
 |---|---|
 | `_distribute(values, bins)` | — |
-| `run_stats(image_repo, comparison_repo)` | — |
+| `run_stats(graph)` | — |
 
 ### Module-level constants
 
@@ -1397,7 +1374,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 |---|---|
 | `build_split_files(limit, model_loader, batch_sizer_factory, maps_provider)` | — |
 | `build_full_files(model_loader, batch_sizer_factory, maps_provider)` | — |
-| `run_rebuild_scores_only(comparison_repo)` | — |
+| `run_rebuild_scores_only(graph)` | — |
 
 ### Module-level constants
 
@@ -1509,7 +1486,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 
 | Name | Description |
 |---|---|
-| `__init__(max_workers, image_repo, comparison_repo, graph, path_ops)` | — |
+| `__init__(max_workers, graph, path_ops)` | — |
 | `_extract_prompt_tags(data)` | — |
 | `clean_json_metadata(json_data, default_score, filename)` | — |
 | `process_image_file(image_path)` | Process a single raw image file into the ranked tree. |
@@ -1542,7 +1519,6 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | Symbol | Description |
 |---|---|
 | `logger` | `get_logger(__name__)` |
-| `cache_split_data` | `{}` |
 
 ### Class `VectorList`
 
@@ -1704,6 +1680,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | `cleanup_orphans` | — |
 | `download_configured_models` | — |
 | `download_mediapipe_models` | — |
+| `set_hub_offline` | — |
 
 
 ## `adapters\cli\main.py`
@@ -1901,6 +1878,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | `cleanup_orphans` | — |
 | `download_configured_models` | — |
 | `download_mediapipe_models` | — |
+| `set_hub_offline` | — |
 
 
 ## `adapters\server\endpoints\__init__.py`
@@ -2150,6 +2128,43 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 > Infrastructure layer — persistence (database, comparisons_repository, images_repository).
 
 
+## `domain\ports\__init__.py`
+
+> Domain ports for cross-cutting infrastructure capabilities.
+
+
+## `domain\ports\cache.py`
+
+> Cache port — injected key/value cache for temporary execution state.
+
+### Class `CacheProvider` (Protocol)
+
+| Name | Description |
+|---|---|
+| `get(key)` | — |
+| `set(key, value)` | — |
+| `invalidate(key)` | — |
+| `clear()` | — |
+
+
+## `infrastructure\cache\__init__.py`
+
+> Infrastructure cache implementations.
+
+
+## `infrastructure\cache\memory_cache.py`
+
+### Class `InMemoryCache` (CacheProvider)
+
+| Name | Description |
+|---|---|
+| `__init__(default_ttl=None, max_bytes=None)` | — |
+| `get(key)` | — |
+| `set(key, value)` | — |
+| `invalidate(key)` | — |
+| `clear()` | — |
+
+
 ## `infrastructure\external_services\__init__.py`
 
 > External services — API clients for remote model inference, cloud storage, and third-party data sources (future).
@@ -2298,6 +2313,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 |---|---|
 | `_missing_model_error(description)` | — |
 | `_face_attributes_checkpoint_path(name)` | — |
+| `set_hub_offline(enabled)` | Flip HF hub offline mode after the import-time constants were mirrored. |
 | `verify_models_present()` | — |
 | `download_configured_models()` | — |
 
@@ -2453,6 +2469,7 @@ Generated from the live tree (paths relative to `comfyui_image_scorer`). Files a
 | Name | Description |
 |---|---|
 | `get_db_connection()` | Create and return SQLite connection with row factory. |
+| `_check_proxy_entry()` | Raise when get_db_connection is entered from outside the graph proxies. |
 | `_ensure_meta_table(conn)` | — |
 | `_ensure_images_table(conn)` | — |
 | `_ensure_comparisons_table(conn)` | — |

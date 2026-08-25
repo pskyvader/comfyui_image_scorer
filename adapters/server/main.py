@@ -13,6 +13,7 @@ import argparse
 from typing import Any
 
 from flask import Flask, send_from_directory, request, send_file, Response
+from pydantic import ValidationError
 from urllib.parse import unquote
 
 
@@ -31,7 +32,7 @@ from ...core.filesystem.paths import image_root
 if config["image_root"] == "":
     from folder_paths import get_output_directory
 
-    config["image_root"] = get_output_directory()
+    config.set_root("image_root", get_output_directory())
 from ...infrastructure.persistence.folder_organizer import ensure_tier_structure
 from ...infrastructure.persistence.path_handler import (
     get_ranked_root,
@@ -52,15 +53,21 @@ from ...infrastructure.persistence.deduplicate_scored import deduplicate_scored
 from ...infrastructure.persistence.cleanup_orphans import cleanup_orphans
 from ...infrastructure.persistence.database import vacuum_database
 from ...application.services.graph_service import CrystalGraph
+from ...application.hyperparameters.hyperparameter_optimizer import HpoRunner
+from ...infrastructure.ml_models.plot import PlotManager
 from ...application.services.image_processor import ImageProcessor, PathOps
 from ...infrastructure.ml_models.model_loader import (
     model_loader,
     download_configured_models,
+    set_hub_offline,
 )
 from ...infrastructure.external_services.mediapipe_models import (
     download_mediapipe_models,
 )
 from ...infrastructure.ml_models.batch_sizer import BatchSizer
+from ...infrastructure.cache.memory_cache import InMemoryCache
+from ...infrastructure.ml_models.mediapipe_provider import MediaPipeProvider
+from ...domain.comparison.constants import IMAGES_CACHE_TTL
 from ...infrastructure.loading.training_loader import training_loader
 from ...infrastructure.ml_models.training.model_trainer import model_trainer
 from ...infrastructure.loading.maps_loader import maps_list
@@ -69,7 +76,11 @@ from .compressed_image import compressed_image_response
 
 image_repo = SQLiteImagesRepository()
 comparison_repo = SQLiteComparisonsRepository()
-graph = CrystalGraph(image_repo=image_repo, comparison_repo=comparison_repo)
+graph = CrystalGraph(
+    image_repo=image_repo,
+    comparison_repo=comparison_repo,
+    cache=InMemoryCache(default_ttl=IMAGES_CACHE_TTL),
+)
 
 
 class _PathResolverAdapter:
@@ -102,17 +113,19 @@ path_ops = PathOps(
     cleanup_orphans=cleanup_orphans,
 )
 
+# Long-lived cache for analysis results and split data across build runs.
+_build_cache = InMemoryCache()
+# Size-bounded WebP cache for compressed image serving (256 MB).
+_webp_cache = InMemoryCache(max_bytes=256 * 1024 * 1024)
+_mediapipe = MediaPipeProvider()
+
 image_processor = ImageProcessor(
     max_workers=int(config["ranking"]["max_workers"]),
-    image_repo=image_repo,
-    comparison_repo=comparison_repo,
     graph=graph,
     path_ops=path_ops,
 )
 
 deps = ServerDeps(
-    image_repo=image_repo,
-    comparison_repo=comparison_repo,
     path_resolver=_PathResolverAdapter(),
     path_ops=path_ops,
     graph=graph,
@@ -122,11 +135,16 @@ deps = ServerDeps(
     maps_provider=maps_list,
     training_loader=training_loader,
     model_trainer=model_trainer,
+    cache=_build_cache,
+    hpo_runner=HpoRunner(),
+    plot_manager=PlotManager,
+    mediapipe=_mediapipe,
     vacuum_database=vacuum_database,
     cleanup_orphans=cleanup_orphans,
     deduplicate_scored=deduplicate_scored,
     download_configured_models=download_configured_models,
     download_mediapipe_models=download_mediapipe_models,
+    set_hub_offline=set_hub_offline,
 )
 
 app = Flask(__name__, static_folder=None)
@@ -150,6 +168,7 @@ SECTION_FRONTENDS = {
     "gallery": Path(__file__).parent.parent / "gallery" / "frontend",
     "maps": Path(__file__).parent.parent / "maps" / "frontend",
     "maps2": Path(__file__).parent.parent / "maps2" / "frontend",
+    "maps3": Path(__file__).parent.parent / "maps3" / "frontend",
     "database": Path(__file__).parent.parent / "database" / "frontend",
     "build": Path(__file__).parent.parent / "build" / "frontend",
     "training": Path(__file__).parent.parent / "training" / "frontend",
@@ -238,7 +257,7 @@ def serve_image_by_name(filename: str):
         if dest.exists() and dest.is_file():
             # logger.debug(f"Serving image by score path", start_timer=_start)
             if config["ranking"]["compress_images"]:
-                return compressed_image_response(dest, fname)
+                return compressed_image_response(dest, fname, _webp_cache)
             return send_file(str(dest))
 
     db_entry = get_db_image(fname)
@@ -247,14 +266,14 @@ def serve_image_by_name(filename: str):
         if dest.exists() and dest.is_file():
             # logger.debug(f"Serving image by db score path", start_timer=_start)
             if config["ranking"]["compress_images"]:
-                return compressed_image_response(dest, fname)
+                return compressed_image_response(dest, fname, _webp_cache)
             return send_file(str(dest))
 
     found = find_image_path(fname)
     if found:
         # logger.debug(f"Serving image by found path", start_timer=_start)
         if config["ranking"]["compress_images"]:
-            return compressed_image_response(Path(found), fname)
+            return compressed_image_response(Path(found), fname, _webp_cache)
         return send_file(str(found))
 
     logger.warning(f"Image not found: {filename}", start_timer=_start)
@@ -281,6 +300,11 @@ def serve_html(filename: str) -> Response:
 @app.errorhandler(404)
 def not_found(_e: Exception):
     return {"error": "Not found"}, 404
+
+
+@app.errorhandler(ValidationError)
+def validation_error(e: ValidationError):
+    return {"error": "Invalid request payload", "details": e.errors()}, 400
 
 
 @app.errorhandler(500)

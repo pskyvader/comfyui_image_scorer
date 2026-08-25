@@ -1,15 +1,14 @@
+"""Training commands: train-model and hpo."""
 import os
 
 import matplotlib.pyplot as plt
 
 from ....application.hyperparameters.hyperparameter_optimizer import (
     load_training_data,
-    run_hpo_cycles,
 )
 from ....core.observability.logger import get_logger
 from ....core.configuration.settings import config
 from ....core.filesystem.paths import training_plots_dir
-from ....domain.training.plot import PlotManager
 from ..deps import CLIDeps
 
 logger = get_logger(__name__)
@@ -41,17 +40,17 @@ def train_model(deps: CLIDeps) -> int:
         model_trainer=deps.model_trainer,
     )
     os.makedirs(training_plots_dir, exist_ok=True)
-    PlotManager.plot_loss_curve(
+    deps.plot_manager.plot_loss_curve(
         metrics,
         save_path=os.path.join(training_plots_dir, "training_curves.png"),
         show=True,
     )
-    PlotManager.plot_score_distribution(
+    deps.plot_manager.plot_score_distribution(
         scores,
         save_path=os.path.join(training_plots_dir, "score_distribution.png"),
         show=True,
     )
-    PlotManager.compare_model_vs_data(
+    deps.plot_manager.compare_model_vs_data(
         vectors_full,
         scores_full,
         training_loader=deps.training_loader,
@@ -86,7 +85,7 @@ def run_hpo(
         ),
     )
 
-    result = run_hpo_cycles(
+    result = deps.hpo_runner.run(
         cycles=cycles,
         optimization_steps=optimization_steps,
         max_combos=max_combos,

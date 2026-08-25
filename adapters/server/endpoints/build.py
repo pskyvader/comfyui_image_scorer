@@ -4,9 +4,9 @@ Every route is one call to the CLI command function it maps to (§1.1),
 with log output captured for the response.
 """
 
-from typing import Any
-
 from flask import Blueprint, Flask, jsonify, request
+
+from pydantic import BaseModel, Field
 
 from ....core.observability.logger import capture_log_output, get_logger, ModuleLogger
 from ....core.utilities.helpers import delete_full_vectors
@@ -19,22 +19,25 @@ logger: ModuleLogger = get_logger(__name__)
 _PREPARE_MODES = ("split", "full", "all")
 
 
+class PrepareRequest(BaseModel):
+    """Payload for POST /api/build/prepare."""
+
+    mode: str = Field(default="all", pattern="^(split|full|all)$")
+    limit: int = Field(default=0, ge=0)
+    batch: bool = Field(default=False)
+
+
 @build_bp.route("/prepare", methods=["POST"])
 def prepare():
-    data: dict[str, Any] = request.get_json() or {}
-    mode = data.get("mode", "all")
-    if mode not in _PREPARE_MODES:
-        return jsonify({"error": f"Unknown mode: {mode}"}), 400
-    limit = int(data.get("limit", 0))
-    batch = bool(data.get("batch", False))
+    req = PrepareRequest.model_validate(request.get_json(silent=True) or {}, strict=False)
     deps = get_server_deps()
     with capture_log_output() as lines:
-        if mode == "split":
-            code = run_split_vectors(limit=limit, batch=batch, deps=deps.to_cli_deps())
-        elif mode == "full":
+        if req.mode == "split":
+            code = run_split_vectors(limit=req.limit, batch=req.batch, deps=deps.to_cli_deps())
+        elif req.mode == "full":
             code = run_full_vectors(deps=deps.to_cli_deps())
         else:
-            code = run_all(limit=limit, batch=batch, deps=deps.to_cli_deps())
+            code = run_all(limit=req.limit, batch=req.batch, deps=deps.to_cli_deps())
     return jsonify({"status": "done", "result": code, "log": lines})
 
 

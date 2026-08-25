@@ -20,9 +20,7 @@ logger: ModuleLogger = get_logger(__name__)
 def stats():
     deps = get_server_deps()
     with capture_log_output() as lines:
-        code = run_stats(
-            image_repo=deps.image_repo, comparison_repo=deps.comparison_repo
-        )
+        code = run_stats(graph=deps.graph)
     return jsonify({"status": "done", "result": code, "log": lines})
 
 
