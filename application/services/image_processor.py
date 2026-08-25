@@ -44,7 +44,7 @@ class PathOps:
     sync_metadata: Callable[..., bool]
     clear_folder_cache: Callable[[], None]
     prewarm_folder_cache: Callable[[Path], None]
-    deduplicate_scored: Callable[[Path | None, int], int]
+    deduplicate_scored: Callable[[Path | None], int]
     cleanup_orphans: Callable[[Path | None], int]
 
 
@@ -320,7 +320,7 @@ class ImageProcessor:
         self.reorganize_folder_structure()
 
         ranked_root: Path = self._path_ops.ranked_root()
-        self._path_ops.deduplicate_scored(root=ranked_root, limit=0)
+        self._path_ops.deduplicate_scored(root=ranked_root)
         self._path_ops.cleanup_orphans(root=ranked_root)
         self._graph.clear_all_comparisons()
         self._graph.clear_all_images()
