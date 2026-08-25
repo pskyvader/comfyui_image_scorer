@@ -81,7 +81,6 @@ def run_full_vectors(deps: CLIDeps) -> int:
         batch_sizer_factory=deps.batch_sizer_factory,
         maps_provider=deps.maps_provider,
         cache=deps.cache,
-        mediapipe=deps.mediapipe,
     )
     logger.info("Full vectors done: %s", result)
     return 0
