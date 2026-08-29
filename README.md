@@ -145,6 +145,7 @@ comfyui_image_scorer/
 - `training/` — HPO orchestration, calibration, parameter analysis
 - `analysis/` — Image/attribute analysis, MediaPipe integration
 - `graph/` — Crystal graph, chain management, proxy objects
+- `files/` — Filesystem ports only; concrete implementations live in `infrastructure/`
 - `vectors/` — Embedding, keypoint, position, person-map vectors
 - `loading/` — Loader **port interfaces** (`ports.py`); implementations live in `infrastructure/loading/` and `infrastructure/ml_models/`
 
@@ -234,7 +235,7 @@ python scorer.py build split-vectors --limit 100
 
 ## `infrastructure/` — Infrastructure Implementations
 **Depends on `core` + `domain` (implements domain ports).** Concrete adapters for external systems.
-- `persistence/` — SQLite repositories implementing `domain.database` ports
+- `persistence/` — SQLite repositories and concrete filesystem services implementing domain ports
 - `loading/` — Training data / maps loaders (implement the `domain.loading` ports)
 - `ml_models/` — Model loader, batch sizer, LightGBM model trainer
 - `external_services/` — MediaPipe model downloads
@@ -255,6 +256,20 @@ python scorer.py build split-vectors --limit 100
 - **Adapter wiring:** `infrastructure` is never imported by other layers — its singletons are constructed and injected at the three composition roots (`adapters/server/main.py`, `adapters/cli/deps.py`, `adapters/comfyui/`).
 - **CLI parity:** server endpoints delegate to the CLI command functions (`adapters.cli.commands.*`) — that same-layer import is the point of the architecture: the CLI is the single source of command behavior, endpoints just call it.
 
+### Graph and Database Access Boundary
+
+`CrystalGraph` is the single application-facing boundary for graph and database
+data. Callers use graph terminology and graph methods: nodes instead of images,
+links instead of comparisons, and proxy properties instead of repository rows.
+Endpoints, CLI commands, application services, and domain algorithms must not
+call database repositories directly.
+
+`CrystalGraph` may depend on domain repository ports and a domain filesystem
+port. Concrete SQLite repositories and the concrete `FileManager` remain in
+`infrastructure/` and are constructed only by composition roots. The graph
+facade owns graph state, proxy creation, history synchronization, and the
+mapping between repository records and graph objects.
+
 ### Dependency Violation Test
 
 An AST-based import scan is the gate. Parse every module in each layer, resolve
@@ -263,8 +278,7 @@ each import to its top-level layer, and assert it is in that layer's allowed set
 contract is:
 
 ```python
-# tests/test_architecture.py  (not on disk yet — future work; new test
-# files are permitted since the 2026-08-22 rule 5 amendment)
+# tests/test_architecture.py  (implemented architecture gate)
 import ast
 from pathlib import Path
 
@@ -292,16 +306,11 @@ def test_no_architectural_violations():
                     raise AssertionError(f"{path.relative_to(ROOT)}: {layer} imports {target}")
 ```
 
-**Current status:** `tests/` exists with `test_general.py` (the general
-suite — runs only on explicit user prompt), plus
-three colocated suites (`domain/vectors/tests/test_terms.py`,
-`domain/graph/tests/test_chain_manager.py`,
-`adapters/server/tests/test_compressed_image.py`) — 34 tests, all passing.
-The AST layer scan in `REORGANIZATION_PLAN.md` §4 remains the architecture
-gate until `test_architecture.py` is authored (permitted since the
-2026-08-22 rule 5 amendment). The revision closed the enumerated violations:
-the only `infrastructure` imports that remain are the 30 adapter-wiring
-statements in the three composition roots.
+**Current status:** `tests/` contains the general suite and colocated suites,
+including `tests/test_architecture.py`. The architecture test enforces both
+the layer dependency gate and the blocking database-access boundary. The
+general suite runs only on explicit user prompt. The only imports of
+`infrastructure` are composition-root wiring imports.
 
 Existing violations must be fixed by moving code across the boundary — never by
 relaxing the rule or deleting the check. The `core` row has an empty allowed
@@ -320,6 +329,10 @@ Nothing imports `infrastructure` except the composition roots listed above.
 | `output/` (rest) | SQLite DB, vector caches, generated maps, exported models | **Ephemeral** — safe to delete anytime | **Ignored** |
 
 **Golden rule:** If `rm -rf output/` requires zero manual steps to recover, it belongs in `output/`.
+
+The sole supported SQLite database filename is `cache.db`. Database backup,
+deletion, renaming, and rebuilding are manual operator actions. No startup
+path, command, test, or migration code performs those actions automatically.
 
 ---
 
@@ -343,7 +356,11 @@ Nothing imports `infrastructure` except the composition roots listed above.
 4. **Typing:** Full type hints on public APIs. `pyright` must pass in strict mode (`"typeCheckingMode": "strict"` in `pyrightconfig.json`). The stale `typings/` folder interferes with analysis — its cleanup is tracked in REORGANIZATION_PLAN.
 5. **No global mutable state** in `core`/`domain`/`application`. State lives in `adapters` or `infrastructure`.
 6. **Configuration** enters only via `core.configuration` — no `os.getenv` scattered in domain code.
-7. **No defaults:** `.get(..., default)` is highly discouraged and strictly forbidden for config objects; avoid default function arguments. When a parameter's default is ambiguous, state it explicitly at every call site.
+7. **No defaults:** default values are forbidden in configuration objects and
+   function arguments. Optional values are not part of this design. Every
+   required value must be supplied explicitly at each call site; remove
+   defaulted parameters rather than representing an omitted value with
+   `None`.
 8. **Verification order** after a change: `pytest` → `ruff` (ARG/F401) → `pyright` → AST layer scan (REORGANIZATION_PLAN §4) → node registration smoke check.
 9. **Never install the module itself:** no `setup.py`, no `pip install .`/`pip install -e .` — only its dependencies via `pip install -r requirements.txt`.
 10. **No unused arguments:** remove them from the signature and fix all callers. Framework callbacks that must keep a positional slot (Flask error handlers, monkey-patched stdlib hooks) keep the slot with an underscore-prefixed name (`_e`). Gate: `ruff check --select ARG --target-version py313 --exclude comfyui_image_scorer_old --exclude typings .` (REORGANIZATION_PLAN §4).

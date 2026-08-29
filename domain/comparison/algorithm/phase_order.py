@@ -155,6 +155,7 @@ def select_pair(
             if (node := cg.get_node(img["filename"])) is not None
         ]
     )
+
     seed_pool_set: set[str] = {node.filename for node in seed_pool}
 
     reserve_count = int(config["ranking"]["reserve_count"])

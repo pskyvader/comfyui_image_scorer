@@ -11,7 +11,7 @@ import numpy as np
 
 from ...core.observability.logger import get_logger
 from ...core.configuration.settings import config
-from ...domain.loading import BatchSizerFactory, ModelLoader
+from ...domain.loading import BatchSizerFactory, ModelLoader, BatchSizer
 from .helpers import l2_normalize_batch
 from ...core.io.serialization import load_json
 from ...core.filesystem.paths import vectors_size_file
@@ -53,7 +53,7 @@ class ImageVector:
         self.variable_input: bool = True
         self.model_input_size: sizeTuple | None = None
         self.model_loader = model_loader
-        self.batch_sizer = batch_sizer_factory(model_key)
+        self.batch_sizer: BatchSizer = batch_sizer_factory(model_key)
 
         self.vector_sizes, _ = load_json(vectors_size_file, expect=dict)
 

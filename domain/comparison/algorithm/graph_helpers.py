@@ -33,7 +33,11 @@ def pair_key(filename_a: str, filename_b: str) -> tuple[str, str]:
 
 def stable_seed_pool(images: list[NodeProxy]) -> list[NodeProxy]:
     seed_percentage = int(config["ranking"]["seed_percentage"])
-    seed_size = max(1, len(images) * seed_percentage // 100)
+    seed_target_comparisons = int(config["ranking"]["seed_target_comparisons"])
+    filtered_images: list[NodeProxy] = [
+        node for node in images if node.comparison_count >= seed_target_comparisons
+    ]
+    seed_size: int = max(1, len(images) * seed_percentage // 100, len(filtered_images))
     by_comps: list[NodeProxy] = sorted(
         images, key=lambda node: node.comparison_count, reverse=True
     )

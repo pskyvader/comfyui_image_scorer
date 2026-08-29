@@ -1,4 +1,5 @@
 """Application service orchestrating vector export and model scoring."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -18,13 +19,15 @@ from ...domain.training.calibration import (
     extract_score_calibration,
 )
 from ...domain.loading.ports import (
-    BatchSizer,
     ModelLoader,
     MapsProvider,
     TrainingLoader,
+    BatchSizerFactory,
 )
 from ...domain.ports.cache import CacheProvider
 from ...domain.ports.ml_providers import MediaPipePort
+
+
 from .vector_list import VectorList
 
 
@@ -34,7 +37,7 @@ class ScoringService:
     def __init__(
         self,
         model_loader: ModelLoader,
-        batch_sizer: BatchSizer,
+        batch_sizer: BatchSizerFactory,
         training_loader: TrainingLoader,
         model_trainer: Any,
         maps_provider: MapsProvider,
@@ -122,7 +125,6 @@ class ScoringService:
             batch_sizer_factory=self._batch_sizer,
             maps_provider=self._maps_provider,
             cache=self._cache,
-            mediapipe=self._mediapipe,
         )
         vector_list.create_vectors()
 

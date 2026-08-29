@@ -62,12 +62,24 @@ def phase_seed_coverage(
     ]
     ready_seed_pool_length: int = len(ready_seed_pool)
 
+    logger.debug(
+        f"phase_seed_coverage: all_images={all_images_length}, seed_size={seed_size}, "
+        f"seed_pool={len(seed_pool)}, ready={ready_seed_pool_length}, target={seed_target}, ",
+        start_timer=_start,
+    )
+
     if ready_seed_pool_length >= seed_size:
-        logger.debug(
+        logger.info(
             f"skipping phase 0: seed pool size {ready_seed_pool_length} >= {seed_size} ({seed_percentage}% of {all_images_length})",
             start_timer=_start,
         )
         return None
+
+    logger.info(
+        f"phase 0 active: {ready_seed_pool_length}/{seed_size} seeds ready (target={seed_target}), "
+        f"under_target={len([n for n in candidate_nodes if n.comparison_count < seed_target])}",
+        start_timer=_start,
+    )
 
     under_seed_target: list[NodeProxy] = [
         node for node in candidate_nodes if node.comparison_count < seed_target
@@ -85,6 +97,17 @@ def phase_seed_coverage(
             and pair_key(node_a.filename, node_b.filename) not in existing_pair_set
         ]
     )
+    # if result:
+    #     logger.debug(
+    #         f"phase_seed_coverage: returning pair {result[0].filename}({result[0].comparison_count}) vs {result[1].filename}({result[1].comparison_count})",
+    #         start_timer=_start,
+    #     )
+    # else:
+    #     logger.debug(
+    #         f"phase_seed_coverage: no pair found, under_seed_target={len(under_seed_target)}, candidate_nodes={len(candidate_nodes)}",
+    #         start_timer=_start,
+    #     )
+    # return result
 
 
 def phase_anchor_insert(
@@ -98,36 +121,58 @@ def phase_anchor_insert(
     reserve_count: int = config["ranking"]["reserve_count"]
 
     candidates: list[NodeProxy] = [
-        node for node in candidate_images if node.filename not in seed_pool_set
+        node
+        for node in candidate_images
+        if node.filename not in seed_pool_set
+        and node.comparison_count < insertion_target
     ]
-    pool_nodes: list[NodeProxy] = []
-    for threshold in range(insertion_target + 1):
-        pool_nodes = [node for node in candidates if node.comparison_count <= threshold]
-        if len(pool_nodes) >= max(threshold + 2, reserve_count):
-            break
 
-    if len(pool_nodes) < reserve_count:
+    if len(candidates) < reserve_count:
         logger.warning(
-            f"pool too small ({len(pool_nodes)} < {reserve_count})",
+            f"pool too small ({len(candidates)} < {reserve_count})",
             start_timer=_start,
         )
         return None
-    pool_nodes.sort(key=lambda node: (node.comparison_count, node.trueskill_score))
-    source_node: NodeProxy = pool_nodes[0]
+    candidates.sort(key=lambda node: (node.comparison_count, node.trueskill_score))
+    node_a: NodeProxy = candidates[0]
 
-    remaining: list[NodeProxy] = [
-        node for node in pool_nodes[1:] if node.filename != source_node.filename
+    pool_nodes: list[NodeProxy] = [
+        node for node in candidate_images if node.filename in seed_pool_set
     ]
-    remaining.sort(key=lambda opp: abs(opp.mu_skill - source_node.mu_skill))
+
+    # for threshold in range(insertion_target + 1):
+    #     pool_nodes = [node for node in candidates if node.comparison_count <= threshold]
+    #     if len(pool_nodes) >= max(threshold + 2, reserve_count):
+    #         break
+
+    pool_nodes.sort(key=lambda node: node.comparison_count)
+
+    # remaining: list[NodeProxy] = [
+    #     node for node in pool_nodes[1:] if node.filename != node_a.filename
+    # ]
+    # remaining.sort(key=lambda opp: abs(opp.mu_skill - node_a.mu_skill))
 
     seen_opponents = 0
-    for opponent in remaining:
-        if pair_key(source_node.filename, opponent.filename) in existing_pair_set:
-            continue
-        seen_opponents += 1
-        if cg.are_in_same_path(source_node.filename, opponent.filename):
-            continue
-        return source_node, opponent
+    # for opponent in pool_nodes:
+    #     if pair_key(node_a.filename, opponent.filename) in existing_pair_set:
+    #         continue
+    #     seen_opponents += 1
+    #     if cg.are_in_same_path(node_a.filename, opponent.filename):
+    #         continue
+    #     return node_a, opponent
+    nodes: list[NodeProxy] = [
+        node
+        for node in pool_nodes
+        if pair_key(node_a.filename, node.filename) not in existing_pair_set
+        and cg.are_in_same_path(node_a.filename, node.filename)
+    ]
+
+    pair_list: list[tuple[NodeProxy, NodeProxy]] = [
+        (node_a, nodes[i + 1]) for i in range(len(nodes) - 1)
+    ]
+    result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(pair_list)
+    if result:
+        return result
     logger.debug(f"no pair found out of {seen_opponents} opponents")
     return None
 
@@ -235,6 +280,7 @@ def phase_single_win_loss(
     _start: float = time.perf_counter()
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
     reserve_count: int = config["ranking"]["reserve_count"]
+    minimum_count = 999
     for single_win, filtered_only in (
         (True, True),
         (False, True),
@@ -269,16 +315,21 @@ def phase_single_win_loss(
             key=lambda node: (node.comparison_count, node.mu_skill)
         )  # , reverse=reverse)
         node_a: NodeProxy = nodes[0]
-        if filtered_only:
+
+        if single_win is True:
+            minimum_count = node_a.comparison_count
+
+        if filtered_only and node_a.comparison_count >= minimum_count:
             filtered_nodes: list[NodeProxy] = [
                 node
                 for node in nodes
-                if node.comparison_count >= node_a.comparison_count + 1
+                if node.comparison_count <= node_a.comparison_count
             ]
             if len(filtered_nodes) < reserve_count:
                 # logger.info(
                 #     f"skipping single win={single_win}, filtered_only={filtered_only}: only {len(filtered_nodes)} candidates with comparison_count={node_a.comparison_count}"
                 # )
+
                 continue
             nodes = filtered_nodes
 

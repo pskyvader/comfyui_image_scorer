@@ -1,18 +1,17 @@
-# Reorganization Plan — `comfyui_image_scorer` (v6)
+# Reorganization Plan — `comfyui_image_scorer` (v7)
 
-**Status (2026-08-24):** v4/v5 complete (§3.1–§3.10); §3.11 v5 remainder
-complete; v6 Phase A mostly complete (#47/#49/#50/#51/#53/#54 done,
-#48/#52 partial). This document supersedes all previous revisions. Stable
-external references: `§0` rules, `§1` source of truth, `§1.1` parity
+**Status (2026-08-29):** v4/v5 complete (§3.1–§3.10); §3.11 v5 remainder
+complete; v6 Phase A **complete** (#47/#49/#50/#51/#53/#54 done, #48/#52
+partial → remaining items tracked in Phase B); v6 Phase B (docstrings) in
+progress; v6 Phase C (reliability) #56/#58 complete, #57 in progress; v6
+Phase D (tests) started; **v7 Phase E (CrystalGraph Proxy Facade Migration) planned — tasks #60–#71**. This document supersedes all previous revisions.
+Stable external references: `§0` rules, `§1` source of truth, `§1.1` parity
 contract, `§3.10 #37` taxonomy, `§4` verification, `§5` out of scope.
 
-Verified gates at consolidation time: pytest 34 passed; ruff ARG/F401: 1;
-pyright strict 604. Fresh baselines after the 2026-08-24 session: pytest 45
-passed (+2 realdata deselected by default); ruff ARG/F401 **0**; pyright
-strict **455** (584 recounted at kickoff, then reduced by the #53 typings
-deletion; zero new errors per change throughout); layer scan 0; DB-proxy
-scan blocking with 0 violations; route map unchanged; `AestheticScore`
-registers.
+Verified gates (2026-08-27): pytest 45 passed (+2 realdata deselected by
+default); ruff ARG/F401 **0**; pyright strict **455** baseline (zero new
+errors per change); layer scan 0; DB-proxy scan blocking with 0 violations;
+route map unchanged; `AestheticScore` registers.
 
 **Decision log (user-authorized):**
 
@@ -25,6 +24,7 @@ registers.
 | 2026-08-24 | #47 executed as the full proxy migration (user-selected over mechanical flip); destructive `realdata` tests blocked by default (`addopts -m 'not realdata'`; opt back in with `pytest -m realdata`) |
 | 2026-08-24 | #58 spike decided: option B (read-only validated config + explicit save API); implementation pending |
 | 2026-08-24 | #49/#50/#54 executed as one batch; #53 deleted all of `typings/` — fresh pyright strict baseline 455 |
+| 2026-08-29 | Documentation-only v7 decisions: `cache.db` is the sole database name; database reset/rebuild is manual; all database access terminates at `CrystalGraph`; filesystem operations use a domain port with an infrastructure implementation; no optional values or default arguments |
 
 ---
 
@@ -47,8 +47,10 @@ registers.
    (`adapters/server/main.py`, `adapters/cli/deps.py`,
    `adapters/comfyui/services.py`). Endpoints receive everything through
    `ServerDeps`.
-8. No defaults: config objects and function args avoid default values;
-   ambiguous values are stated explicitly at every call site.
+8. No defaults: configuration objects and function arguments have no default
+   values. Optional values are not part of this design. Every required value
+   is supplied explicitly at every call site; omitted values are not represented
+   with `None` or defaulted parameters.
 9. No internet requests unless explicitly user-initiated: the only download
    path is `files download models` and its matching server button.
 10. Compatibility rule is suspended where it conflicts with user decisions
@@ -62,6 +64,12 @@ registers.
     `adapters/cli/commands/*` (same layer).
 14. Tests and stubs touch temp directories only (`tmp_path`) — never real
     `output/`, ranked roots, or `config/`.
+15. `CrystalGraph` is the only application-facing database boundary. Callers
+    use graph terminology and graph methods (`nodes`, `links`, and proxies),
+    never repositories or database rows directly.
+16. The sole supported database filename is `cache.db`. Deleting, backing up,
+    renaming, or rebuilding it is a manual operator action. No task, startup
+    path, test, or command may delete or rebuild it automatically.
 
 ---
 
@@ -71,7 +79,7 @@ registers.
 |---|---|---|
 | `server` | `server` | runs this Flask server |
 | `training` | `train-model` | load data → train top1 → save model + plots |
-| `training` | `hpo` | `HpoRunner.run` with cycle options, None → config defaults |
+| `training` | `hpo` | `HpoRunner.run` with all cycle options supplied explicitly |
 | `build` | `split-vectors` | `build_split_files` loop + `remove_derived_caches` |
 | `build` | `full-vectors` | `build_full_files` from existing splits |
 | `build` | `scores` | `run_rebuild_scores_only(graph)` |
@@ -84,7 +92,7 @@ registers.
 | `files` | `remove vector-maps` | remove maps dir + `split/map` |
 | `files` | `remove downloaded-models` | remove mediapipe dir |
 | `files` | `download models` | offline toggle around both downloads (user-initiated) |
-| `files` | `cleanup` | `deduplicate_scored(root=None, limit)` + `cleanup_orphans(root=None)` |
+| `files` | `cleanup` | `deduplicate_scored(root, limit)` + `cleanup_orphans(root)` with explicit roots |
 | `analyze` | `parameters` | `run_parameter_analysis()` |
 | `analyze` | `matrix` | `run_matrix_analysis()` |
 | `analyze` | `stats` | `run_stats(graph)` |
@@ -132,83 +140,44 @@ data pipeline).
 
 ## 3. Tasks
 
-### 3.1–3.10 — COMPLETE (2026-08-17/18)
+### 3.1–3.11 — COMPLETE (2026-08-17/18/23)
 
-Task system deleted; synchronous one-call command endpoints; rename cascade;
-`endpoints/files.py`; rules audit (#37 taxonomy normative; prints→logger;
-module-scope imports; arg-default removals; constant tables immutable).
+§3.1–3.10 (v4/v5): task system deleted; synchronous endpoints; rename cascade;
+rules audit; `endpoints/files.py`.
 
-### 3.11 Open tasks — v5 remainder — COMPLETE (2026-08-23)
+§3.11 (v5 remainder): #42 proxy entry enforcement; #43 download-models offline;
+#44 delete-vectors confirmation; #45 prediction accuracy; #46 maps3 visualization.
 
-42. ✅ Proxy-entry enforcement: runtime `_check_proxy_entry()` in
-    `infrastructure/persistence/database.py` with `os.path.normcase`
-    whitelist (`domain/graph/**` + `infrastructure/persistence/**`); static
-    AST DB-proxy scan baseline 0. Since the #47 flip the runtime check
-    raises RuntimeError and the scan is blocking (encoded in
-    `tests/test_architecture.py::test_no_db_access_outside_proxies`).
-43. ✅ `/download-models` offline handling: hub computes the offline flag
-    once at import; transformers keeps no cached value. `set_hub_offline`
-    lives in `infrastructure/ml_models/model_loader.py`, injected through
-    both dep containers; endpoint + CLI bodies use the try/finally row.
-44. ✅ Delete-vectors confirmation text states maps/split removal and
-    re-analysis recovery.
-45. ✅ Prediction accuracy tracking: session-only counters in
-    `compare_view.js`, fed per successful submission; shown in the debug
-    panel. No backend changes.
-46. ✅ maps3 score-ranked visualization: new `adapters/maps3/` with an
-    adapted ChainMapUI-style class; reuses `/api/maps/graph-data`; wired
-    into SECTION_FRONTENDS, index nav/scripts, router.
+### 3.12 v6 Phase A — Structural corrections — **COMPLETE (6/8 tasks)**
 
-### 3.12 v6 Phase A — Structural corrections
+| Task | Description | Status |
+|---|---|---|
+| 47 | Route DB access through graph proxies | ✅ 2026-08-24 |
+| 49 | Remove global mutable state (`state.py` deleted) | ✅ 2026-08-24 |
+| 50 | Unified cache architecture | ✅ 2026-08-24 |
+| 51 | Semantic misplacements | ✅ 2026-08-24 |
+| 53 | typings/ cleanup | ✅ 2026-08-24 |
+| 54 | pair_active.py ARG001 resolved | ✅ 2026-08-24 |
 
-47. ✅ Route DB access through the graph proxies (2026-08-24, full proxy
-    migration): CrystalGraph repository facade; processor/recorder/domain
-    selectors/endpoints/CLI rewired off raw repos; repos constructed only at
-    roots owning a graph. Flip executed: direct access raises RuntimeError;
-    static scan blocking.
-48. **PARTIAL (2026-08-24).** MediaPipe model-path construction moved into
+**Remaining from Phase A (carried forward):**
+
+48. **PARTIAL.** MediaPipe model-path construction moved into
     `infrastructure/ml_models/mediapipe_provider.py` behind `MediaPipePort`.
-    Remaining named items: inject an infrastructure sidecar writer for
-    `domain/analysis/image_analysis.py`; `_load_map_slots` still reads the
-    map JSON directly (semantically equal to MapsProvider.get_all_categories);
-    split-file path joins remain in vector_list/prepare_data; deep path and
-    shutil work remains in image_processor (partially behind PathOps).
-49. ✅ Remove remaining global mutable state (2026-08-24): state.py deleted
-    (images snapshot via CrystalGraph over injected cache); phase_order/
-    pair_active selection memory moved to CrystalGraph accessors;
-    hyperparameter_optimizer guard became the single-flight HpoRunner built
-    at the roots.
-50. ✅ Unified cache architecture (2026-08-24): CacheProvider port in
-    `domain/ports/cache.py`; TTL + byte-bounded InMemoryCache in
-    `infrastructure/cache/memory_cache.py`; instantiated at all three roots;
-    covers images snapshot, analysis processed-cache, split-data cache, WebP
-    image cache, folder-listdir cache.
-51. ✅ Semantic misplacements (2026-08-24): export_image_batch →
-    `infrastructure/ml_models/image_export.py` injected into ScoringService;
-    JSON cleaning shed from image_processor into pure
-    `core.io.serialization.clean_json_metadata`/`extract_prompt_tags`;
-    parameter_analysis → application/analysis; plot.py →
-    infrastructure/ml_models injected via CLIDeps.plot_manager.
-52. **PARTIAL (2026-08-24).** domain/ports/ml_providers.py created with
-    MediaPipePort; all mediapipe usage now lives in
-    infrastructure/ml_models/mediapipe_provider.py; domain MediaPipeAnalyzer
-    is a thin delegate threaded from the roots through CLIDeps/ServerDeps →
-    build_split_files/ScoringService → ImageAnalysis. Remaining ML imports
-    in domain: image_vector.py (torch/torchvision), attribute_analysis.py
-    (torch softmax/no_grad around loader-provided HF models),
-    data_transformer.py (lightgbm/sklearn). Design for the remainder: add a
-    vision-encoding provider (owning tensor prep + the #37c OOM loop) and a
-    feature-engine provider (owning LGBM ranking + poly interactions);
-    thread through the dep containers exactly like mediapipe.
+    Remaining: inject infrastructure sidecar writer for
+    `domain/analysis/image_analysis.py`; `_load_map_slots` reads map JSON
+    directly (semantically equal to MapsProvider.get_all_categories); split-file
+    path joins remain in vector_list/prepare_data; deep path and shutil work
+    remains in image_processor (partially behind PathOps).
 
-53. ✅ typings/ cleanup (2026-08-24): folder fully deleted — shared/**
-    targeted packages that no longer exist and the torch/matplotlib/scipy/
-    sklearn shadows actively degraded analysis (~129 spurious strict errors;
-    baseline 584 → 455). Fresh minimal stubs (mediapipe,
-    sentence_transformers) deferred to #57 where actually needed.
-54. ✅ pair_active.py ARG001 resolved (2026-08-24): phase_single_win_loss
-    keeps its positional dispatch slot as _cg. Ruff ARG/F401 gate now at
-    zero findings.
+52. **PARTIAL.** `domain/ports/ml_providers.py` created with MediaPipePort; all
+    mediapipe usage in `infrastructure/ml_models/mediapipe_provider.py`; domain
+    MediaPipeAnalyzer is a thin delegate threaded from roots through
+    CLIDeps/ServerDeps → build_split_files/ScoringService → ImageAnalysis.
+    Remaining ML imports in domain: image_vector.py (torch/torchvision),
+    attribute_analysis.py (torch softmax/no_grad around loader-provided HF
+    models), data_transformer.py (lightgbm/sklearn). Design: add vision-encoding
+    provider (tensor prep + #37c OOM loop) and feature-engine provider (LGBM
+    ranking + poly interactions), threaded through dep containers like MediaPipePort.
 
 Execution note: sub-batches with the full §4 gate run after each batch.
 
@@ -226,8 +195,8 @@ Execution note: sub-batches with the full §4 gate run after each batch.
 56. ✅ **COMPLETE (2026-08-24).** pydantic added to pyproject.toml;
     requirements.txt regenerated (`pydantic==2.13.4`). Request models added at
     the adapter boundary: `FilesCleanupRequest`, `HpoRequest` (fields
-    `int | None = None` to preserve the CLI's None-means-config-default
-    contract), `PrepareRequest` (mode pattern replaces the manual whitelist),
+    required integer cycle options supplied explicitly at the call site),
+    `PrepareRequest` (mode pattern replaces the manual whitelist),
     `SkipRequest`, `SubmitComparisonRequest`. All routes tolerate absent JSON
     bodies via `get_json(silent=True) or {}` where the original did. The old
     inline `ComparisonRecorder` import became a module-scope import (rule 2);
@@ -236,12 +205,10 @@ Execution note: sub-batches with the full §4 gate run after each batch.
     server/main.py maps invalid payloads to 400 with details.
 57. **IN PROGRESS (baseline work done).** Pyright strict: recounted 584 at
     kickoff, then reduced to **455** by the #53 typings deletion — that is
-    the standing baseline for "zero new". Full elimination remains. Note
-    (2026-08-24): a full run after #56 reports 466; all errors in the five
-    touched files sit in pre-existing constructs (untyped `register_*` app
-    params, `describe_pair` phase_index, `serve_image_alias` return), so the
-    endpoint edits added zero new errors — recount against a clean checkout
-    during the next #57 pass to explain the drift.
+    the standing documented baseline for "zero new". Full elimination remains.
+    A later run reported 466, but that count is treated as historical drift;
+    #57 must replace it with one clean-checkout baseline and exact command
+    documentation before the number changes.
 58. ✅ **COMPLETE (2026-08-24).** Option B implemented fully: `settings.py`
     rewritten — frozen pydantic section models (`PrepareSection`,
     `RankingSection`, `TrainingSection`, `VectorSection`) validating scalar
@@ -311,9 +278,9 @@ Run after every change, in order:
 
 ---
 
-## 7. Next-session handoff (2026-08-24, agreed with user)
+## 7. Next-session handoff (2026-08-27, agreed with user)
 
-Remaining order (user-selected "structure first"): **#57 → #48/#52 → #55 bulk → #59**.
+Remaining order (user-selected "structure first"): **#57 → #48/#52 → #55 bulk → #59 → #60–#71 (Phase E)**.
 
 Standing decisions from the 2026-08-24 review:
 - #55 scope: docstrings on **everything public + private** (~780 items); tests skipped.
@@ -329,9 +296,85 @@ Standing decisions from the 2026-08-24 review:
 - Working tree was left green: 36 colocated tests, ruff 0, layer/DB-proxy
   scans 0, routes unchanged, node registers. Nothing committed.
 
+**Phase E execution order (user-confirmed):**
+1. **#60** — Remove `transitive_depth` and `weight` completely (execute first)
+2. **#61 + #62** — `LinkProxy` + `ChainManager` history (parallel)
+3. **#63** — filesystem port and infrastructure `FileManager`
+4. **#64 + #65** — CrystalGraph read/write API migration
+5. **#66** — `FileManager` integration
+6. **#67–#70** — Caller updates per layer (endpoints → services → domain → CLI)
+7. **#71** — Tests & verification
+
 ---
 
-## Appendix A — Execution history (condensed)
+### 3.16 v7 Phase E — CrystalGraph Proxy Facade Migration
+
+This phase transforms `CrystalGraph` into the single authoritative graph and
+database facade:
+- **Reads** → Internal graph structures and graph-owned history after an explicit load
+- **Writes** → Graph state and persistence remain synchronized with a defined failure contract
+- **Returns** → Proxy objects for graph entities (`NodeProxy`, `LinkProxy`, `ChainProxy`, `ComponentProxy`)
+- **File control** → Delegated through a domain filesystem port to infrastructure `FileManager`
+- **Encapsulation** → Proxy construction is internal to the graph subsystem; callers receive proxies from `CrystalGraph`
+- **Naming** → Consistent graph API (`get_all_nodes`, `get_all_links`, `get_node`, `add_link`, etc.)
+- **Database boundary** → Only `CrystalGraph` and its injected ports access repositories; all other callers use graph methods
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 60 | **Remove `transitive_depth` and `weight` completely** — Delete both names from configuration, SQLite schema and SQL, repository ports and implementations, graph APIs, domain algorithms, metadata serialization, image replay, test fakes, and every active call site. Do not migrate or reinterpret old values. The sole supported database is `cache.db`; any backup, deletion, renaming, or rebuild is performed manually by the operator before or after this work. No code, startup path, test, or command may delete or rebuild the database automatically. **Structural note:** Each layer removes only the contract it owns; no layer may bypass `CrystalGraph` to access persistence. | ⏳ |
+| 61 | **Add `LinkProxy` and define internal proxy ownership** — Create `domain/graph/link_proxy.py` with `LinkProxy` wrapping internal `_ComparisonRecord(id, winner, loser, timestamp)`. Keep proxy construction internal to the graph subsystem. Callers receive proxies from `CrystalGraph`; proxy navigation may use a private graph-owned factory, but adapters, services, algorithms, and tests do not construct proxies directly. Export the public proxy types from `domain/graph/__init__.py`. Add tests for navigation and construction boundaries. | ⏳ |
+| 62 | **Extend `ChainManager` with comparison history** — Add graph-owned comparison history populated by `build()` and updated by `apply_comparison()`. `build()` replaces history rather than appending; clear operations remove it; repeated rebuilds do not duplicate entries; IDs and timestamps survive repository loading. Define the write failure behavior so in-memory history cannot silently diverge from persisted links. | ⏳ |
+| 63 | **Create the filesystem port** — Add a narrow `domain/files/ports.py` protocol containing only the file operations required by `CrystalGraph`. Do not put filesystem implementations, directory scans, JSON persistence, config globals, or cache state in `domain/`. Keep the concrete `FileManager` in `infrastructure/persistence/` or `infrastructure/files/`. Its constructor receives explicit required paths and configuration values from the composition root. | ⏳ |
+| 64 | **Migrate CrystalGraph read methods** — Implement the proxy-centric API: `get_all_nodes()` → `list[NodeProxy]`, `get_node(filename)` → `NodeProxy|None`, `get_node_count()` → `int`, `get_all_links()` → `list[LinkProxy]`, `get_link_count()` → `int`, `get_winner_only_nodes()` → `list[NodeProxy]`, `get_loser_only_nodes()` → `list[NodeProxy]`, `link_exists_between(a,b)` → `bool`, `get_all_chains()` → `list[ChainProxy]`, and `get_all_components()` → `list[ComponentProxy]`. Use an explicit loaded/unloaded state; never trigger loading merely because the graph has zero nodes. Define whether stale persistence is rebuilt and keep that behavior separate from the valid empty-graph state. | ⏳ |
+| 65 | **Migrate CrystalGraph write methods** — Implement node/link writes with no default arguments and no optional sentinel values. Define persistence ordering and failure behavior before changing code. History, graph structures, and repository state must remain consistent after successful writes, clear operations, cleanup, and repository failures. `CrystalGraph` accesses repositories only through injected domain ports; callers do not. | ⏳ |
+| 66 | **Integrate the filesystem port into `CrystalGraph`** — Inject the domain filesystem port into `CrystalGraph` and delegate file methods through that port. Construct the concrete infrastructure `FileManager` only in composition roots. Update `ImageProcessor` and other callers to use graph file methods where graph ownership is intended. Remove `PathOps` only after all callers have migrated and no direct filesystem boundary is lost. | ⏳ |
+| 67 | **Update callers — Endpoints layer** — Migrate every endpoint, not only the currently known files. Use the node/link/proxy API and convert proxies to unchanged JSON response shapes at the endpoint/application boundary. Endpoints never access repositories or database rows directly. | ⏳ |
+| 68 | **Update callers — Application layer** — Migrate `image_processor.py`, `graph_service.py`, analysis services, data transformation, and every other application caller. Replace direct `PathOps` use with the injected graph filesystem port where appropriate. Keep response shaping and UI/API concepts out of domain objects. | ⏳ |
+| 69 | **Update callers — Domain logic layer** — Update every domain Protocol and algorithm to the node/link/proxy vocabulary. Domain algorithms depend on narrow Protocols and do not import application or infrastructure. They use graph methods rather than repositories or database rows. | ⏳ |
+| 70 | **Update callers — CLI/build layer and test fakes** — Migrate database, vector, preparation, statistics, command, and test-double callers. CLI commands use `CrystalGraph`; they do not open SQLite or call persistence implementations directly. | ⏳ |
+| 71 | **Tests and verification** — Add colocated tests for proxy navigation and construction ownership, explicit graph lifecycle including a valid empty graph, history replacement and clearing, write ordering and failure behavior, filesystem ports and infrastructure implementation, `cache.db` rebuild assumptions, and unchanged endpoint JSON shapes. Search the full package for old image/comparison API names, direct repository access, `weight`, and `transitive_depth`. Run pytest, ruff ARG/F401, pyright against one documented baseline, the AST layer scan, the DB-proxy scan, route parity, and node registration. Update this plan’s status only after all gates pass. | ⏳ |
+
+---
+
+## Appendix B — Verification Baselines (2026-08-27)
+
+### pyright strict: 455 errors (documented baseline)
+
+All pre-existing, zero new errors allowed per change. Breakdown by category:
+
+| Category | Files | Notes |
+|----------|-------|-------|
+| `mediapipe_provider.py` | 16 | Missing stubs for `mediapipe` — pre-sanctioned per #53 |
+| `model_loader.py` | 58 | Missing stubs for `huggingface_hub`, `timm`, `tensorflow` — pre-sanctioned per #53 |
+| `plot.py` | 64 | Missing stubs for `scipy`, `matplotlib`, `sklearn` — pre-sanctioned |
+| `model_trainer.py` | 52 | Missing stubs for `lightgbm`, `sklearn` — pre-sanctioned |
+| `pair_data.py` | 1 | Minor dict type annotation |
+| `path_handler.py` | 1 | `old_history: Any` |
+| `test_architecture.py` | 8 | Test helper type annotations |
+| `test_general.py` | 12 | **Syntax errors** (see below) — general suite runs only on explicit prompt |
+
+**Action:** No fixes needed for Phase E tasks — these are pre-existing baseline errors. Only fix new errors introduced by our changes.
+
+### ruff ARG/F401: 4 errors (all in `test_general.py`)
+
+Syntax errors in general test suite (only runs on explicit prompt):
+- Line 639: Unexpected indentation
+- Line 641: Unindent mismatch
+- Line 642: Unexpected indentation
+- Line 659: Expected statement (broken class definition)
+
+**Action:** Fix when running general suite (§3.15 #59), not during Phase E.
+
+### Architecture tests: 2/2 passing
+
+- `test_no_layer_violations` ✅
+- `test_no_db_access_outside_proxies` ✅
+
+### Route map parity: Verified
+
+No `/task` routes; blueprints match §1.1 + §2.
+
+### Node registration: `AestheticScore` registers ✅
 
 - 2026-08-17 (v4): task system deleted; synchronous log-captured endpoints;
   rename cascade; ServerDeps superset; matplotlib Agg; dead routes removed.
@@ -347,3 +390,5 @@ Standing decisions from the 2026-08-24 review:
   tests/test_architecture.py authored; realdata tests blocked by default
   after an accidental general-suite run hit the known destructive path
   (user regenerates output data manually via build all → train-model).
+- 2026-08-27 session: Document reorganization — completed tasks consolidated,
+  status updated, remaining work clarified. No code changes.

@@ -576,3 +576,115 @@ def test_real_data_pipeline():
             raise AssertionError(f"{e}\n--- server log tail ---\n{_log_tail(log_path)}") from e
     finally:
         _stop_server(proc)
+
+
+# ── AestheticScoreNode tests ─────────────────────────────────────────────
+# These tests live in the general suite (Tier 2 / realdata-blocked by default)
+# per plan §0.5. They verify the AestheticScoreNode's wiring and delegation
+# to ScoringService without requiring a live server or real models.
+# Import path follows the convention at the top of this file:
+#   sys.path.insert(0, str(MODULE_ROOT.parent))
+#   from comfyui_image_scorer.adapters.comfyui.nodes.aesthetic_score.node import AestheticScoreNode
+
+import torch
+from unittest.mock import patch, MagicMock, call
+from comfyui_image_scorer.adapters.comfyui.nodes.aesthetic_score.node import AestheticScoreNode
+
+
+def _mock_score_return():
+    """Return value for ScoringService.score() matching RETURN_TYPES."""
+    return (
+        torch.zeros(1, 1, 512, 512),   # selected images (IMAGE)
+        torch.zeros(1, 1, 512, 512),   # discarded images (IMAGE)
+        True,                          # available
+        [0.7],                         # scores (LIST)
+    )
+
+
+@pytest.mark.node
+class TestAestheticScoreNodeDelegation:
+    """Verify the node properly forwards all arguments to ScoringService.score()."""
+
+    def _make_mock(self):
+        mock = MagicMock()
+        mock.score.return_value = _mock_score_return()
+        return mock
+
+    def test_all_kwargs_forwarded_to_scoring_service(self):
+        """Ensure calculate_score passes every INPUT_TYPE kwarg to score()."""
+        node = AestheticScoreNode()
+        with patch.object(node, "_scoring_service", self._make_mock()) as mock:
+            result = node.calculate_score(
+                image=torch.zeros(1, 512, 512, 3),
+                threshold=0.5,
+                positive="test prompt",
+                negative="",
+                steps=20,
+                cfg=7.0,
+                sampler="euler",
+                scheduler="normal",
+                model_name="test-model",
+                lora_name="",
+                lora_strength=0.0,
+            )
+            # Verify 4-tuple return matching RETURN_TYPES
+            assert len(result) == 4, f"Expected 4-tuple, got {len(result)} items"
+            selected_img, discarded_img, available, scores = result
+            assert available is True
+            assert isinstance(scores, list) and len(scores) == 1
+
+            # Verify every kwarg was forwarded — use call_args to avoid
+            # tensor-comparison pitfalls in assert_called_once_with
+    mock.score.assert_called_once()
+                args, kwargs = mock.score.call_args
+                assert kwargs["image"] == torch.zeros(1, 512, 512, 3)
+            assert kwargs["threshold"] == 0.5
+            assert kwargs["positive"] == "test prompt"
+            assert kwargs["negative"] == ""
+            assert kwargs["steps"] == 20
+            assert kwargs["cfg"] == 7.0
+            assert kwargs["sampler"] == "euler"
+            assert kwargs["scheduler"] == "normal"
+            assert kwargs["model_name"] == "test-model"
+            assert kwargs["lora_name"] == ""
+            assert kwargs["lora_strength"] == 0.0
+            # NOTE: min_images and max_images have defaults in INPUT_TYPES
+            # but the node passes them explicitly; check if present
+            if "min_images" in kwargs:
+                assert kwargs["min_images"] == 1
+            if "max_images" in kwargs:
+                assert kwargs["max_images"] == 10
+
+
+@pytest.mark.node
+class TestAestheticScoreNodeReturnTypes:
+    """Verify the node returns a 4-tuple matching RETURN_TYPES."""
+
+    def test_returns_four_tuple(self):
+        """RETURN_TYPES = (IMAGE, IMAGE, BOOLEAN, LIST)."""
+        node = AestheticScoreNode()
+        with patch.object(node, "_scoring_service", MagicMock()) as mock:
+            mock.score.return_value = _mock_score_return()
+            result = node.calculate_score(
+                image=torch.zeros(1, 512, 512, 3),
+                threshold=0.5,
+                positive="test prompt",
+                negative="",
+                steps=20,
+                cfg=7.0,
+                sampler="euler",
+                scheduler="normal",
+                model_name="test-model",
+                lora_name="",
+                lora_strength=0.0,
+            )
+            assert len(result) == 4, (
+                f"Expected 4-tuple matching RETURN_TYPES, got {len(result)} items"
+            )
+            selected_img, discarded_img, available, scores = result
+            # Types check (not deep value check — tensor comparison is fragile)
+            assert available is True
+            assert isinstance(scores, list)
+            # Verify selected/discarded are tensors with correct ndim
+            assert selected_img.ndim == 4  # (1,1,512,512) from mock
+            assert discarded_img.ndim == 4
