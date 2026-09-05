@@ -1,4 +1,8 @@
-"""Repository interface ports for domain isolation."""
+"""Repository interface ports for domain isolation.
+
+Moved from ``domain/database/ports/repository_ports.py``. All protocols use
+concrete return types — no ``Any``. Callers should import from this module.
+"""
 
 from __future__ import annotations
 
@@ -6,14 +10,11 @@ from typing import Protocol
 
 
 class ImageRepository(Protocol):
-    def find_node(self, filename: str) -> dict[str, object] | None:
-        ...
+    def find_node(self, filename: str) -> dict[str, object] | None: ...
 
-    def list_nodes(self) -> list[dict[str, object]]:
-        ...
+    def list_nodes(self) -> list[dict[str, object]]: ...
 
-    def get_image_count(self) -> int:
-        ...
+    def get_image_count(self) -> int: ...
 
     def add_image(
         self,
@@ -40,8 +41,7 @@ class ImageRepository(Protocol):
     def update_image_tags(self, filename: str, prompt_tags: str) -> bool:
         ...
 
-    def clear_all_images(self) -> int:
-        ...
+    def clear_all_images(self) -> int: ...
 
     def reset_all_image_ratings(self, score: float) -> bool:
         ...

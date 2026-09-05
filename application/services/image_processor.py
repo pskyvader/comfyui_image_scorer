@@ -29,7 +29,7 @@ from ...domain.analysis.trueskill import (
     public_score_from_rating,
     replay_ratings,
 )
-from ...domain.files.ports import FilePort
+from ...domain.ports.files import FilePort
 from .graph_service import CrystalGraph
 
 logger: ModuleLogger = get_logger(__name__)

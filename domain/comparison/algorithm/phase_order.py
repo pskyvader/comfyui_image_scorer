@@ -22,7 +22,9 @@ from .pair_active import (
     phase_uncertainty_refine,
     phase_fallback,
 )
-from .graph_helpers import pair_key, stable_seed_pool, CrystalGraph
+from ....domain.ports.graph import CrystalGraphPort
+
+from .graph_helpers import pair_key, stable_seed_pool
 from ...graph.node_proxy import NodeProxy
 
 logger: ModuleLogger = get_logger(__name__)
@@ -114,7 +116,7 @@ def get_phases() -> list[dict[str, object]]:
 def select_pair(
     all_images: list[dict[str, object]],
     candidate_images: list[dict[str, object]],
-    cg: CrystalGraph,
+    cg: CrystalGraphPort,
 ) -> tuple[tuple[str, str] | None, int | None]:
     _start = time.perf_counter()
 

@@ -1,4 +1,3 @@
-from typing import Any
 from .helpers import get_value_from_entry
 
 
@@ -10,7 +9,7 @@ class IntVector:
         self.vector_list: dict[str, list[int]] = {}
 
     def parse_value_list(
-        self, entries: dict[str, dict[str, Any]], alias: list[str] | None
+        self, entries: dict[str, dict[str, object]], alias: list[str] | None
     ) -> dict[str, int]:
         for id, entry in list(entries.items()):
             # for entry_date in entry.values():
@@ -40,7 +39,7 @@ class FloatVector:
         self.vector_list: dict[str, list[float]] = {}
 
     def parse_value_list(
-        self, entries: dict[str, dict[str, Any]], alias: list[str] | None
+        self, entries: dict[str, dict[str, object]], alias: list[str] | None
     ) -> dict[str, float]:
         for id, entry in list(entries.items()):
             # for entry_date in entry.values():

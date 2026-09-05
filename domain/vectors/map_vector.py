@@ -1,4 +1,5 @@
-from typing import Any
+from __future__ import annotations
+
 
 from ...domain.loading import MapsProvider
 from ...core.configuration.settings import config
@@ -36,7 +37,7 @@ class MapVector:
             self.vector_config[i]["slot_size"] = size
             config.save_section("vector", {"vectors": self.vector_config})
 
-    def _normalize(self, value: Any) -> dict[str, float]:
+    def _normalize(self, value: object) -> dict[str, float]:
         if value is None:
             return {}
         if isinstance(value, str):
@@ -52,7 +53,7 @@ class MapVector:
 
     def parse_value_list(
         self,
-        entries: dict[str, dict[str, Any]],
+        entries: dict[str, dict[str, object]],
         add_new_values: bool,
         alias: list[str] | None,
     ) -> dict[str, dict[str, float]]:

@@ -23,11 +23,29 @@ from ...domain.analysis.image_analysis import ImageAnalysis
 from ...domain.analysis.trueskill import replay_ratings, public_score_from_rating
 from ...domain.loading import BatchSizerFactory, MapsProvider, ModelLoader
 from ...domain.ports.cache import CacheProvider
-from ...domain.ports.ml_providers import MediaPipePort
 from ...application.services.vector_list import VectorList
-from ...application.data_transform.config.maps import register_map_values
 
 logger: ModuleLogger = get_logger(__name__)
+
+
+def register_map_values(
+    processed_data: list, maps_provider: MapsProvider
+) -> None:
+    map_configs = [
+        v for v in config["vector"]["vectors"] if v["type"] in ("map", "person_map")
+    ]
+    if not map_configs:
+        return
+    for _path, entry, _cat, _extra in processed_data:
+        if not isinstance(entry, dict):
+            continue
+        for v in map_configs:
+            name = v["name"]
+            alias = v.get("alias")
+            value = get_value_from_entry(entry, name, alias)
+            if value is None:
+                continue
+            maps_provider.register_value(name, value)
 
 
 def build_split_files(

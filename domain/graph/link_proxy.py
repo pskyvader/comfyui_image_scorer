@@ -68,3 +68,14 @@ class LinkProxy:
 
     def __repr__(self) -> str:
         return f"LinkProxy(id={self._record.id}, winner={self._record.winner}, loser={self._record.loser})"
+
+
+  # Protocol alias
+  # Protocol alias
+
+  # Protocol alias
+  # Protocol alias
+
+  # Protocol alias
+
+  # Protocol alias

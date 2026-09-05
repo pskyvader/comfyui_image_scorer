@@ -1,27 +1,24 @@
 """
 Parameter Analysis Module
+
 Analyzes relationships between parameters/terms and image scores.
 """
 
 import json
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
-from sklearn.preprocessing import MinMaxScaler
-from typing import Any
 
+from typing import Any
 from ...core.io.serialization import load_single_jsonl
 from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.filesystem.paths import vectors_file, text_data_file
 
-matplotlib.use("Agg")
-
 logger: ModuleLogger = get_logger(__name__)
 
 SKLEARN_AVAILABLE = True
-MATPLOTLIB_AVAILABLE = True
+
+MATPLOTLIB_AVAILABLE = False
 
 
 class ParameterAnalyzer:
@@ -39,20 +36,14 @@ class ParameterAnalyzer:
 
     def analyze_all(self) -> None:
         logger.info("Starting parameter analysis...")
-        if MATPLOTLIB_AVAILABLE:
-            logger.info("Analyzing parameter relationships...")
-            self.analyze_parameter_pairs()
-            self.analyze_term_correlations()
-            logger.info("Parameter analysis complete")
-        else:
-            logger.warning("matplotlib not available - skipping visualization")
+        self.analyze_parameter_pairs()
+        self.analyze_term_correlations()
+        logger.info("Parameter analysis complete")
         logger.info("Generating analysis report...")
         self.generate_report()
         logger.info("Analysis complete! Output saved to %s", self.output_dir)
 
     def analyze_parameter_pairs(self) -> None:
-        if not MATPLOTLIB_AVAILABLE:
-            return
         logger.info("  - Extracting parameters...")
         steps_list, cfg_list, lora_weight_list = [], [], []
         sampler_list, scheduler_list, model_list = [], [], []
@@ -86,13 +77,6 @@ class ParameterAnalyzer:
         logger.info("    Found %d entries with CFG parameter", len(cfg_list))
         logger.info("    Found %d entries with LORA weight", len(lora_weight_list))
 
-        if len(steps_list) > 1:
-            self._create_scatter(np.array(steps_list), self.scores[:len(steps_list)], self.scores[:len(steps_list)], "steps_vs_score", "Sampling Steps", "Score", normalize=True)
-        if len(cfg_list) > 1:
-            self._create_scatter(np.array(cfg_list), self.scores[:len(cfg_list)], self.scores[:len(cfg_list)], "cfg_vs_score", "CFG Scale", "Score", normalize=True)
-        if len(steps_list) > 1 and len(cfg_list) > 1:
-            min_len = min(len(steps_list), len(cfg_list))
-            self._create_2d_scatter(np.array(steps_list[:min_len]), np.array(cfg_list[:min_len]), self.scores[:min_len], "steps_vs_cfg", "Sampling Steps", "CFG Scale", "Score")
         if sampler_list:
             sampler_scores = self._get_category_scores(sampler_list)
             self._save_category_stats("sampler_stats.json", sampler_scores)
@@ -101,8 +85,6 @@ class ParameterAnalyzer:
             self._save_category_stats("scheduler_stats.json", scheduler_scores)
 
     def analyze_term_correlations(self) -> None:
-        if not MATPLOTLIB_AVAILABLE:
-            return
         logger.info("  - Extracting term correlations...")
         term_scores: dict[str, list[float]] = {}
         for idx, text_entry in enumerate(self.text_data):
@@ -142,48 +124,19 @@ class ParameterAnalyzer:
         logger.info("  - Found %d unique terms", len(term_stats))
         logger.info("  - Top positive terms: %s", [t[0] for t in sorted_terms[:5]])
         with open(self.output_dir / "term_correlations.json", "w") as f:
-            json.dump({
-                "top_positive_terms": sorted_terms[:50],
-                "bottom_terms": sorted_terms[-50:],
-                "total_unique_terms": len(term_stats),
-                "summary": {"terms_analyzed": len(term_stats), "avg_score_across_all": float(np.mean(self.scores))},
-            }, f, indent=2)
-
-    def _create_scatter(self, x: np.ndarray, y: np.ndarray, colors: np.ndarray, name: str, xlabel: str, ylabel: str, normalize: bool) -> None:
-        if not MATPLOTLIB_AVAILABLE or plt is None:
-            return
-        fig, ax = plt.subplots(figsize=(10, 8))
-        if normalize and SKLEARN_AVAILABLE and MinMaxScaler is not None:
-            scaler = MinMaxScaler()
-            x_plot = scaler.fit_transform(x.reshape(-1, 1)).flatten()
-        else:
-            x_plot = x
-        scatter = ax.scatter(x_plot, y, c=colors, cmap="viridis", s=50, alpha=0.6, edgecolors="k")
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        ax.set_title(f"{xlabel} vs {ylabel}")
-        plt.colorbar(scatter, ax=ax, label="Score")
-        plt.tight_layout()
-        plt.savefig(self.output_dir / f"{name}.png", dpi=150, bbox_inches="tight")
-        plt.close()
-        logger.info("    Saved %s.png", name)
-
-    def _create_2d_scatter(self, x: np.ndarray, y: np.ndarray, colors: np.ndarray, name: str, xlabel: str, ylabel: str, zlabel: str) -> None:
-        if not MATPLOTLIB_AVAILABLE or plt is None:
-            return
-        fig, ax = plt.subplots(figsize=(12, 9))
-        scatter = ax.scatter(x, y, c=colors, cmap="coolwarm", s=100, alpha=0.7, edgecolors="k", linewidth=0.5)
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
-        ax.set_title(f"{xlabel} vs {ylabel} (colored by {zlabel})")
-        plt.colorbar(scatter, ax=ax, label=zlabel)
-        if len(x) > 1:
-            corr = np.corrcoef(x, y)[0, 1]
-            ax.text(0.05, 0.95, f"Correlation: {corr:.3f}", transform=ax.transAxes, fontsize=11, verticalalignment="top", bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8))
-        plt.tight_layout()
-        plt.savefig(self.output_dir / f"{name}.png", dpi=150, bbox_inches="tight")
-        plt.close()
-        logger.info("    Saved %s.png", name)
+            json.dump(
+                {
+                    "top_positive_terms": sorted_terms[:50],
+                    "bottom_terms": sorted_terms[-50:],
+                    "total_unique_terms": len(term_stats),
+                    "summary": {
+                        "terms_analyzed": len(term_stats),
+                        "avg_score_across_all": float(np.mean(self.scores)),
+                    },
+                },
+                f,
+                indent=2,
+            )
 
     def _get_category_scores(self, categories: list[str]) -> dict[str, list[float]]:
         category_scores: dict[str, list[float]] = {}

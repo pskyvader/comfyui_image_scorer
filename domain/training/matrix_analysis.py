@@ -6,7 +6,6 @@ Each row/column is a unique parameter value extracted from text records.
 Each cell contains scores for records that have both parameters.
 """
 
-from typing import Any
 from collections import defaultdict
 import numpy as np
 from tqdm import tqdm
@@ -23,7 +22,7 @@ class MatrixAnalyzer:
     def __init__(
         self,
         scores: list[float],
-        text_data: list[dict[str, Any]],
+        text_data: list[dict[str, object]],
         memory_limit: int = 10000,
     ):
         self.scores = scores
@@ -48,7 +47,7 @@ class MatrixAnalyzer:
         normalized_text = " ".join(str(text).split()).lower()
         return normalized_text, weight
 
-    def _extract_all_params_from_record(self, record: dict[str, Any]) -> list[str]:
+    def _extract_all_params_from_record(self, record: dict[str, object]) -> list[str]:
         params: list[str] = []
 
         lora_value = record.get("lora", None)
@@ -86,7 +85,7 @@ class MatrixAnalyzer:
         return params
 
     def _add_param_from_value(
-        self, key: str, value: Any, params: list[str], prefix: str = ""
+        self, key: str, value: object, params: list[str], prefix: str = ""
     ) -> None:
         if value is None or value == "":
             return
@@ -228,7 +227,7 @@ class MatrixAnalyzer:
         return self.cell_stats
 
     def export_to_json(self, output_path: str) -> None:
-        export_data_list: list[dict[str, Any]] = []
+        export_data_list: list[dict[str, object]] = []
         with tqdm(total=len(self.cell_stats), desc="Exporting to JSON", unit=" cells", delay=3.0) as pbar:
             for (p1_id, p2_id), stats in self.cell_stats.items():
                 if p1_id > p2_id:
@@ -254,7 +253,7 @@ class MatrixAnalyzer:
     def get_matrix_size(self) -> tuple[int, int]:
         return (len(self.param_list), len(self.param_list))
 
-    def get_matrix_summary(self) -> dict[str, Any]:
+    def get_matrix_summary(self) -> dict[str, object]:
         all_means = [stats["mean"] for stats in self.cell_stats.values()]
         all_counts = [stats["count"] for stats in self.cell_stats.values()]
         return {

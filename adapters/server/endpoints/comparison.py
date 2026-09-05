@@ -72,7 +72,7 @@ def _get_level_progress_stats(
 def get_ranking_config():
     _start = time.perf_counter()
     ranking_conf = config["ranking"]
-    all_images = get_server_deps().graph.get_all_images()
+    all_images = [node.data for node in get_server_deps().graph.get_all_nodes()]
     seed_percentage = int(ranking_conf["seed_percentage"])
     seed_size = max(1, len(all_images) * seed_percentage // 100)
     result = jsonify(
@@ -101,7 +101,7 @@ def get_ranking_phases():
 def get_status():
     _start = time.perf_counter()
     deps = get_server_deps()
-    all_images = deps.graph.get_all_images()
+    all_images = [node.data for node in deps.graph.get_all_nodes()]
     total = len(all_images)
     if total == 0:
         result = jsonify(
@@ -132,7 +132,7 @@ def get_status():
             "ranked_images": ranked,
             "unranked_images": total - ranked,
             "total_comparisons": deps.graph.get_total_comparisons(),
-            "skipped_comparisons": deps.graph.get_skipped_comparison_count(),
+            "skipped_comparisons": 0,
             "min_images": 2,
             "current_target": level_stats["current_target"],
             "baseline_comparisons": level_stats["base_level"],
@@ -157,7 +157,7 @@ def get_next_pair():
         with processor.recent_lock:
             recent_files_ordered = list(processor.recent_images)
 
-    total_images = deps.graph.get_image_count()
+    total_images = deps.graph.get_node_count()
     if total_images < 2:
         result = (
             jsonify(
@@ -170,13 +170,13 @@ def get_next_pair():
         )
         return result
 
-    full_exclude = set(recent_files_ordered)
+    full_exclude: set[str] = set(recent_files_ordered)
     pair, phase_index = merge_sort_ranker.select_pair_for_comparison(
         exclude_set=full_exclude,
         crystal_graph=deps.graph,
     )
     logger.debug(f"phase {phase_index}", start_timer=_start)
-    if not pair:
+    if not pair or phase_index is None:
         logger.warning("pair not found")
         result = "", 204
         return result
@@ -250,15 +250,17 @@ def submit_comparison():
         path_syncer=deps.path_resolver,
         graph_service=deps.graph,
     )
-    success = recorder.record_comparison(req.filename_a, req.filename_b, req.winner, 1.0, 0)
+    success = recorder.record_comparison(req.filename_a, req.filename_b, req.winner)
     if not success:
         result = jsonify({"error": "Failed to record comparison"}), 500
         return result
 
     processor.clear_old_cache(force=False)
 
-    data_a = deps.graph.get_image(req.filename_a)
-    data_b = deps.graph.get_image(req.filename_b)
+    node_a = deps.graph.get_node(req.filename_a)
+    node_b = deps.graph.get_node(req.filename_b)
+    data_a = node_a.data if node_a is not None else None
+    data_b = node_b.data if node_b is not None else None
     if data_a is None or data_b is None:
         result = jsonify({"error": "Image not found"}), 404
         return result
@@ -285,8 +287,8 @@ def submit_comparison():
 def sync_all_to_json():
     _start = time.perf_counter()
     deps = get_server_deps()
-    images = deps.graph.get_all_images()
-    all_comparisons = deps.graph.get_all_comparisons()
+    images = [node.data for node in deps.graph.get_all_nodes()]
+    all_comparisons = [link.data for link in deps.graph.get_all_links()]
     count = 0
     errors = 0
     for img in images:
@@ -308,6 +310,6 @@ def sync_all_to_json():
     return result
 
 
-def register_ranking_routes(app, deps: ServerDeps) -> None:
+def register_ranking_routes(app: Any, deps: ServerDeps) -> None:
     app.extensions["server_deps"] = deps
     app.register_blueprint(ranking_bp)

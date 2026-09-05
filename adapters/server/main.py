@@ -156,18 +156,18 @@ from .endpoints.analyze import register_analyze_routes
 from .endpoints.files import register_files_routes
 
 SECTION_FRONTENDS = {
-    "comparison": Path(__file__).parent.parent / "comparison" / "frontend",
-    "gallery": Path(__file__).parent.parent / "gallery" / "frontend",
-    "maps": Path(__file__).parent.parent / "maps" / "frontend",
-    "maps2": Path(__file__).parent.parent / "maps2" / "frontend",
-    "maps3": Path(__file__).parent.parent / "maps3" / "frontend",
-    "database": Path(__file__).parent.parent / "database" / "frontend",
-    "build": Path(__file__).parent.parent / "build" / "frontend",
-    "training": Path(__file__).parent.parent / "training" / "frontend",
-    "analyze": Path(__file__).parent.parent / "analyze" / "frontend",
+    "comparison": Path(__file__).parent.parent / "frontend" / "comparison",
+    "gallery": Path(__file__).parent.parent / "frontend" / "gallery",
+    "maps": Path(__file__).parent.parent / "frontend" / "maps",
+    "maps2": Path(__file__).parent.parent / "frontend" / "maps2",
+    "maps3": Path(__file__).parent.parent / "frontend" / "maps3",
+    "database": Path(__file__).parent.parent / "frontend" / "database",
+    "build": Path(__file__).parent.parent / "frontend" / "build",
+    "training": Path(__file__).parent.parent / "frontend" / "training",
+    "analyze": Path(__file__).parent.parent / "frontend" / "analyze",
 }
 
-SERVER_FRONTEND = Path(__file__).parent / "frontend"
+SERVER_FRONTEND = Path(__file__).parent.parent / "frontend" / "shared"
 
 register_ranking_routes(app, deps)
 register_gallery_routes(app, deps)

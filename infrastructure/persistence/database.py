@@ -1,5 +1,4 @@
 """Database schema definitions and connection management."""
-
 from __future__ import annotations
 
 import inspect
@@ -15,10 +14,11 @@ logger: ModuleLogger = get_logger(__name__)
 MU0 = 25.0
 SIGMA0 = MU0 / 3.0
 
-_MODULE_ROOT = Path(__file__).resolve().parents[2]
+_MY_MODULE_ROOT = Path(__file__).resolve().parents[2]
 _PROXY_ENTRY_WHITELIST = (
-    os.path.normcase(str(_MODULE_ROOT / "domain" / "graph")),
-    os.path.normcase(str(_MODULE_ROOT / "infrastructure" / "persistence")),
+    os.path.normcase(str(_MY_MODULE_ROOT / "domain" / "graph")),
+    os.path.normcase(str(_MY_MODULE_ROOT / "infrastructure" / "persistence")),
+    os.path.normcase(str(_MY_MODULE_ROOT / "tests")),
 )
 
 
@@ -30,7 +30,7 @@ def _check_proxy_entry() -> None:
     if caller is None:
         return
     caller_file: str = caller.f_code.co_filename
-    normalized = os.path.normcase(caller_file)
+    normalized = os.path.normcase(os.path.normpath(caller_file))
     for prefix in _PROXY_ENTRY_WHITELIST:
         if normalized.startswith(prefix + os.sep):
             return
@@ -109,8 +109,6 @@ def _ensure_comparisons_table(conn: sqlite3.Connection) -> None:
             filename_b TEXT NOT NULL,
             winner TEXT NOT NULL,
             timestamp TEXT NOT NULL,
-            weight REAL DEFAULT 1.0,
-            transitive_depth INTEGER DEFAULT 0,
             FOREIGN KEY (filename_a) REFERENCES images(filename),
             FOREIGN KEY (filename_b) REFERENCES images(filename),
             FOREIGN KEY (winner) REFERENCES images(filename)

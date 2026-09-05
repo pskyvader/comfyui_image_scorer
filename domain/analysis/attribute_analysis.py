@@ -5,10 +5,9 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from torch import nn
-from torchvision.transforms import Compose
 
 from ...core.observability.logger import get_logger, ModuleLogger
-from ...domain.loading.ports import ModelLoader
+from ...domain.ports.loading import ModelLoader
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -56,7 +55,7 @@ class FaceAttributeAnalyzer:
         self._model_loader = model_loader
         self._model: nn.Module | None = None
         self._output_dim: int = 0
-        self._processor: Compose | object | None = None
+        self._processor: object | None = None
         self._lock = threading.Lock()
 
     def _ensure_loaded(self) -> None:

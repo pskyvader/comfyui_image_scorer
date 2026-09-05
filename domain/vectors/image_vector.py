@@ -1,8 +1,10 @@
+from __future__ import annotations
 import math
 from PIL import Image, ImageFile
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-from typing import Any
+
+
 from tqdm import tqdm
 from collections import defaultdict, OrderedDict
 import torch
@@ -47,7 +49,7 @@ class ImageVector:
         self.image_list: dict[str, Image.Image] = {}
         self.path_list: dict[str, str] = {}
         self.vector_list: vectorDict = {}
-        self.model: Any = None
+        self.model: object | None = None
         self.vector_length: int = 0
         self._transform: transforms.Compose | None = None
         self.variable_input: bool = True
@@ -57,7 +59,7 @@ class ImageVector:
 
         self.vector_sizes, _ = load_json(vectors_size_file, expect=dict)
 
-    def array_to_pil(self, arr: Any) -> list[Image.Image]:
+    def array_to_pil(self, arr: object) -> list[Image.Image]:
         arr = np.asarray(arr)
         if arr.ndim == 4:
             # Batch of images
@@ -91,7 +93,7 @@ class ImageVector:
             return [Image.fromarray(arr).convert("RGB")]
         raise ValueError(f"Unsupported ndarray shape: {arr.shape}")
 
-    def prepare_image_batch(self, image: Any) -> list[Image.Image]:
+    def prepare_image_batch(self, image: object) -> list[Image.Image]:
         """
         Convert various image inputs into a list of RGB PIL Images.
         Accepts torch.Tensor, numpy arrays, PIL.Image, or list/tuple of these.

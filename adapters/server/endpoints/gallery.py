@@ -23,7 +23,7 @@ def list_images():
     if per_page < 1 or per_page > 100:
         per_page = 20
 
-    scored = deps.graph.get_all_images()
+    nodes = deps.graph.get_all_nodes()
     score_min = request.args.get("score_min", 0.0, type=float)
     score_max = request.args.get("score_max", 1.0, type=float)
     comparisons_min = request.args.get("comparisons_min", 0, type=int)
@@ -32,9 +32,10 @@ def list_images():
     tags_query = request.args.get("tags", "").strip().lower()
     search_tags = [tag.strip() for tag in tags_query.split(",")] if tags_query else []
 
-    filtered_and = []
-    filtered_or = []
-    for img in scored:
+    filtered_and: list[dict[str, Any]] = []
+    filtered_or: list[dict[str, Any]] = []
+    for node in nodes:
+        img = node.data
         if not (score_min <= float(img["score"]) <= score_max):
             continue
         comp_count = int(img.get("comparison_count", 0))
@@ -101,7 +102,7 @@ def list_images():
             "page": page,
             "per_page": per_page,
             "max_comparison_count": max(
-                (int(img.get("comparison_count", 0)) for img in scored), default=0
+                (int(img.get("comparison_count", 0)) for img in filtered_and + filtered_or), default=0
             ),
         }
     )
@@ -110,17 +111,17 @@ def list_images():
 
 @gallery_bp.route("/image/<path:filename>", methods=["GET"])
 def get_image_info(filename: str):
-    img = get_server_deps().graph.get_image(filename)
-    if not img:
+    node = get_server_deps().graph.get_node(filename)
+    if node is None:
         result = jsonify({"error": "Image not found"}), 404
         return result
     result = jsonify(
         {
-            "filename": img["filename"],
-            "score": round(float(img["score"]), 4),
-            "comparison_count": int(img.get("comparison_count", 0)),
-            "last_compared_at": img.get("last_compared_at"),
-            "prompt_tags": img.get("prompt_tags"),
+            "filename": node.filename,
+            "score": round(node.score, 4),
+            "comparison_count": node.comparison_count,
+            "last_compared_at": node.last_compared_at,
+            "prompt_tags": node.prompt_tags,
         }
     )
     return result
@@ -133,18 +134,18 @@ def search_images():
     score_min = request.args.get("score_min", 0.0, type=float)
     score_max = request.args.get("score_max", 1.0, type=float)
 
-    results = []
-    for img in get_server_deps().graph.get_all_images():
-        if query and query not in img["filename"].lower():
+    results: list[dict[str, Any]] = []
+    for node in get_server_deps().graph.get_all_nodes():
+        if query and query not in node.filename.lower():
             continue
-        if not (score_min <= float(img["score"]) <= score_max):
+        if not (score_min <= node.score <= score_max):
             continue
         results.append(
             {
-                "filename": img["filename"],
-                "score": round(float(img["score"]), 3),
-                "file": f"{img['filename']}?score={round(float(img['score']), 3)}",
-                "comparison_count": int(img.get("comparison_count", 0)),
+                "filename": node.filename,
+                "score": round(node.score, 3),
+                "file": f"{node.filename}?score={round(node.score, 3)}",
+                "comparison_count": node.comparison_count,
             }
         )
     result = jsonify({"results": results, "count": len(results)})
@@ -154,21 +155,20 @@ def search_images():
 @gallery_bp.route("/history/<path:filename>", methods=["GET"])
 def get_image_history(filename: str):
     deps = get_server_deps()
-    wins = []
-    losses = []
-    for comp in deps.graph.get_all_comparisons():
-        if comp["filename_a"] != filename and comp["filename_b"] != filename:
+    wins: list[dict[str, Any]] = []
+    losses: list[dict[str, Any]] = []
+    for link in deps.graph.get_all_links():
+        if link.winner != filename and link.loser != filename:
             continue
-        opponent = (
-            comp["filename_b"] if comp["filename_a"] == filename else comp["filename_a"]
-        )
-        opponent_data = deps.graph.get_image(opponent)
+        opponent = link.loser if link.winner == filename else link.winner
+        opponent_node = deps.graph.get_node(opponent)
+        opponent_score = opponent_node.score if opponent_node is not None else 0.5
         item = {
             "opponent": opponent,
-            "opponent_score": float(opponent_data["score"]) if opponent_data else 0.5,
-            "timestamp": comp["timestamp"],
+            "opponent_score": opponent_score,
+            "timestamp": link.timestamp,
         }
-        if comp["winner"] == filename:
+        if link.winner == filename:
             wins.append(item)
         else:
             losses.append(item)
@@ -184,6 +184,6 @@ def get_image_history(filename: str):
     return result
 
 
-def register_gallery_routes(app, deps: ServerDeps) -> None:
+def register_gallery_routes(app: Any, deps: ServerDeps) -> None:
     app.extensions["server_deps"] = deps
     app.register_blueprint(gallery_bp)

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+
+
 
 import numpy as np
 import numpy.typing as npt
@@ -18,16 +19,16 @@ def l2_normalize_batch(vectors: npt.NDArray[np.float32]) -> npt.NDArray[np.float
 
 
 def get_value_from_entry(
-    entry: dict[str, Any], name: str, alias: list[str] | None
-) -> Any:
+    entry: dict[str, object], name: str, alias: list[str] | None
+) -> object | None:
     _start = time.perf_counter()
-    custom_text: dict[str, Any] = {}
+    custom_text: dict[str, object] = {}
     if "custom_text" in entry and isinstance(entry["custom_text"], dict):
         custom_text.update(entry["custom_text"])
     for key, value in entry.items():
         custom_text[key] = value
 
-    result: Any = None
+    result: object | None = None
     if alias is not None and len(alias) > 0:
         for alias_name in alias:
             if alias_name in custom_text:

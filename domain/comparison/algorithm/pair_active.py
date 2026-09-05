@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Protocol
+from typing import Any
 
 from ....core.observability.logger import get_logger, ModuleLogger
 from ...graph.chain_proxy import ChainProxy
 
-from ...graph.node_proxy import NodeProxy
+from comfyui_image_scorer.domain.graph.node_proxy import NodeProxy as NodeProxy
 
 from ....core.configuration.settings import config
 
@@ -16,34 +16,11 @@ from ..constants import MIN_CHAIN_THRESHOLD
 
 from .graph_helpers import pair_key, stable_seed_pool
 
+from ....domain.ports.graph import CrystalGraphPort
+
 logger: ModuleLogger = get_logger(__name__)
 
 NodeTuple = tuple[NodeProxy, bool]
-
-
-class CrystalGraph(Protocol):
-    def get_node(self, node_id: str | None) -> Any: ...
-    def get_all_nodes(
-        self, only_top: bool = False, only_bottom: bool = False
-    ) -> list[Any]: ...
-    def get_component(
-        self,
-        node_id: str | None = None,
-        component_id: int | None = None,
-        chain_id: int | None = None,
-    ) -> Any: ...
-    def get_all_chains(
-        self, min_length: int = 0, sort_order: str = "desc"
-    ) -> list[tuple[Any, list[Any]]]: ...
-    def get_graph_stats(self) -> dict[str, Any]: ...
-    def are_in_same_path(self, img1: str, img2: str) -> bool: ...
-    def get_all_links(self) -> set[tuple[str, str]]: ...
-    def get_images_with_only_wins(self) -> list[str]: ...
-    def get_images_with_only_losses(self) -> list[str]: ...
-    def get_recent_chain_ids(self) -> list[int]: ...
-    def set_recent_chain_ids(self, chain_ids: list[int]) -> None: ...
-
-    _chain: Any
 
 
 def phase_seed_coverage(
@@ -52,21 +29,16 @@ def phase_seed_coverage(
     seed_pool: list[NodeProxy],
     all_images_length: int,
 ) -> tuple[NodeProxy, NodeProxy] | None:
-    _start: float = time.perf_counter()
-    seed_percentage = int(config["ranking"]["seed_percentage"])
-    seed_target = int(config["ranking"]["seed_target_comparisons"])
-
-    seed_size: int = all_images_length * seed_percentage // 100
     ready_seed_pool: list[NodeProxy] = [
         i for i in seed_pool if i.comparison_count >= seed_target
     ]
     ready_seed_pool_length: int = len(ready_seed_pool)
 
-    logger.debug(
-        f"phase_seed_coverage: all_images={all_images_length}, seed_size={seed_size}, "
-        f"seed_pool={len(seed_pool)}, ready={ready_seed_pool_length}, target={seed_target}, ",
-        start_timer=_start,
-    )
+    # logger.debug(
+    #     f"phase_seed_coverage: all_images={all_images_length}, seed_size={seed_size}, "
+    #     f"seed_pool={len(seed_pool)}, ready={ready_seed_pool_length}, target={seed_target}, ",
+    #     start_timer=_start,
+    # )
 
     if ready_seed_pool_length >= seed_size:
         logger.info(
@@ -75,11 +47,11 @@ def phase_seed_coverage(
         )
         return None
 
-    logger.info(
-        f"phase 0 active: {ready_seed_pool_length}/{seed_size} seeds ready (target={seed_target}), "
-        f"under_target={len([n for n in candidate_nodes if n.comparison_count < seed_target])}",
-        start_timer=_start,
-    )
+    # logger.debug(
+    #     f"phase 0 active: {ready_seed_pool_length}/{seed_size} seeds ready (target={seed_target}), "
+    #     f"under_target={len([n for n in candidate_nodes if n.comparison_count < seed_target])}",
+    #     start_timer=_start,
+    # )
 
     under_seed_target: list[NodeProxy] = [
         node for node in candidate_nodes if node.comparison_count < seed_target
@@ -87,15 +59,16 @@ def phase_seed_coverage(
     under_seed_target.sort(key=lambda node: node.comparison_count, reverse=True)
 
     node_a: NodeProxy = under_seed_target[0]
+    pair_list: list[tuple[NodeProxy, NodeProxy]] = [
+        (node_a, node_b)
+        for node_b in under_seed_target[1 : (seed_size - ready_seed_pool_length + 1)]
+        if node_b.comparison_count <= node_a.comparison_count + 2
+        and pair_key(node_a.filename, node_b.filename) not in existing_pair_set
+    ]
+
     return _closest_score_pair(
-        [
-            (node_a, node_b)
-            for node_b in under_seed_target[
-                1 : (seed_size - ready_seed_pool_length + 1)
-            ]
-            if node_b.comparison_count <= node_a.comparison_count + 2
-            and pair_key(node_a.filename, node_b.filename) not in existing_pair_set
-        ]
+        pair_list,
+        closest=False,
     )
     # if result:
     #     logger.debug(
@@ -114,22 +87,21 @@ def phase_anchor_insert(
     candidate_images: list[NodeProxy],
     seed_pool_set: set[str],
     existing_pair_set: set[tuple[str, str]],
-    cg: CrystalGraph,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     _start: float = time.perf_counter()
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
-    reserve_count: int = config["ranking"]["reserve_count"]
+    # reserve_count: int = config["ranking"]["reserve_count"]
 
     candidates: list[NodeProxy] = [
         node
         for node in candidate_images
         if node.filename not in seed_pool_set
-        and node.comparison_count < insertion_target
+        and node.comparison_count <= insertion_target
     ]
 
-    if len(candidates) < reserve_count:
+    if len(candidates) < 2:
         logger.warning(
-            f"pool too small ({len(candidates)} < {reserve_count})",
+            f"pool too small ({len(candidates)} < {2})",
             start_timer=_start,
         )
         return None
@@ -152,7 +124,7 @@ def phase_anchor_insert(
     # ]
     # remaining.sort(key=lambda opp: abs(opp.mu_skill - node_a.mu_skill))
 
-    seen_opponents = 0
+    # seen_opponents = 0
     # for opponent in pool_nodes:
     #     if pair_key(node_a.filename, opponent.filename) in existing_pair_set:
     #         continue
@@ -164,17 +136,29 @@ def phase_anchor_insert(
         node
         for node in pool_nodes
         if pair_key(node_a.filename, node.filename) not in existing_pair_set
-        and cg.are_in_same_path(node_a.filename, node.filename)
+        # and not cg.are_in_same_path(node_a.filename, node.filename)
     ]
+    if len(nodes) < 2:
+        logger.debug(f"no pair found out of {len(pair_list)} opponents")
+        return None
 
     pair_list: list[tuple[NodeProxy, NodeProxy]] = [
         (node_a, nodes[i + 1]) for i in range(len(nodes) - 1)
     ]
-    result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(pair_list)
-    if result:
-        return result
-    logger.debug(f"no pair found out of {seen_opponents} opponents")
-    return None
+    pair_list.sort(key=lambda pair: abs(pair[0].score - pair[1].score))
+    result = pair_list[0]
+
+    # result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
+    #     pair_list, closest=True
+    # )
+    # if result:
+    logger.debug(
+        f"returning pair {result[0].filename}({result[0].comparison_count}) vs {result[1].filename}({result[1].comparison_count})",
+        start_timer=_start,
+    )
+    return result
+    # logger.debug(f"no pair found out of {len(pair_list)} opponents")
+    # return None
 
 
 def _collect_chain_extremes(
@@ -182,7 +166,7 @@ def _collect_chain_extremes(
     candidate_names: set[str],
     check_list: list[str],
     use_bottom: bool,
-    cg: CrystalGraph,
+    cg: CrystalGraphPort,
 ) -> list[NodeProxy]:
     """Return up to 10 qualifying chain extremes, least-compared first."""
     nodes: list[NodeProxy] = []
@@ -209,7 +193,7 @@ def _collect_chain_extremes(
 
 
 def _closest_score_pair(
-    pair_list: list[tuple[NodeProxy, NodeProxy]],
+    pair_list: list[tuple[NodeProxy, NodeProxy]], closest: bool = False
 ) -> tuple[NodeProxy, NodeProxy] | None:
     if not pair_list:
         return None
@@ -217,6 +201,9 @@ def _closest_score_pair(
         key=lambda pair: abs(pair[0].trueskill_score - pair[1].trueskill_score)
     )
     selected: tuple[NodeProxy, NodeProxy] = pair_list[0]
+    if closest:
+        return selected
+
     best_difference: float = abs(
         selected[0].trueskill_score - selected[1].trueskill_score
     )
@@ -234,7 +221,7 @@ def _closest_score_pair(
 
 def phase_collapsible_pairs(
     candidate_nodes: list[NodeProxy],
-    cg: CrystalGraph,
+    cg: CrystalGraphPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     """Anchor on the least-compared node and return its most score-similar same-type partner."""
     _start = time.perf_counter()
@@ -247,17 +234,16 @@ def phase_collapsible_pairs(
         # if node.comparison_count > insertion_target
     }
 
-    chains_list = cg.get_all_chains()
-    chains: list[ChainProxy] = [c[0] for c in chains_list]
+    chains: list[ChainProxy] = list(cg.get_all_chains())
 
-    check_list = cg.get_images_with_only_losses()
+    check_list = cg.get_nodes_with_only_losses()
     use_bottom = True
     nodes: list[NodeProxy] = _collect_chain_extremes(
         chains, candidate_names, check_list, use_bottom, cg
     )
 
     if len(nodes) < 2:
-        check_list = cg.get_images_with_only_wins()
+        check_list = cg.get_nodes_with_only_wins()
         use_bottom = False
         nodes = _collect_chain_extremes(
             chains, candidate_names, check_list, use_bottom, cg
@@ -265,17 +251,32 @@ def phase_collapsible_pairs(
 
     if len(nodes) < 2:
         logger.info(
-            f"no candidates found, len:{len(nodes)}, bottom:{use_bottom}, checklist:{len(check_list)}"
+            f"no candidates found, len:{len(nodes)}, bottom:{use_bottom}, checklist:{len(check_list)}",
+            start_timer=_start,
         )
         return None
 
     node_a: NodeProxy = nodes[0]
-    return _closest_score_pair([(node_a, node_b) for node_b in nodes[1:]])
+    pair_list: list[tuple[NodeProxy, NodeProxy]] = [
+        (node_a, node_b) for node_b in nodes[1:]
+    ]
+    result = _closest_score_pair(pair_list, closest=False)
+    if not result:
+        logger.info(
+            f"no pair found, len:{len(nodes)}, bottom:{use_bottom}, checklist:{len(check_list)}",
+            start_timer=_start,
+        )
+        return None
+    logger.debug(
+        f"collapsible pair: {result[0].filename}({result[0].comparison_count}) vs {result[1].filename}({result[1].comparison_count})",
+        start_timer=_start,
+    )
+    return result
 
 
 def phase_single_win_loss(
     candidate_nodes: list[NodeProxy],
-    _cg: CrystalGraph,
+    _cg: CrystalGraphPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     _start: float = time.perf_counter()
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
@@ -288,7 +289,7 @@ def phase_single_win_loss(
         (False, False),
     ):
 
-        logger.info(f"single_win={single_win}, filtered_only={filtered_only}")
+        # logger.info(f"single_win={single_win}, filtered_only={filtered_only}")
 
         nodes: list[NodeProxy] = []
         for node in candidate_nodes:
@@ -336,7 +337,9 @@ def phase_single_win_loss(
         pair_list: list[tuple[NodeProxy, NodeProxy]] = [
             (node_a, nodes[i + 1]) for i in range(len(nodes) - 1)
         ]
-        result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(pair_list)
+        result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
+            pair_list, closest=False
+        )
         if result:
             # logger.debug(
             #     f"single win/loss pair: {result}, single_win: {single_win}",
@@ -349,7 +352,7 @@ def phase_single_win_loss(
 
 def phase_chain_merge(
     candidate_images: list[NodeProxy],
-    cg: CrystalGraph,
+    cg: CrystalGraphPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     score_threshold = 0.01
     min_comparisons = int(config["ranking"]["insertion_target_comparisons"])
@@ -362,10 +365,10 @@ def phase_chain_merge(
     _start = time.perf_counter()
     candidate_names = {node.filename for node in candidate_images}
 
-    chains_list: list[tuple[ChainProxy, list[NodeTuple]]] = cg.get_all_chains(
-        min_length=1, sort_order="asc"
-    )
-    chains: list[list[NodeTuple]] = [c[1] for c in chains_list]
+    chains: list[list[NodeProxy]] = [
+        list(chain_proxy.nodes)
+        for chain_proxy in cg.get_all_chains(min_length=1, sort_order="asc")
+    ]
 
     if len(chains) < MIN_CHAIN_THRESHOLD:
         logger.info(
@@ -380,11 +383,9 @@ def phase_chain_merge(
         if i in last_chains_index:
             continue
         a_nodes: list[NodeProxy] = [
-            n[0]
+            n
             for n in chains[i]
-            if n[0].filename in candidate_names
-            and n[1]
-            and n[0].comparison_count > min_comparisons
+            if n.filename in candidate_names and n.comparison_count > min_comparisons
         ]
         if len(a_nodes) == 0:
             continue
@@ -394,7 +395,7 @@ def phase_chain_merge(
             if j in last_chains_index:
                 continue
             b_nodes: list[NodeProxy] = [
-                n[0] for n in chains[j] if n[0].filename in candidate_names and n[1]
+                n for n in chains[j] if n.filename in candidate_names
             ]
 
             if len(b_nodes) == 0:
@@ -439,13 +440,13 @@ def phase_chain_merge(
 def phase_uncertainty_refine(
     candidate_images: list[NodeProxy],
     pair_set: set[tuple[str, str]],
-    cg: CrystalGraph,
+    cg: CrystalGraphPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     _start = time.perf_counter()
 
     min_sigma_threshold = float(config["ranking"]["sigma_threshold"])
 
-    seed_filenames = stable_seed_pool(candidate_images)
+    seed_nodes = stable_seed_pool(candidate_images)
     seed_pool: list[NodeProxy] = []
     node_a: NodeProxy | None = None
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
@@ -456,7 +457,7 @@ def phase_uncertainty_refine(
     )
 
     for node in candidate_nodes:
-        if node.filename in seed_filenames:
+        if node in seed_nodes:
             seed_pool.append(node)
         elif node.sigma_uncertainty >= min_sigma_threshold:
             if not node_a:
@@ -470,29 +471,42 @@ def phase_uncertainty_refine(
     if not node_a or not seed_pool:
         return None
 
-    best_pair: tuple[NodeProxy, NodeProxy] | None = None
-    closest_ranking_mu: float = 100
+    # best_pair: tuple[NodeProxy, NodeProxy] | None = None
+    # closest_ranking_mu: float = 100
 
-    pair_list = sorted(
-        ((node_a, node_b) for node_b in seed_pool),
-        key=lambda pair: abs(pair[0].mu_skill - pair[1].mu_skill),
+    pair_list: list[tuple[NodeProxy, NodeProxy]] = [
+        (node_a, node_b)
+        for node_b in seed_pool
+        if pair_key(node_a.filename, node_b.filename) not in pair_set
+        and not cg.are_in_same_path(node_a.filename, node_b.filename)
+    ]
+
+    # pair_list: list[tuple[NodeProxy, NodeProxy]] = sorted(
+    #     pair_list,
+    #     key=lambda pair: abs(pair[0].mu_skill - pair[1].mu_skill),
+    # )
+
+    result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
+        pair_list, closest=False
     )
 
-    for node_a, node_b in pair_list:
-        if pair_key(node_a.filename, node_b.filename) in pair_set:
-            continue
-        if cg.are_in_same_path(node_a.filename, node_b.filename):
-            continue
-        closest_ranking_mu = abs(node_a.mu_skill - node_b.mu_skill)
-        best_pair = (node_a, node_b)
-        break
+    # for node_a, node_b in pair_list:
+    #     if pair_key(node_a.filename, node_b.filename) in pair_set:
+    #         continue
+    #     if cg.are_in_same_path(node_a.filename, node_b.filename):
+    #         continue
+    #     closest_ranking_mu = abs(node_a.mu_skill - node_b.mu_skill)
+    #     best_pair = (node_a, node_b)
+    #     break
 
-    if best_pair:
+    if result:
         logger.debug(
-            f"Uncertainty refine selected pair: {best_pair} (mu difference:{closest_ranking_mu})",
+            f"Uncertainty refine selected pair: {result} "
+            f"(mu difference:{abs(result[0].mu_skill - result[1].mu_skill)},"
+            f"sigma:{result[0].sigma_uncertainty},{result[1].sigma_uncertainty})",
             start_timer=_start,
         )
-        return best_pair
+        return result
 
     logger.debug("Uncertainty refine no pair found", start_timer=_start)
     return None
@@ -502,8 +516,10 @@ def phase_fallback(
     candidate_images: list[NodeProxy],
     pair_set: set[tuple[str, str]],
 ) -> tuple[NodeProxy, NodeProxy] | None:
-    _start = time.perf_counter()
-    ordered = sorted(candidate_images, key=lambda node: node.comparison_count)
+    _start: float = time.perf_counter()
+    ordered: list[NodeProxy] = sorted(
+        candidate_images, key=lambda node: node.comparison_count
+    )
     for idx, left in enumerate(ordered):
         for right in ordered[idx + 1 :]:
             if pair_key(left.filename, right.filename) in pair_set:

@@ -1,4 +1,3 @@
-from typing import Any
 
 from ...core.configuration.settings import config
 from .helpers import get_value_from_entry
@@ -33,7 +32,7 @@ class PositionVector:
 
     def parse_value_list(
         self,
-        entries: dict[str, dict[str, Any]],
+        entries: dict[str, dict[str, object]],
         add_new_values: bool,
         alias: list[str] | None,
     ) -> dict[str, list[dict[str, float]]]:

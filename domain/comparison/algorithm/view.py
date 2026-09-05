@@ -15,8 +15,10 @@ from ...analysis.trueskill import expected_win_probability, Rating
 from ..constants import MIN_CHAIN_THRESHOLD
 from . import graph_helpers
 
+from ....domain.ports.graph import CrystalGraphPort
 
-def _describe_one(node: NodeProxy, cg: Any) -> dict[str, Any]:
+
+def _describe_one(node: NodeProxy, cg: CrystalGraphPort) -> dict[str, Any]:
     """Build the per-image payload from a NodeProxy.
 
     Every field is read through the proxy; no database row is touched here.
@@ -62,7 +64,7 @@ def _describe_one(node: NodeProxy, cg: Any) -> dict[str, Any]:
     }
 
 
-def describe_image(node: NodeProxy, cg: Any) -> dict[str, Any]:
+def describe_image(node: NodeProxy, cg: CrystalGraphPort) -> dict[str, Any]:
     """Return all per-image info for a single node, regardless of phase."""
     return _describe_one(node, cg)
 
@@ -71,7 +73,7 @@ def describe_pair(
     node_a: NodeProxy,
     node_b: NodeProxy,
     phase_index: int,
-    cg: Any,
+    cg: CrystalGraphPort,
 ) -> dict[str, Any]:
     """Return phase-specific pair context built from the two nodes and config.
 

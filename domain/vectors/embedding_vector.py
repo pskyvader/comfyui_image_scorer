@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Iterable
 
 import numpy as np
 import numpy.typing as npt
@@ -26,7 +26,7 @@ class EmbeddingVector:
         self.model_loader = model_loader
 
     def parse_value_list(
-        self, entries: dict[str, dict[str, Any]], alias: list[str] | None
+        self, entries: dict[str, dict[str, object]], alias: list[str] | None
     ) -> dict[str, str]:
         self.value_list = {}
         for id, entry in list(entries.items()):

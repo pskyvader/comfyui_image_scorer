@@ -11,7 +11,7 @@ from ...application.services.graph_service import CrystalGraph
 from ...application.hyperparameters.hyperparameter_optimizer import HpoRunner
 from ...application.services.image_processor import ImageProcessor
 from ..cli.deps import CLIDeps
-from ...domain.database.ports import PathResolver
+from ...domain.ports.repository import PathResolver
 from ...domain.loading import BatchSizerFactory, MapsProvider, ModelLoader, TrainingLoader
 from ...domain.ports.cache import CacheProvider
 from ...domain.ports.ml_providers import MediaPipePort

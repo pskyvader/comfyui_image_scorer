@@ -10,14 +10,14 @@ import time
 
 from ...core.observability.logger import get_logger, ModuleLogger
 
-from ...domain.database.ports import ImageRepository, ComparisonRepository
+from ...domain.ports.repository import ImageRepository, ComparisonRepository
 from ...domain.graph.chain_manager import ChainManager
 from ...domain.graph.node_proxy import NodeProxy
 from ...domain.graph.chain_proxy import ChainProxy
 from ...domain.graph.component_proxy import ComponentProxy
-from ...domain.graph.link_proxy import LinkProxy, _ComparisonRecord
+from ...domain.graph.link_proxy import LinkProxy
 from ...domain.ports.cache import CacheProvider
-from ...domain.files.ports import FilePort
+from ...domain.ports.files import FilePort
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -418,10 +418,6 @@ class CrystalGraph:
         assert self._image_repo is not None
         return self._image_repo.reset_all_image_ratings(score)
 
-    def get_total_comparisons(self) -> int:
-        assert self._comparison_repo is not None
-        return self._comparison_repo.get_total_comparisons()
-
     def get_nodes_with_only_wins(self) -> list[str]:
         assert self._comparison_repo is not None
         return self._comparison_repo.get_nodes_with_only_wins()
@@ -433,21 +429,6 @@ class CrystalGraph:
     def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool:
         assert self._comparison_repo is not None
         return self._comparison_repo.comparison_exists_for_pair(filename_a, filename_b)
-
-    def add_comparison(
-        self,
-        filename_a: str,
-        filename_b: str,
-        winner: str,
-        timestamp: str,
-    ) -> Any:
-        assert self._comparison_repo is not None
-        return self._comparison_repo.add_comparison(
-            filename_a=filename_a,
-            filename_b=filename_b,
-            winner=winner,
-            timestamp=timestamp,
-        )
 
     def add_historical_comparison(
         self,

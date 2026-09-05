@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import json
 import numpy as np
@@ -5,7 +6,7 @@ from numpy import typing as npt
 import lightgbm as lgb
 from tqdm import tqdm
 import gc
-from typing import Any
+
 from sklearn.preprocessing import PolynomialFeatures
 
 from ...core.observability.logger import get_logger
@@ -19,7 +20,7 @@ from ..analysis.trueskill import (
 logger = get_logger(__name__)
 
 
-def get_feature_mapping_from_config() -> dict[str, Any]:
+def get_feature_mapping_from_config() -> dict[str, object]:
     """
     Creates a mapping from feature indices to vector names and positions.
     Returns both a forward map (index -> vector info) and reverse map (vector -> indices).
@@ -27,11 +28,11 @@ def get_feature_mapping_from_config() -> dict[str, Any]:
     feature_to_vector = {}
     vector_ranges = {}
     current_idx = 0
-    config_vectors: list[dict[str, Any]] = config["vector"]["vectors"]
+    config_vectors: list[dict[str, object]] = config["vector"]["vectors"]
     for vector_config in config_vectors:
         vec_name = vector_config["name"]
         slot_size = vector_config["slot_size"]
-        entry: dict[str, Any] = {
+        entry: dict[str, object] = {
             "start_idx": current_idx,
             "end_idx": current_idx + slot_size,
             "slot_size": slot_size,
@@ -60,7 +61,9 @@ def get_feature_mapping_from_config() -> dict[str, Any]:
 class DataTransformer:
     poly = PolynomialFeatures(degree=2, include_bias=False, interaction_only=True)
 
-    def __init__(self, training_loader: Any, model_trainer: Any) -> None:
+    def __init__(
+        self, training_loader: object, model_trainer: object
+    ) -> None:
         """Data transformer for feature engineering and interaction features.
 
         Responsible for generating polynomial interaction features, training
@@ -74,7 +77,7 @@ class DataTransformer:
         self.training_loader = training_loader
         self.model_trainer = model_trainer
         feature_mapping = get_feature_mapping_from_config()
-        self.feature_to_vector: dict[int, dict[str, Any]] = feature_mapping[
+        self.feature_to_vector: dict[int, dict[str, object]] = feature_mapping[
             "feature_to_vector"
         ]
         self.vector_ranges = feature_mapping["vector_ranges"]
@@ -169,7 +172,7 @@ class DataTransformer:
         user_verbosity = int(config["training"]["verbosity"])
 
         # Create training model using shared trainer with minimal config
-        config_dict: dict[str, Any] = {
+        config_dict: dict[str, object] = {
             "n_estimators": steps,
         }
         if config["training"]["objective"] == "lambdarank":
@@ -181,7 +184,7 @@ class DataTransformer:
         assert model is not None
 
         # Setup callbacks for logging
-        callbacks: list[Any] = [
+        callbacks: list[object] = [
             lgb.log_evaluation(period=-1)
         ]  # suppress default logger
         pbar = None
@@ -200,9 +203,7 @@ class DataTransformer:
             pbar.close()
 
         # Get feature importances (gain)
-        importances: np.ndarray[tuple[Any, ...], np.dtype[Any]] = (
-            model.feature_importances_
-        )
+        importances: np.ndarray = model.feature_importances_
         n_features = len(importances)
 
         n_zeros = np.sum(importances == 0)
@@ -244,8 +245,8 @@ class DataTransformer:
         X_batch: npt.NDArray[np.float32],
         y_batch: npt.NDArray[np.float32],
         n_features_in: int,
-        accumulators: dict[str, Any],
-    ) -> dict[str, Any]:
+accumulators: dict[str, object],
+    ) -> dict[str, object]:
         """Compute interaction feature statistics for a batch of data.
 
         Updates accumulators with sum of interaction terms, sum of squares,
@@ -281,7 +282,7 @@ class DataTransformer:
         return accumulators
 
     def compute_correlations(
-        self, k: int, accumulators: dict[str, Any], n_samples: int, dtype: np.dtype[Any]
+        self, k: int, accumulators: dict[str, object], n_samples: int, dtype: np.dtype
     ) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.intp]]:
         n = accumulators["n"]
         # Compute Correlations (Pearson)
@@ -374,7 +375,7 @@ class DataTransformer:
 
         # Accumulators for correlation calculation
 
-        accumulators: dict[str, Any] = {
+        accumulators: dict[str, object] = {
             "sum_x": np.zeros(n_interactions),
             "sum_x_sq": np.zeros(n_interactions),
             "sum_xy": np.zeros(n_interactions),

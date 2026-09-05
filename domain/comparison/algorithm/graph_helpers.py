@@ -5,22 +5,14 @@ node-grouping / filtering patterns that appear across multiple pair-selection
 strategies.
 """
 
-from typing import Protocol
+from __future__ import annotations
+
 import time
 
 from ....core.configuration.settings import config
 from ...graph.node_proxy import NodeProxy
 
-
-class CrystalGraph(Protocol):
-    def get_node(self, node_id: str | None) -> NodeProxy | None: ...
-    def get_component(
-        self,
-        node_id: str | None = None,
-        component_id: int | None = None,
-        chain_id: int | None = None,
-    ) -> object | None: ...
-    def are_in_same_path(self, img1: str, img2: str) -> bool: ...
+from ....domain.ports.graph import CrystalGraphPort
 
 
 def pair_key(filename_a: str, filename_b: str) -> tuple[str, str]:
@@ -54,7 +46,7 @@ def stable_seed_pool(images: list[NodeProxy]) -> list[NodeProxy]:
 # ---------------------------------------------------------------------------
 
 
-def is_collapsable_pair(filename_a: str, filename_b: str, cg: CrystalGraph) -> bool:
+def is_collapsable_pair(filename_a: str, filename_b: str, cg: CrystalGraphPort) -> bool:
     """Check if a pair is collapsible (both top or both bottom in same component, no common chains)."""
     _start = time.perf_counter()
     node_a = cg.get_node(filename_a)
@@ -89,6 +81,7 @@ def is_collapsable_pair(filename_a: str, filename_b: str, cg: CrystalGraph) -> b
 def filter_excluded_images(
     images: list[dict[str, object]],
     exclude_set: set[str],
+    cg: CrystalGraphPort,
 ) -> list[dict[str, object]]:
     """Remove images whose filename is in exclude_set."""
     _start = time.perf_counter()

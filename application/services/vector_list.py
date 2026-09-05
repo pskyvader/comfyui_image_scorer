@@ -1,5 +1,5 @@
 """Vector listing helpers over the split/full vector files."""
-from typing import Any, Iterator
+from typing import Iterator, Any, Union, TypedDict, cast
 import numpy as np
 import numpy.typing as npt
 from tqdm import tqdm
@@ -24,6 +24,27 @@ from ...domain.ports.cache import CacheProvider
 logger: ModuleLogger = get_logger(__name__)
 
 
+VectorType = Union[
+    MapVector,
+    IntVector,
+    FloatVector,
+    EmbeddingVector,
+    ImageVector,
+    PositionVector,
+    KeypointVector,
+    PersonMapVector,
+]
+
+class VectorConfig(TypedDict):
+    vector: VectorType
+    type: str
+    name: str
+    slot_size: int
+    alias: list[str] | None
+    max_normalization: int | float
+    model_key: str
+
+
 class VectorList:
     _IMAGE = "image"
     _INT = "int"
@@ -45,10 +66,10 @@ class VectorList:
     ) -> None:
 
         self.image_paths: dict[str, str] = {}
-        self.entries: dict[str, Any] = {}
+        self.entries: dict[str, dict[str, Any]] = {}
         self.unique_ids: list[str] = []
         self.vector_config = config["vector"]["vectors"]
-        self.sorted_vectors: dict[str, Any] = {}
+        self.sorted_vectors: dict[str, VectorConfig] = {}
         self.read_only = read_only
         self.add_new_to_map = not self.read_only
         self._model_loader = model_loader
@@ -118,14 +139,19 @@ class VectorList:
             else:
                 raise ValueError(f"Unknown vector type: {v_type}")
 
-            self.sorted_vectors[name] = {
-                "vector": vec,
-                **current_type,
-            }
+            self.sorted_vectors[name] = VectorConfig(
+                vector=vec,
+                type=v_type,
+                name=name,
+                slot_size=current_type.get("slot_size", 0),
+                alias=current_type.get("alias"),
+                max_normalization=current_type.get("max_normalization", 0),
+                model_key=current_type.get("model_key", ""),
+            )
 
-    def _exclude_present_entry(self, current_vector: Any) -> dict[str, Any]:
+    def _exclude_present_entry(self, current_vector: VectorType) -> dict[str, dict[str, Any]]:
 
-        new_entries: dict[str, Any] = {}
+        new_entries: dict[str, dict[str, Any]] = {}
         current_list = set(current_vector.vector_list.keys())
         for file_id, entry in list(self.entries.items()):
             if file_id in current_list:
@@ -136,7 +162,7 @@ class VectorList:
 
     def _exclude_present_image_path(
         self, current_vector: ImageVector
-    ) -> dict[str, Any]:
+    ) -> dict[str, str]:
 
         new_paths: dict[str, str] = {}
         current_list = set(current_vector.path_list.keys())
@@ -152,19 +178,19 @@ class VectorList:
             c = self.sorted_vectors[v]
             alias = c["alias"]
             if c["type"] == self._MAP:
-                map_vector: MapVector = c["vector"]
+                map_vector = cast(MapVector, c["vector"])
                 new_entries = self._exclude_present_entry(map_vector)
                 map_vector.parse_value_list(new_entries, self.add_new_to_map, alias)
                 map_vector.create_vector_list()
                 self.sorted_vectors[v]["vector"] = map_vector
             elif c["type"] == self._INT:
-                int_vector: IntVector = c["vector"]
+                int_vector = cast(IntVector, c["vector"])
                 new_entries = self._exclude_present_entry(int_vector)
                 int_vector.parse_value_list(new_entries, alias)
                 int_vector.create_vector_list()
                 self.sorted_vectors[v]["vector"] = int_vector
             elif c["type"] == self._FLOAT:
-                float_vector: FloatVector = c["vector"]
+                float_vector = cast(FloatVector, c["vector"])
                 new_entries = self._exclude_present_entry(float_vector)
                 float_vector.parse_value_list(new_entries, alias)
                 float_vector.create_vector_list()
@@ -174,7 +200,7 @@ class VectorList:
                     )
                 self.sorted_vectors[v]["vector"] = float_vector
             elif c["type"] == self._EMBEDDING:
-                embedding_vector: EmbeddingVector = c["vector"]
+                embedding_vector = cast(EmbeddingVector, c["vector"])
                 new_entries = self._exclude_present_entry(embedding_vector)
                 embedding_vector.parse_value_list(new_entries, alias)
                 embedding_vector.create_vector_list(batch_size=256)
@@ -182,14 +208,14 @@ class VectorList:
 
                 self.sorted_vectors[v]["vector"] = embedding_vector
             elif c["type"] == self._IMAGE:
-                image_vector: ImageVector = c["vector"]
+                image_vector = cast(ImageVector, c["vector"])
                 new_image_paths: dict[str, str] = self._exclude_present_image_path(
                     image_vector
                 )
                 image_vector.create_vector_list_from_paths(new_image_paths)
                 self.sorted_vectors[v]["vector"] = image_vector
             elif c["type"] == self._POSITION:
-                position_vector: PositionVector = c["vector"]
+                position_vector = cast(PositionVector, c["vector"])
                 new_entries = self._exclude_present_entry(position_vector)
                 position_vector.parse_value_list(
                     new_entries, self.add_new_to_map, alias
@@ -197,7 +223,7 @@ class VectorList:
                 position_vector.create_vector_list()
                 self.sorted_vectors[v]["vector"] = position_vector
             elif c["type"] == self._KEYPOINT:
-                keypoint_vector: KeypointVector = c["vector"]
+                keypoint_vector = cast(KeypointVector, c["vector"])
                 new_entries = self._exclude_present_entry(keypoint_vector)
                 keypoint_vector.parse_value_list(
                     new_entries, self.add_new_to_map, alias
@@ -205,7 +231,7 @@ class VectorList:
                 keypoint_vector.create_vector_list()
                 self.sorted_vectors[v]["vector"] = keypoint_vector
             elif c["type"] == self._PERSON_MAP:
-                person_map_vector: PersonMapVector = c["vector"]
+                person_map_vector = cast(PersonMapVector, c["vector"])
                 new_entries = self._exclude_present_entry(person_map_vector)
                 person_map_vector.parse_value_list(
                     new_entries, self.add_new_to_map, alias
@@ -231,7 +257,7 @@ class VectorList:
 
         for v in self.sorted_vectors:
             c = self.sorted_vectors[v]
-            current_vector = c["vector"]
+            current_vector: VectorType = c["vector"]
             vector_ids = set(current_vector.vector_list.keys())
             error_ids[c["name"]] = []
             errors: list[str] = []
@@ -261,10 +287,14 @@ class VectorList:
         ) as pbar:
             for v in self.sorted_vectors:
                 c = self.sorted_vectors[v]
-                current_vector = c["vector"]
+                current_vector: VectorType = c["vector"]
                 valid_vectors: list[list[float]] = []
                 for id in self.unique_ids:
-                    valid_vectors.append(current_vector.vector_list[id])
+                    vector = current_vector.vector_list[id]
+                    if isinstance(vector[0], int):
+                        valid_vectors.append([float(x) for x in vector])
+                    else:
+                        valid_vectors.append(cast(list[float], vector))
 
                 if len(valid_vectors) != len(self.unique_ids):
                     raise ValueError(
@@ -283,10 +313,10 @@ class VectorList:
 
     def convert_text_list(
         self,
-        clean_arrays: dict[str, Any],
+        clean_arrays: dict[str, dict[str, Any]],
         current_list: dict[str, str],
         name: str,
-    ) -> dict[str, Any]:
+    ) -> dict[str, dict[str, Any]]:
 
         for id, value in current_list.items():
             if id not in clean_arrays:
@@ -298,7 +328,7 @@ class VectorList:
         if self.final_text_data:
             return self.final_text_data
 
-        initial_arrays: dict[str, Any] = {}
+        initial_arrays: dict[str, dict[str, Any]] = {}
         with tqdm(
             total=len(self.sorted_vectors),
             desc="joining text data",
@@ -308,7 +338,7 @@ class VectorList:
         ) as pbar:
             for v in self.sorted_vectors:
                 c = self.sorted_vectors[v]
-                current_vector = c["vector"]
+                current_vector: VectorType = c["vector"]
                 valid_texts: dict[str, str] = {}
                 if c["type"] in [
                     self._MAP,
@@ -318,18 +348,26 @@ class VectorList:
                     self._KEYPOINT,
                     self._PERSON_MAP,
                 ]:
-                    current_list: dict[str, str] = current_vector.value_list
+                    raw_values = cast(
+                        "MapVector | IntVector | FloatVector | PositionVector | KeypointVector | PersonMapVector",
+                        current_vector,
+                    ).value_list
+                    for id in self.unique_ids:
+                        val = raw_values[id]
+                        if isinstance(val, str):
+                            valid_texts[id] = val
+                        else:
+                            valid_texts[id] = str(val)
                 elif c["type"] == self._EMBEDDING:
-                    current_list: dict[str, str] = current_vector.text_list
+                    text_values = cast(EmbeddingVector, current_vector).text_list
+                    for id in self.unique_ids:
+                        valid_texts[id] = text_values[id]
                 elif c["type"] == self._IMAGE:
                     continue
                 else:
                     raise ValueError(
                         f"Unsupported column type for text data: {c['type']}"
                     )
-
-                for id in self.unique_ids:
-                    valid_texts[id] = current_list[id]
 
                 initial_arrays = self.convert_text_list(
                     initial_arrays, valid_texts, c["name"]
@@ -352,7 +390,7 @@ class VectorList:
     def load_split_files(self) -> None:
         _start = time.perf_counter()
 
-        invalid_entries: dict[str, list[Any]] = {}
+        invalid_entries: dict[str, list[dict[str, Any]]] = {}
         maps_provider = self._maps_provider
         with tqdm(
             total=len(self.sorted_vectors),
@@ -365,7 +403,7 @@ class VectorList:
                 c = self.sorted_vectors[v]
                 name = c["name"]
                 v_type = c["type"]
-                current_vector = c["vector"]
+                current_vector: VectorType = c["vector"]
 
                 split_path = os.path.join(split_dir, v_type, f"{name}.jsonl")
                 if not os.path.exists(split_path):
@@ -374,12 +412,13 @@ class VectorList:
 
                 raw_vals: dict[str, Any] = {}
                 vec_vals: dict[str, list[float]] = {}
+                int_vec_vals: dict[str, list[int]] = {}
                 invalid: list[dict[str, Any]] = []
-                cached_split: list[dict[str, Any]] | None = self._cache.get(
-                    f"split:{name}"
-                )
+                cached_split = self._cache.get(f"split:{name}")
                 if cached_split is not None:
-                    reader: Iterator[dict[str, Any]] = iter(cached_split)
+                    reader: Iterator[dict[str, Any]] = iter(
+                        cast(list[dict[str, Any]], cached_split)
+                    )
                 else:
                     reader: Iterator[dict[str, Any]] = load_single_jsonl(split_path)
 
@@ -387,7 +426,10 @@ class VectorList:
                     if obj["raw"] is not None and len(list(obj["vector"])) > 0:
                         self.unique_ids.append(obj["id"])
                         raw_vals[obj["id"]] = obj["raw"]
-                        vec_vals[obj["id"]] = obj["vector"]
+                        vector_data = obj["vector"]
+                        vec_vals[obj["id"]] = vector_data
+                        if v_type == self._INT:
+                            int_vec_vals[obj["id"]] = [int(x) for x in vector_data]
                         if v_type in (self._MAP, self._PERSON_MAP):
                             maps_provider.register_value(name, obj["raw"])
                     else:
@@ -396,7 +438,16 @@ class VectorList:
                 if invalid:
                     invalid_entries[name] = invalid
 
-                current_vector.vector_list = vec_vals
+                if v_type == self._INT:
+                    int_vector = cast(IntVector, current_vector)
+                    int_vector.vector_list = int_vec_vals
+                elif v_type == self._IMAGE:
+                    cast(ImageVector, current_vector).vector_list = vec_vals
+                else:
+                    cast(
+                        "MapVector | FloatVector | EmbeddingVector | PositionVector | KeypointVector | PersonMapVector",
+                        current_vector,
+                    ).vector_list = vec_vals
 
                 if v_type in [
                     self._MAP,
@@ -406,11 +457,14 @@ class VectorList:
                     self._KEYPOINT,
                     self._PERSON_MAP,
                 ]:
-                    current_vector.value_list = raw_vals
+                    cast(
+                        "MapVector | IntVector | FloatVector | PositionVector | KeypointVector | PersonMapVector",
+                        current_vector,
+                    ).value_list = raw_vals
                 elif v_type == self._EMBEDDING:
-                    current_vector.text_list = raw_vals
+                    cast(EmbeddingVector, current_vector).text_list = raw_vals
                 elif v_type == self._IMAGE:
-                    current_vector.path_list = raw_vals
+                    cast(ImageVector, current_vector).path_list = raw_vals
                 pbar.update(1)
 
         logger.debug(f"before unique:{len(self.unique_ids)}")
@@ -444,7 +498,7 @@ class VectorList:
                 c = self.sorted_vectors[v]
                 name = c["name"]
                 v_type = c["type"]
-                current_vector = c["vector"]
+                current_vector: VectorType = c["vector"]
                 raw_values: dict[str, Any] = {}
 
                 if v_type in [
@@ -455,15 +509,18 @@ class VectorList:
                     self._KEYPOINT,
                     self._PERSON_MAP,
                 ]:
-                    raw_values = current_vector.value_list
+                    raw_values = cast(
+                        "MapVector | IntVector | FloatVector | PositionVector | KeypointVector | PersonMapVector",
+                        current_vector,
+                    ).value_list
                 elif v_type == self._EMBEDDING:
-                    raw_values = current_vector.text_list
+                    raw_values = cast(EmbeddingVector, current_vector).text_list
                 elif v_type == self._IMAGE:
                     raw_values = {id: id for id in current_vector.vector_list.keys()}
                 else:
                     raise ValueError(f"Unknown vector type: {v_type}")
 
-                vector_values_len = len(current_vector.vector_list.values())
+                vector_values_len = len(current_vector.vector_list)
                 if vector_values_len != len(raw_values):
                     raise ValueError(
                         f"Length mismatch in vector '{name}' of type '{v_type}'. "

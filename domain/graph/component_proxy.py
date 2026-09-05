@@ -23,7 +23,7 @@ class ComponentProxy:
         return self._id
 
     @property
-    def nodes(self) -> list[NodeProxy]:
+    def nodes(self) -> list[_node_proxy.NodeProxy]:
         return [
             _node_proxy.NodeProxy(self._chain, n)
             for n in self._chain.get_component_members(self._id)
@@ -33,7 +33,7 @@ class ComponentProxy:
     def size(self) -> int:
         return len(self._chain.get_component_members(self._id))
 
-    def get_chains(self) -> list[ChainProxy]:
+    def get_chains(self) -> list[_chain_proxy.ChainProxy]:
         all_chains: list[list[str]] = list(self._chain.get_chains().values())
         comp_nodes: set[str] = set(self._chain.get_component_members(self._id))
         matching: list[tuple[int, list[str]]] = []
@@ -46,3 +46,9 @@ class ComponentProxy:
 
     def __repr__(self) -> str:
         return f"ComponentProxy(id={self._id}, size={self.size})"
+
+  # Protocol alias
+
+  # Protocol alias
+
+  # Protocol alias

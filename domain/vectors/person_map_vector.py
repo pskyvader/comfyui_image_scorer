@@ -1,4 +1,3 @@
-from typing import Any
 
 from ...domain.loading import MapsProvider
 from ...core.configuration.settings import config
@@ -37,7 +36,7 @@ class PersonMapVector:
 
     def parse_value_list(
         self,
-        entries: dict[str, dict[str, Any]],
+        entries: dict[str, dict[str, object]],
         add_new_values: bool,
         alias: list[str] | None,
     ) -> dict[str, list[dict[str, float]]]:

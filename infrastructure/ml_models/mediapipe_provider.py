@@ -1,7 +1,6 @@
 """MediaPipe face/pose inference provider (implements domain MediaPipePort)."""
 
 import os
-from typing import Any
 
 import mediapipe as mp
 import numpy as np
@@ -15,13 +14,13 @@ from ...domain.analysis.mediapipe_analysis import POSE_LANDMARK_NAMES
 
 class MediaPipeProvider:
     def __init__(self) -> None:
-        self._face_detector: Any = None
-        self._pose_landmarker: Any = None
+        self._face_detector: mp.tasks.vision.FaceDetector | None = None
+        self._pose_landmarker: mp.tasks.vision.PoseLandmarker | None = None
 
     def _image_to_rgb(self, img: Image.Image) -> npt.NDArray[np.uint8]:
         return np.asarray(img.convert("RGB"))
 
-    def _get_face_detector(self) -> Any:
+    def _get_face_detector(self) -> mp.tasks.vision.FaceDetector:
         if self._face_detector is None:
             model_path = os.path.join(
                 mediapipe_models_dir,
@@ -40,7 +39,7 @@ class MediaPipeProvider:
             self._face_detector = mp.tasks.vision.FaceDetector.create_from_options(options)
         return self._face_detector
 
-    def _get_pose_landmarker(self) -> Any:
+    def _get_pose_landmarker(self) -> mp.tasks.vision.PoseLandmarker:
         if self._pose_landmarker is None:
             model_path = os.path.join(
                 mediapipe_models_dir,
@@ -59,7 +58,7 @@ class MediaPipeProvider:
             self._pose_landmarker = mp.tasks.vision.PoseLandmarker.create_from_options(options)
         return self._pose_landmarker
 
-    def analyze(self, img: Image.Image) -> dict[str, Any]:
+    def analyze(self, img: Image.Image) -> dict[str, list[dict[str, float]]]:
         rgb = self._image_to_rgb(img)
         height, width = rgb.shape[0], rgb.shape[1]
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)

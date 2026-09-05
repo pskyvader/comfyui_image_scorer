@@ -17,7 +17,7 @@ from ...domain.training.calibration import (
     apply_score_calibration,
     extract_score_calibration,
 )
-from ...domain.loading.ports import (
+from ...domain.ports.loading import (
     ModelLoader,
     MapsProvider,
     TrainingLoader,

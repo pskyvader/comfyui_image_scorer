@@ -1,3 +1,10 @@
+"""Filesystem protocol port, moved from ``domain/files/ports.py``.
+
+Only the narrow filesystem operations required by ``CrystalGraph`` are exposed
+here. Implementations live in ``infrastructure``; callers depend only on this
+protocol, not on concrete paths or JSON formats.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,7 +38,9 @@ class FilePort(Protocol):
         """Create *path* including any missing parents; no-op if it exists."""
 
     def ranked_root(self) -> Path: ...
+
     def compute_path(self, filename: str, score: float) -> Path: ...
+
     def sync_metadata(
         self,
         filename: str,
@@ -44,7 +53,11 @@ class FilePort(Protocol):
         filename_to_image_data: dict[str, dict[str, object]],
         filename_to_entry: dict[str, dict[str, object]],
     ) -> bool: ...
+
     def clear_folder_cache(self) -> None: ...
+
     def prewarm_folder_cache(self, path: Path) -> None: ...
+
     def deduplicate_scored(self, root: Path) -> int: ...
+
     def cleanup_orphans(self, root: Path) -> int: ...

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
 
 import numpy as np
 
 
-def _as_1d_float_array(values: Any) -> np.ndarray:
+def _as_1d_float_array(values: object) -> np.ndarray:
     array = np.asarray(values, dtype=np.float32).reshape(-1)
     return array[np.isfinite(array)]
 
@@ -24,10 +23,10 @@ def _strictly_increasing(values: np.ndarray) -> np.ndarray:
 
 
 def build_score_calibration(
-    raw_scores: Any,
-    target_scores: Any,
+    raw_scores: object,
+    target_scores: object,
     num_points: int = 257,
-) -> dict[str, Any] | None:
+) -> dict[str, object] | None:
     """Build a monotonic quantile-based score calibration table."""
 
     raw = _as_1d_float_array(raw_scores)
@@ -50,7 +49,7 @@ def build_score_calibration(
     }
 
 
-def extract_score_calibration(data: dict[str, Any] | None) -> dict[str, Any] | None:
+def extract_score_calibration(data: dict[str, object] | None) -> dict[str, object] | None:
     if not data or "score_calibration" not in data:
         return None
 
@@ -62,7 +61,7 @@ def extract_score_calibration(data: dict[str, Any] | None) -> dict[str, Any] | N
 
 
 def apply_score_calibration(
-    raw_scores: Any, calibration: dict[str, Any] | None
+    raw_scores: object, calibration: dict[str, object] | None
 ) -> np.ndarray:
     scores = np.asarray(raw_scores, dtype=np.float32).reshape(-1)
     if not calibration:

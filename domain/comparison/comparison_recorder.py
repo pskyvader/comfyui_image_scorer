@@ -2,49 +2,24 @@
 
 from __future__ import annotations
 
+from ...core.observability.logger import get_logger
 from datetime import datetime, timezone
-from typing import Any, Protocol
 
-from ...core.observability.logger import get_logger, ModuleLogger
 from ..analysis.trueskill import (
     public_score_from_rating,
     rating_from_row,
     update_ratings,
 )
-from ..database.ports import PathResolver
+from ..graph.link_proxy import LinkProxy
+from ..graph.node_proxy import NodeProxy
 
 logger: ModuleLogger = get_logger(__name__)
 
 
-class GraphService(Protocol):
-    def apply_comparison(self, winner: str, loser: str) -> None: ...
-    def get_all_comparisons(self) -> list[dict[str, Any]]: ...
-    def get_image(self, filename: str) -> dict[str, Any] | None: ...
-    def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool: ...
-    def add_comparison(
-        self,
-        filename_a: str,
-        filename_b: str,
-        winner: str,
-        weight: float,
-        transitive_depth: int,
-        timestamp: str,
-    ) -> Any: ...
-    def update_image_rating_state(
-        self,
-        filename: str,
-        score: float,
-        rating_mu: float,
-        rating_sigma: float,
-        comparison_count: int,
-        touch_timestamp: bool,
-    ) -> bool: ...
-
-
 def update_scores_after_comparison(
-    winner_data: dict[str, Any],
-    loser_data: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
+    winner_data: dict[str, object],
+    loser_data: dict[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
     winner_rating, loser_rating = update_ratings(
         rating_from_row(winner_data), rating_from_row(loser_data)
     )
@@ -70,7 +45,7 @@ class ComparisonRecorder:
         self._path_syncer = path_syncer
         self._graph = graph_service
 
-    def _persist_image_state(self, filename: str, data: dict[str, Any]) -> bool:
+    def _persist_image_state(self, filename: str, data: dict[str, object]) -> bool:
         return self._graph.update_image_rating_state(
             filename=filename,
             score=float(data["score"]),
@@ -85,8 +60,6 @@ class ComparisonRecorder:
         filename_a: str,
         filename_b: str,
         winner: str,
-        impact_factor: float,
-        transitive_depth: int,
     ) -> bool:
         """Record one direct comparison and update both image ratings."""
         if self._graph.comparison_exists_for_pair(filename_a, filename_b):
@@ -96,8 +69,10 @@ class ComparisonRecorder:
                 filename_b,
             )
 
-        data_a = self._graph.get_image(filename_a)
-        data_b = self._graph.get_image(filename_b)
+        node_a = self._graph.get_node(filename_a)
+        node_b = self._graph.get_node(filename_b)
+        data_a = node_a.data if node_a is not None else None
+        data_b = node_b.data if node_b is not None else None
         if not data_a or not data_b or filename_a == filename_b:
             return False
 
@@ -113,12 +88,10 @@ class ComparisonRecorder:
         )
 
         ts = datetime.now(timezone.utc).isoformat()
-        comp_id = self._graph.add_comparison(
+        comp_id = self._graph.add_link(
             filename_a=filename_a,
             filename_b=filename_b,
             winner=winner,
-            weight=impact_factor,
-            transitive_depth=transitive_depth,
             timestamp=ts,
         )
         if not comp_id:
@@ -135,7 +108,7 @@ class ComparisonRecorder:
         if not self._persist_image_state(loser_filename, loser_data):
             return False
 
-        all_comparisons = self._graph.get_all_comparisons()
+        all_comparisons = [link.data for link in self._graph.get_all_links()]
         saved_winner = self._path_syncer.sync_image_metadata_to_json(
             filename=winner_filename,
             score=float(winner_data["score"]),
@@ -160,7 +133,5 @@ class ComparisonRecorder:
                 loser_filename,
             )
             return False
-
-        self._graph.apply_comparison(winner_filename, loser_filename)
 
         return True
