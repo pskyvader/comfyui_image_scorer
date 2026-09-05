@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import time
-from typing import Any
 
 import torch
+from torch import nn
 
 from ...core.io.serialization import atomic_write_json, load_json
 from ...core.observability.logger import get_logger
@@ -232,7 +232,7 @@ class BatchSizer:
     def _evaluate_candidate(
         self,
         *,
-        model: Any,
+        model: nn.Module,
         profile: ProfileData,
         key: str,
         candidate: int,
@@ -336,7 +336,7 @@ class BatchSizer:
         if "profiles" not in data:
             data["profiles"] = []
 
-        history_payload: dict[str, list[dict[str, Any]]] = {}
+        history_payload: dict[str, list[dict[str, object]]] = {}
         for res_key, entries in profile.history.items():
             history_payload[res_key] = [
                 {
@@ -347,7 +347,7 @@ class BatchSizer:
                 for entry in entries
             ]
 
-        profile_payload: dict[str, Any] = {
+        profile_payload: dict[str, object] = {
             "model_name": profile.model_name,
             "device_name": profile.device_name,
             "device_id": profile.device_id,

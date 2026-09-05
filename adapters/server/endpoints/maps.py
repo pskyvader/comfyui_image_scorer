@@ -1,8 +1,9 @@
 """Maps API - endpoints for chain visualizations (graph data)."""
 
 import time
+from typing import Any
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, Flask, jsonify
 
 from ....core.observability.logger import get_logger, ModuleLogger
 from ..deps import ServerDeps, get_server_deps
@@ -21,7 +22,7 @@ def get_graph_data():
 
         stats = deps.graph.get_graph_stats()
         node_to_height: dict[str, int] = {}
-        for proxy, _node_list in deps.graph.get_all_chains():
+        for proxy in deps.graph.get_all_chains():
             for node_proxy in proxy.nodes:
                 filename = node_proxy.filename
                 if (
@@ -30,8 +31,8 @@ def get_graph_data():
                 ):
                     node_to_height[filename] = proxy.length
 
-        img_dict = {img["filename"]: img for img in deps.graph.get_all_images()}
-        nodes = []
+        img_dict = {node.filename: node.data for node in deps.graph.get_all_nodes()}
+        nodes: list[dict[str, Any]] = []
         for node in deps.graph.get_all_nodes():
             filename = node.filename
             img_data = img_dict.get(filename)
@@ -51,15 +52,15 @@ def get_graph_data():
             )
 
         edges = [
-            {"source": winner, "target": loser, "weight": 1.0}
-            for winner, loser in deps.graph.get_all_links()
+            {"source": link.winner, "target": link.loser, "weight": 1.0}
+            for link in deps.graph.get_all_links()
         ]
         all_components = deps.graph.get_all_components()
         component_members = {
             comp.id: [n.filename for n in comp.nodes] for comp in all_components
         }
-        chains = []
-        for chain_proxy, _ in deps.graph.get_all_chains():
+        chains: list[dict[str, Any]] = []
+        for chain_proxy in deps.graph.get_all_chains():
             comp = chain_proxy.get_component()
             chains.append(
                 {
@@ -85,11 +86,11 @@ def get_graph_data():
         )
         return result
     except Exception as exc:
-        logger.error("Error in get_graph_data: %s", exc, exc_info=True)
+        logger.error("Error in get_graph_data: %s", exc)
         result = jsonify({"error": str(exc)}), 500
         return result
 
 
-def register_maps_routes(app, deps: ServerDeps) -> None:
+def register_maps_routes(app: Flask, deps: ServerDeps) -> None:
     app.extensions["server_deps"] = deps
     app.register_blueprint(maps_bp)

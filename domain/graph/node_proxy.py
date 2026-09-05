@@ -79,6 +79,11 @@ class NodeProxy:
     def last_compared_at(self) -> str | None:
         return self._image_data.get("last_compared_at")
 
+    @property
+    def data(self) -> dict[str, Any]:
+        """Return the persisted image fields for adapter serialization."""
+        return dict(self._image_data, filename=self._node_id)
+
     def is_top(self) -> bool:
         return self._chain.is_top(self._node_id)
 

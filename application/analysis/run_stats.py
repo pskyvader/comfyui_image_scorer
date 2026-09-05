@@ -25,8 +25,8 @@ def _distribute(values: list[float], bins: int) -> dict[str, int]:
 
 
 def run_stats(graph: Any) -> int:
-    images = graph.get_all_images()
-    comparisons = graph.get_all_comparisons()
+    images = [node.data for node in graph.get_all_nodes()]
+    comparisons = [link.data for link in graph.get_all_links()]
 
     scores = [img.get("score", 0) for img in images]
     mus = [img.get("rating_mu", 0) for img in images]

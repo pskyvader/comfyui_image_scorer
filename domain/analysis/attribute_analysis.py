@@ -1,12 +1,14 @@
 import threading
 from collections.abc import Sequence
-from typing import Any
 
 import torch
 import torch.nn.functional as F
 from PIL import Image
+from torch import nn
+from torchvision.transforms import Compose
 
 from ...core.observability.logger import get_logger, ModuleLogger
+from ...domain.loading.ports import ModelLoader
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -50,11 +52,11 @@ class FaceAttributeAnalyzer:
 
     MODEL_KEY = "face_attributes"
 
-    def __init__(self, model_loader: Any) -> None:
+    def __init__(self, model_loader: ModelLoader) -> None:
         self._model_loader = model_loader
-        self._model: Any = None
+        self._model: nn.Module | None = None
         self._output_dim: int = 0
-        self._processor: Any = None
+        self._processor: Compose | object | None = None
         self._lock = threading.Lock()
 
     def _ensure_loaded(self) -> None:
@@ -75,10 +77,10 @@ class FaceAttributeAnalyzer:
         self, imgs: Sequence[Image.Image]
     ) -> list[dict[str, list[dict[str, float]]]]:
         self._ensure_loaded()
-        device = next(self._model.parameters()).device
-        inputs = self._processor(images=list(imgs), return_tensors="pt").to(device)
+        device = next(self._model.parameters()).device  # type: ignore[union-attr]
+        inputs = self._processor(images=list(imgs), return_tensors="pt").to(device)  # type: ignore[union-attr]
         with torch.no_grad():
-            logits = self._model(pixel_values=inputs["pixel_values"])
+            logits = self._model(pixel_values=inputs["pixel_values"])  # type: ignore[union-attr]
 
         age = logits["age"].cpu().float()
         gender = logits["gender"].cpu().float()
@@ -121,11 +123,11 @@ class NSFWAnalyzer:
 
     MODEL_KEY = "nsfw"
 
-    def __init__(self, model_loader: Any) -> None:
+    def __init__(self, model_loader: ModelLoader) -> None:
         self._model_loader = model_loader
-        self._model: Any = None
+        self._model: nn.Module | None = None
         self._output_dim: int = 0
-        self._processor: Any = None
+        self._processor: Compose | object | None = None
 
     def _ensure_loaded(self) -> None:
         if self._model is not None:
@@ -140,10 +142,10 @@ class NSFWAnalyzer:
 
     def predict_batch(self, imgs: Sequence[Image.Image]) -> list[float]:
         self._ensure_loaded()
-        device = next(self._model.parameters()).device
-        inputs = self._processor(images=list(imgs), return_tensors="pt").to(device)
+        device = next(self._model.parameters()).device  # type: ignore[union-attr]
+        inputs = self._processor(images=list(imgs), return_tensors="pt").to(device)  # type: ignore[union-attr]
         with torch.no_grad():
-            outputs = self._model(**inputs)
+            outputs = self._model(**inputs)  # type: ignore[union-attr]
         logits = outputs.logits
         probs = F.softmax(logits, dim=-1)
         nsfw_idx = 1

@@ -277,8 +277,8 @@ class StubGraph:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def get_all_images(self) -> list[dict[str, Any]]:
-        self.calls.append("get_all_images")
+    def list_nodes(self) -> list[dict[str, Any]]:
+        self.calls.append("list_nodes")
         return [
             {
                 "filename": "stub.png",
@@ -289,8 +289,16 @@ class StubGraph:
             }
         ]
 
-    def get_all_comparisons(self, *_: Any, **__: Any) -> list[dict[str, Any]]:
-        self.calls.append("get_all_comparisons")
+    def get_all_nodes(self) -> list[Any]:
+        self.calls.append("get_all_nodes")
+        return [SimpleNamespace(filename="stub.png", data=self.list_nodes()[0])]
+
+    def get_all_links(self) -> list[Any]:
+        self.calls.append("get_all_links")
+        return []
+
+    def list_links(self, *_: Any, **__: Any) -> list[dict[str, Any]]:
+        self.calls.append("list_links")
         return []
 
     def clean_comparisons(self, **_: Any) -> int:
@@ -587,7 +595,7 @@ def test_real_data_pipeline():
 #   from comfyui_image_scorer.adapters.comfyui.nodes.aesthetic_score.node import AestheticScoreNode
 
 import torch
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 from comfyui_image_scorer.adapters.comfyui.nodes.aesthetic_score.node import AestheticScoreNode
 
 
@@ -635,9 +643,9 @@ class TestAestheticScoreNodeDelegation:
 
             # Verify every kwarg was forwarded — use call_args to avoid
             # tensor-comparison pitfalls in assert_called_once_with
-    mock.score.assert_called_once()
-                args, kwargs = mock.score.call_args
-                assert kwargs["image"] == torch.zeros(1, 512, 512, 3)
+            mock.score.assert_called_once()
+            args, kwargs = mock.score.call_args
+            assert torch.equal(kwargs["image"], torch.zeros(1, 512, 512, 3))
             assert kwargs["threshold"] == 0.5
             assert kwargs["positive"] == "test prompt"
             assert kwargs["negative"] == ""

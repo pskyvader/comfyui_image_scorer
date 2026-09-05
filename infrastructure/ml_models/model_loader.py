@@ -1,6 +1,5 @@
 import os
 import threading
-from typing import Any
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
@@ -25,6 +24,7 @@ import torch
 from torch import nn
 from safetensors.torch import load_file as load_safetensors
 from torchvision import transforms
+from torchvision.transforms import Compose
 import timm
 from ...core.configuration.settings import config
 from ...core.filesystem.paths import mediapipe_models_dir
@@ -99,29 +99,29 @@ class ModelLoader:
     def __init__(self):
         self.embedding_model: tuple[SentenceTransformer, int] | None = None
         self.vision_model_cache: dict[
-            str, tuple[nn.Module, int, int, transforms.Compose]
+            str, tuple[nn.Module, int, int, Compose]
         ] = {}
-        self._model_info_cache: dict[str, dict[str, Any]] = {}
-        self._hf_model_cache: dict[str, tuple[nn.Module, int, Any]] = {}
+        self._model_info_cache: dict[str, dict[str, object]] = {}
+        self._hf_model_cache: dict[str, tuple[nn.Module, int, object]] = {}
         self._hf_model_lock = threading.Lock()
-        self.cnn_model: Any | None = None
+        self.cnn_model: object | None = None
         self.download_mode: bool = False
         self.prepare_config = config["prepare"]
 
     @staticmethod
-    def _select_transform(name: str) -> transforms.Compose:
+    def _select_transform(name: str) -> Compose:
         if "clip" in name.lower():
             return ModelLoader._CLIP_NORM
         return ModelLoader._IMAGENET_NORM
 
     def load_vision_model(
         self, model_key: str
-    ) -> tuple[nn.Module, int, int, transforms.Compose]:
+    ) -> tuple[nn.Module, int, int, Compose]:
         cached = self.vision_model_cache.get(model_key)
         if cached is not None:
             return cached
 
-        vision_models: dict[str, dict[str, Any]] = self.prepare_config["vision_models"]
+        vision_models: dict[str, dict[str, object]] = self.prepare_config["vision_models"]
         if model_key not in vision_models:
             raise KeyError(
                 f"Vision model key '{model_key}' not found in prepare_config. "
@@ -179,7 +179,7 @@ class ModelLoader:
         }
         return result
 
-    def get_model_info(self, model_key: str) -> dict[str, Any]:
+    def get_model_info(self, model_key: str) -> dict[str, object]:
         if model_key not in self.vision_model_cache:
             self.load_vision_model(model_key)
         return self._model_info_cache.get(model_key, {})
@@ -206,7 +206,7 @@ class ModelLoader:
         self.embedding_model = (model, output_dim)
         return self.embedding_model
 
-    def load_hf_vision_model(self, model_key: str) -> tuple[nn.Module, int, Any]:
+    def load_hf_vision_model(self, model_key: str) -> tuple[nn.Module, int, object]:
         cached = self._hf_model_cache.get(model_key)
         if cached is not None:
             return cached
@@ -220,8 +220,8 @@ class ModelLoader:
         self._hf_model_cache[model_key] = result
         return result
 
-    def _load_hf_vision_model_impl(self, model_key: str) -> tuple[nn.Module, int, Any]:
-        attribute_models: dict[str, dict[str, Any]] = self.prepare_config["attribute_models"]
+    def _load_hf_vision_model_impl(self, model_key: str) -> tuple[nn.Module, int, object]:
+        attribute_models: dict[str, dict[str, object]] = self.prepare_config["attribute_models"]
         if model_key not in attribute_models:
             raise KeyError(
                 f"Attribute model key '{model_key}' not found in prepare_config. "

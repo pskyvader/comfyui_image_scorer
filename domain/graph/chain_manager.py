@@ -8,7 +8,7 @@ import time
 from tqdm import tqdm
 
 from ...core.observability.logger import get_logger, ModuleLogger
-from ...core.configuration.settings import config
+from .link_proxy import _ComparisonRecord
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -282,6 +282,8 @@ class ChainManager:
         self._common_chains: dict[int, tuple[list[str], bool]] = {}
         self._node_chains: dict[str, dict[int, bool]] = {}
 
+        self._comparison_history: list[_ComparisonRecord] = []
+
     # ==================================================================
     # Public accessors
     # ==================================================================
@@ -294,6 +296,12 @@ class ChainManager:
 
     def get_bottom_nodes(self) -> list[str]:
         return list(self._bottom_nodes)
+
+    def get_nodes_with_only_wins(self) -> list[str]:
+        return [node for node in self._all_filenames if self._worse_than[node] == [] and self._better_than[node]]
+
+    def get_nodes_with_only_losses(self) -> list[str]:
+        return [node for node in self._all_filenames if self._better_than[node] == [] and self._worse_than[node]]
 
     def get_better_than(self, node_id: str) -> list[str]:
         return self._better_than.get(node_id, [])
@@ -323,6 +331,9 @@ class ChainManager:
     def get_component_count(self) -> int:
         return len(self._component_members)
 
+    def get_component_ids(self) -> list[int]:
+        return list(self._component_members)
+
     def get_built_at(self) -> datetime | None:
         return self._built_at
 
@@ -334,6 +345,12 @@ class ChainManager:
 
     def set_db_comparison_count(self, count: int) -> None:
         self._db_comparison_count = count
+
+    def get_comparison_history(self) -> list[_ComparisonRecord]:
+        return list(self._comparison_history)
+
+    def clear_comparison_history(self) -> None:
+        self._comparison_history.clear()
 
     # ==================================================================
     # Build (full rebuild from comparison list)
@@ -354,6 +371,26 @@ class ChainManager:
         self._identify_top_bottom()
         self._build_components()
         self._build_chains()
+        # Replace history with fresh entries from this build
+        self._comparison_history = [
+            _ComparisonRecord(
+                id=comp["id"] if "id" in comp else index,
+                winner=comp["winner"],
+                loser=(
+                    comp["filename_b"]
+                    if comp["winner"] == comp["filename_a"]
+                    else comp["filename_a"]
+                ),
+                timestamp=comp["timestamp"] if "timestamp" in comp else "",
+            )
+            for index, comp in enumerate(comparisons)
+        ]
+
+    def link_exists_between(self, first: str, second: str) -> bool:
+        return first in self._worse_than[second] or second in self._worse_than[first]
+
+    def can_reach(self, start: str, end: str) -> bool:
+        return self._can_reach(start, end)
         # logger.info("build complete", start_timer=_start)
 
     def _reset_adjacency(self) -> None:
@@ -392,6 +429,17 @@ class ChainManager:
 
         self._update_top_bottom_for_edge(winner, loser)
         self._merge_node_components(winner, loser)
+
+        # Record in comparison history (replaces last entry if present)
+        ts = datetime.now(timezone.utc).isoformat()
+        for entry in self._comparison_history:
+            if entry.winner == winner and entry.loser == loser:
+                entry.timestamp = ts
+                break
+        else:
+            self._comparison_history.append(_ComparisonRecord(
+                id=len(self._comparison_history), winner=winner, loser=loser, timestamp=ts
+            ))
 
         self._db_comparison_count += 1
         self._built_at = datetime.now(timezone.utc)
@@ -802,7 +850,7 @@ class ChainManager:
         end: str,
     ) -> bool:
         _start = time.perf_counter()
-        max_depth = config["ranking"]["transitive_depth"]
+        max_depth = 1000  # default depth limit for BFS search
         reject: str | None = self._quick_reject(start, end)
         if reject is not None:
             return False

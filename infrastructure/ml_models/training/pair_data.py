@@ -57,12 +57,10 @@ def build_pairwise_dataset(
             else:
                 continue
 
-            weight_value = comp.get("weight", 1.0)
-            weight = float(weight_value)
             rows.append(np.asarray(x[winner_idx], dtype=np.float32))
             rows.append(np.asarray(x[loser_idx], dtype=np.float32))
             labels.extend([1.0, 0.0])
-            weights.extend([weight, weight])
+            weights.extend([1.0, 1.0])
             groups.append(2)
             valid_pairs += 1
 

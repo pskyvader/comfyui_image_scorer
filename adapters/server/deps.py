@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Callable
 
 from flask import current_app
 
 from ...application.services.graph_service import CrystalGraph
 from ...application.hyperparameters.hyperparameter_optimizer import HpoRunner
-from ...application.services.image_processor import ImageProcessor, PathOps
+from ...application.services.image_processor import ImageProcessor
 from ..cli.deps import CLIDeps
 from ...domain.database.ports import PathResolver
 from ...domain.loading import BatchSizerFactory, MapsProvider, ModelLoader, TrainingLoader
 from ...domain.ports.cache import CacheProvider
 from ...domain.ports.ml_providers import MediaPipePort
+from ...infrastructure.ml_models.training.model_trainer import ModelTrainer
+from ...infrastructure.ml_models.plot import PlotManager
 
 
 def get_server_deps() -> ServerDeps:
@@ -26,23 +28,23 @@ class ServerDeps:
     """Dependency container for endpoints; superset of CLIDeps via to_cli_deps()."""
 
     path_resolver: PathResolver
-    path_ops: PathOps
+    path_ops: FileManager
     graph: CrystalGraph
     processor: ImageProcessor
     model_loader: ModelLoader
     batch_sizer_factory: BatchSizerFactory
     maps_provider: MapsProvider
     training_loader: TrainingLoader
-    model_trainer: Any
+    model_trainer: ModelTrainer
     cache: CacheProvider
     hpo_runner: HpoRunner
-    plot_manager: Any
+    plot_manager: type[PlotManager]
     mediapipe: MediaPipePort
-    vacuum_database: Callable[..., Any]
+    vacuum_database: Callable[..., None]
     deduplicate_scored: Callable[..., int]
     cleanup_orphans: Callable[..., int]
-    download_configured_models: Callable[..., Any]
-    download_mediapipe_models: Callable[..., Any]
+    download_configured_models: Callable[..., None]
+    download_mediapipe_models: Callable[..., None]
     set_hub_offline: Callable[[bool], None]
 
     def to_cli_deps(self) -> CLIDeps:

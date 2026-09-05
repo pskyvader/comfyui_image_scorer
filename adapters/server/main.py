@@ -39,12 +39,11 @@ from ...infrastructure.persistence.path_handler import (
     compute_path_from_filename,
     find_image_path,
     sync_image_metadata_to_json,
-    clear_folder_cache,
-    prewarm_folder_cache,
 )
+from ...infrastructure.persistence.file_manager import FileManager
 from ...infrastructure.persistence.images_repository import (
     SQLiteImagesRepository,
-    get_image as get_db_image,
+    find_node as get_db_node,
 )
 from ...infrastructure.persistence.comparisons_repository import (
     SQLiteComparisonsRepository,
@@ -55,7 +54,7 @@ from ...infrastructure.persistence.database import vacuum_database
 from ...application.services.graph_service import CrystalGraph
 from ...application.hyperparameters.hyperparameter_optimizer import HpoRunner
 from ...infrastructure.ml_models.plot import PlotManager
-from ...application.services.image_processor import ImageProcessor, PathOps
+from ...application.services.image_processor import ImageProcessor
 from ...infrastructure.ml_models.model_loader import (
     model_loader,
     download_configured_models,
@@ -80,6 +79,7 @@ graph = CrystalGraph(
     image_repo=image_repo,
     comparison_repo=comparison_repo,
     cache=InMemoryCache(default_ttl=IMAGES_CACHE_TTL),
+    file_port=FileManager(),
 )
 
 
@@ -103,15 +103,7 @@ class _PathResolverAdapter:
         )
 
 
-path_ops = PathOps(
-    ranked_root=get_ranked_root,
-    compute_path=compute_path_from_filename,
-    sync_metadata=sync_image_metadata_to_json,
-    clear_folder_cache=clear_folder_cache,
-    prewarm_folder_cache=prewarm_folder_cache,
-    deduplicate_scored=deduplicate_scored,
-    cleanup_orphans=cleanup_orphans,
-)
+path_ops = FileManager()
 
 # Long-lived cache for analysis results and split data across build runs.
 _build_cache = InMemoryCache()
@@ -260,7 +252,7 @@ def serve_image_by_name(filename: str):
                 return compressed_image_response(dest, fname, _webp_cache)
             return send_file(str(dest))
 
-    db_entry = get_db_image(fname)
+    db_entry = get_db_node(fname)
     if db_entry and db_entry["score"] is not None:
         dest = compute_path_from_filename(fname, db_entry["score"])
         if dest.exists() and dest.is_file():

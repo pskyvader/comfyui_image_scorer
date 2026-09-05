@@ -2,7 +2,6 @@
 
 import time
 from collections import OrderedDict
-from typing import Any
 
 from ...domain.ports.cache import CacheProvider
 
@@ -15,10 +14,10 @@ class InMemoryCache(CacheProvider):
     ) -> None:
         self._default_ttl = default_ttl
         self._max_bytes = max_bytes
-        self._data: OrderedDict[str, tuple[Any, float | None]] = OrderedDict()
+        self._data: OrderedDict[str, tuple[object, float | None]] = OrderedDict()
         self._size_bytes = 0
 
-    def get(self, key: str) -> Any | None:
+    def get(self, key: str) -> object | None:
         entry = self._data.get(key)
         if entry is None:
             return None
@@ -29,24 +28,24 @@ class InMemoryCache(CacheProvider):
             return None
         return value
 
-    def set(self, key: str, value: Any) -> None:
+    def set(self, key: str, value: object) -> None:
         if key in self._data:
             old_value, _ = self._data[key]
-            self._size_bytes -= len(old_value)
+            self._size_bytes -= len(old_value)  # type: ignore[arg-type]
             del self._data[key]
         expires_at = (
             time.time() + self._default_ttl if self._default_ttl is not None else None
         )
         self._data[key] = (value, expires_at)
-        self._size_bytes += len(value)
+        self._size_bytes += len(value)  # type: ignore[arg-type]
         while self._max_bytes is not None and self._size_bytes > self._max_bytes and self._data:
             _, (evicted, _) = self._data.popitem(last=False)
-            self._size_bytes -= len(evicted)
+            self._size_bytes -= len(evicted)  # type: ignore[arg-type]
 
     def invalidate(self, key: str) -> None:
         entry = self._data.pop(key, None)
         if entry is not None:
-            self._size_bytes -= len(entry[0])
+            self._size_bytes -= len(entry[0])  # type: ignore[arg-type]
 
     def clear(self) -> None:
         self._data.clear()

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Protocol
 
 
 class ImageRepository(Protocol):
-    def get_image(self, filename: str) -> dict[str, Any] | None:
+    def find_node(self, filename: str) -> dict[str, object] | None:
         ...
 
-    def get_all_images(self) -> list[dict[str, Any]]:
+    def list_nodes(self) -> list[dict[str, object]]:
         ...
 
     def get_image_count(self) -> int:
@@ -53,8 +53,6 @@ class ComparisonRepository(Protocol):
         filename_a: str,
         filename_b: str,
         winner: str,
-        weight: float,
-        transitive_depth: int,
         timestamp: str | None,
     ) -> int:
         ...
@@ -65,30 +63,25 @@ class ComparisonRepository(Protocol):
         filename_b: str,
         winner: str,
         timestamp: str,
-        weight: float,
-        transitive_depth: int,
     ) -> int:
         ...
 
     def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool:
         ...
 
-    def get_all_comparisons(self, weight: float | None = None) -> list[dict[str, Any]]:
+    def list_links(self) -> list[dict[str, object]]:
         ...
 
     def get_total_comparisons(self) -> int:
         ...
 
-    def get_skipped_comparison_count(self) -> int:
-        ...
-
     def clean_comparisons(self) -> dict[str, int]:
         ...
 
-    def get_images_with_only_wins(self) -> list[str]:
+    def get_nodes_with_only_wins(self) -> list[str]:
         ...
 
-    def get_images_with_only_losses(self) -> list[str]:
+    def get_nodes_with_only_losses(self) -> list[str]:
         ...
 
     def clear_all_comparisons(self) -> int:
@@ -103,6 +96,6 @@ class PathResolver(Protocol):
         rating_mu: float,
         rating_sigma: float,
         comparison_count: int,
-        all_comparisons: list[dict[str, Any]] | None = None,
+        all_comparisons: list[dict[str, object]] | None = None,
     ) -> bool:
         ...

@@ -6,7 +6,6 @@ from tqdm import tqdm
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Callable
-from typing import Any
 from skimage.feature import local_binary_pattern
 
 from .mediapipe_analysis import MediaPipeAnalyzer, POSE_LANDMARK_NAMES
@@ -22,7 +21,7 @@ from ..vectors.image_vector import ImageVector
 logger: ModuleLogger = get_logger(__name__)
 
 # Type Alias for the shared data structure
-ImageEntry = tuple[str, dict[str, Any], str, str]
+ImageEntry = tuple[str, dict[str, object], str, str]
 
 REQUIRED_ANALYSIS_FIELDS: frozenset[str] = frozenset({
     "original_width",
@@ -108,7 +107,7 @@ class ImageAnalysis(ImageVector):
         )
 
     @staticmethod
-    def _entry_has_required_fields(entry: dict[str, Any]) -> bool:
+    def _entry_has_required_fields(entry: dict[str, object]) -> bool:
         keys = set(entry.keys())
         if isinstance(entry.get("custom_text"), dict):
             keys.update(entry["custom_text"].keys())
@@ -129,8 +128,8 @@ class ImageAnalysis(ImageVector):
         atomic_write_json(json_path, entry[1], indent=2)
 
     def _image_size(
-        self, img: Image.Image, entry: dict[str, Any], data: ImageEntry
-    ) -> dict[str, Any]:
+        self, img: Image.Image, entry: dict[str, object], data: ImageEntry
+    ) -> dict[str, object]:
         size_keys = [
             "original_width",
             "original_height",
@@ -163,7 +162,7 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _contrast(self, img: Image.Image, entry: dict[str, Any]) -> dict[str, Any]:
+    def _contrast(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
         if "contrast" in entry:
             return entry
         _start = time.perf_counter()
@@ -173,7 +172,7 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _sharpness(self, img: Image.Image, entry: dict[str, Any]) -> dict[str, Any]:
+    def _sharpness(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
         if "sharpness" in entry:
             return entry
         _start = time.perf_counter()
@@ -190,7 +189,7 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _noise_score(self, img: Image.Image, entry: dict[str, Any]) -> dict[str, Any]:
+    def _noise_score(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
         if "noise_score" in entry:
             return entry
         _start = time.perf_counter()
@@ -208,7 +207,7 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _colorfulness(self, img: Image.Image, entry: dict[str, Any]) -> dict[str, Any]:
+    def _colorfulness(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
         if "colorfulness" in entry:
             return entry
         _start = time.perf_counter()
@@ -226,8 +225,8 @@ class ImageAnalysis(ImageVector):
         return entry
 
     def _artifact_score(
-        self, img: Image.Image, entry: dict[str, Any]
-    ) -> dict[str, Any]:
+        self, img: Image.Image, entry: dict[str, object]
+    ) -> dict[str, object]:
         if "artifact_score" in entry:
             return entry
         _start = time.perf_counter()
@@ -244,7 +243,7 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _edge_density(self, img: Image.Image, entry: dict[str, Any]) -> dict[str, Any]:
+    def _edge_density(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
         if "edge_density" in entry:
             return entry
         _start = time.perf_counter()
@@ -256,7 +255,7 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _texture_lbp(self, img: Image.Image, entry: dict[str, Any]) -> dict[str, Any]:
+    def _texture_lbp(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
         if "texture_lbp" in entry:
             return entry
         _start = time.perf_counter()
@@ -270,7 +269,7 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _mediapipe_analysis(self, img: Image.Image, entry: dict[str, Any]) -> dict[str, Any]:
+    def _mediapipe_analysis(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
         mp_fields = {"bbox"} | set(POSE_LANDMARK_NAMES)
         if mp_fields.issubset(entry.keys()):
             return entry
@@ -278,7 +277,7 @@ class ImageAnalysis(ImageVector):
         entry.update(result)
         return entry
 
-    def _assemble_analysis_map(self, entry: dict[str, Any]) -> dict[str, Any]:
+    def _assemble_analysis_map(self, entry: dict[str, object]) -> dict[str, object]:
         if "analysis" in entry:
             return entry
         analysis: dict[str, float] = {}
@@ -289,7 +288,7 @@ class ImageAnalysis(ImageVector):
         entry["analysis"] = analysis
         return entry
 
-    def _nsfw_analysis(self, img: Image.Image, entry: dict[str, Any]) -> dict[str, Any]:
+    def _nsfw_analysis(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
         if "nsfw_score" in entry:
             return entry
         entry["nsfw_score"] = self._nsfw.predict(img)
@@ -350,7 +349,7 @@ class ImageAnalysis(ImageVector):
         return data_batch
 
     @staticmethod
-    def _normalize_lora(entry: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_lora(entry: dict[str, object]) -> dict[str, object]:
         """Fold the legacy scalar ``lora_weight`` into the ``lora`` map.
 
         The ``lora`` field is normalized to a weighted dict ``{name: weight}``

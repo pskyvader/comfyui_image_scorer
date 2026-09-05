@@ -49,7 +49,12 @@ def build_split_files(
 
     logger.debug("loading already-processed ids from split files...")
     split_ids = VectorList(
-        [], read_only=False, model_loader=model_loader, batch_sizer_factory=batch_sizer_factory, maps_provider=maps_provider, cache=cache
+        [],
+        read_only=False,
+        model_loader=model_loader,
+        batch_sizer_factory=batch_sizer_factory,
+        maps_provider=maps_provider,
+        cache=cache,
     )
     processed_files: set[str] | None = None
     for c in split_ids.sorted_vectors.values():
@@ -146,7 +151,9 @@ def build_full_files(
 
 
 def run_rebuild_scores_only(graph: Any) -> dict[str, Any]:
-    rows = graph.get_all_comparisons()
+    graph.rebuild_from_database()
+    rows = [link.data for link in graph.get_all_links()]
+    # logger.debug(f"links: {len(rows)}")
 
     comparisons = [
         {

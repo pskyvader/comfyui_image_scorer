@@ -50,7 +50,6 @@ class RankingSection(SectionModel):
     """ranking_config.json."""
 
     subfolder_threshold: int
-    transitive_depth: int
     lru_size: int
     max_workers: int
     default_score: float

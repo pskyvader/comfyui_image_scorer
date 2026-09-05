@@ -1,4 +1,5 @@
 """Application service owning graph-level selection memory accessors."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -14,7 +15,9 @@ from ...domain.graph.chain_manager import ChainManager
 from ...domain.graph.node_proxy import NodeProxy
 from ...domain.graph.chain_proxy import ChainProxy
 from ...domain.graph.component_proxy import ComponentProxy
+from ...domain.graph.link_proxy import LinkProxy, _ComparisonRecord
 from ...domain.ports.cache import CacheProvider
+from ...domain.files.ports import FilePort
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -32,6 +35,7 @@ class CrystalGraph:
         image_repo: ImageRepository | None = None,
         comparison_repo: ComparisonRepository | None = None,
         cache: CacheProvider | None = None,
+        file_port: FilePort | None = None,
     ) -> None:
         self._chain: ChainManager = ChainManager()
         self._images: dict[str, dict[str, Any]] = {}
@@ -41,13 +45,41 @@ class CrystalGraph:
         self._image_repo = image_repo
         self._comparison_repo = comparison_repo
         self._cache = cache
+        self._file_port = file_port
+        self._loaded: bool = False
         # Selection working memory (#49/#50): replaces the former module-level
         # _skip_before/_existing_pairs/_last_chains_index globals.
         self._skip_before: int = 0
         self._existing_pairs: set[tuple[str, str]] = set()
         self._recent_chain_ids: list[int] = []
 
+    def _make_node(self, node_id: str) -> NodeProxy:
+        return NodeProxy(self._chain, node_id, self._images.get(node_id))
+
+    def _make_chain(self, chain_id: int, nodes: list[str]) -> ChainProxy:
+        return ChainProxy(self._chain, chain_id, nodes)
+
+    def _make_component(self, component_id: int) -> ComponentProxy:
+        return ComponentProxy(self._chain, component_id)
+
+    def _make_link(self, record: Any) -> LinkProxy:
+        return LinkProxy(self._chain, record)
+
+    def read_json_file(self, path: str) -> dict[str, Any]:
+        if self._file_port is None:
+            raise RuntimeError("No filesystem port provided")
+        return self._file_port.read_json(path)
+
+    def write_json_file(self, path: str, data: dict[str, Any]) -> None:
+        if self._file_port is None:
+            raise RuntimeError("No filesystem port provided")
+        self._file_port.write_json(path, data)
+
     # -- Lifecycle ------------------------------------------------------
+    def is_loaded(self) -> bool:
+        """Return whether this graph has been explicitly built from data."""
+        return self._loaded
+
     def get_node_chain_length(self, filename: str) -> int:
         main: tuple[int, list[str]] | None = self._chain.get_node_main_chain(filename)
         if main is None:
@@ -79,14 +111,14 @@ class CrystalGraph:
             if self._image_repo is None:
                 self._rebuilding = False
                 raise RuntimeError("No ImageRepository provided and no images passed")
-            images = self._image_repo.get_all_images()
+            images = self._image_repo.list_nodes()
         if comparisons is None:
             if self._comparison_repo is None:
                 self._rebuilding = False
                 raise RuntimeError(
                     "No ComparisonRepository provided and no comparisons passed"
                 )
-            comparisons = self._comparison_repo.get_all_comparisons()
+            comparisons = self._comparison_repo.list_links()
 
         self._images = {img["filename"]: img for img in images}
         self._chain.set_db_comparison_count(len(comparisons))
@@ -99,6 +131,7 @@ class CrystalGraph:
             all_filenames.add(comp["filename_b"])
 
         self._chain.build(comparisons, all_filenames=all_filenames)
+        self._loaded = True
         self._chain_map = None  # chain map will be rebuilt lazily
         # self.get_chains_map()
         self._rebuilding = False
@@ -106,6 +139,33 @@ class CrystalGraph:
 
     def apply_comparison(self, winner: str, loser: str) -> None:
         self._chain.apply_comparison(winner, loser)
+
+    def add_link(
+        self,
+        filename_a: str,
+        filename_b: str,
+        winner: str,
+        timestamp: str,
+    ) -> int:
+        if self._comparison_repo is None:
+            raise RuntimeError("No ComparisonRepository provided")
+        link_id = self._comparison_repo.add_comparison(
+            filename_a=filename_a,
+            filename_b=filename_b,
+            winner=winner,
+            timestamp=timestamp,
+        )
+        loser = filename_b if winner == filename_a else filename_a
+        self._chain.apply_comparison(winner, loser)
+        history = self._chain.get_comparison_history()
+        record = next(
+            item
+            for item in reversed(history)
+            if item.winner == winner and item.loser == loser
+        )
+        record.id = link_id
+        record.timestamp = timestamp
+        return link_id
 
     # -- Selection working memory (#49/#50) ------------------------------
 
@@ -168,8 +228,7 @@ class CrystalGraph:
     def get_node(self, node_id: str | None) -> NodeProxy | None:
         if node_id is None or node_id not in self._chain.get_all_filenames():
             return None
-        image_data: dict[str, Any] | None = self._images.get(node_id)
-        return NodeProxy(self._chain, node_id, image_data)
+        return self._make_node(node_id)
 
     def get_all_nodes(
         self, only_top: bool = False, only_bottom: bool = False
@@ -177,19 +236,10 @@ class CrystalGraph:
         if only_top and only_bottom:
             raise ValueError("only_top and only_bottom cannot both be True")
         if only_top:
-            return [
-                NodeProxy(self._chain, n, self._images.get(n))
-                for n in self._chain.get_top_nodes()
-            ]
+            return [self._make_node(n) for n in self._chain.get_top_nodes()]
         if only_bottom:
-            return [
-                NodeProxy(self._chain, n, self._images.get(n))
-                for n in self._chain.get_bottom_nodes()
-            ]
-        return [
-            NodeProxy(self._chain, n, self._images.get(n))
-            for n in self._chain.get_all_filenames()
-        ]
+            return [self._make_node(n) for n in self._chain.get_bottom_nodes()]
+        return [self._make_node(n) for n in self._chain.get_all_filenames()]
 
     # -- Chain lookups --------------------------------------------------
 
@@ -206,31 +256,26 @@ class CrystalGraph:
             )
             if main is None:
                 return None
-            return ChainProxy(self._chain, main[0], main[1])
+            return self._make_chain(main[0], main[1])
         if chain_id is not None:
             chains: dict[int, list[str]] = self._chain.get_chains()
             if chain_id < 0 or chain_id not in chains:
                 return None
-            return ChainProxy(self._chain, chain_id, chains[chain_id])
+            return self._make_chain(chain_id, chains[chain_id])
         return None
 
     def get_all_chains(
         self,
         min_length: int = 0,
         sort_order: str = "desc",
-    ) -> list[tuple[ChainProxy, list[NodeTuple]]]:
-        _start = time.perf_counter()
-        result: list[tuple[ChainProxy, list[NodeTuple]]] = []
-        length_data: ChainDict
-        chain: ChainProxy
-        node_list: list[NodeTuple]
-        for length_data in self.get_chains_map().values():
-            for chain, node_list in length_data.values():
-                result.append((chain, node_list))
+    ) -> list[ChainProxy]:
+        result = [
+            self._make_chain(chain_id, nodes)
+            for chain_id, nodes in self._chain.get_chains().items()
+        ]
         if min_length > 0:
-            result = [c for c in result if min_length <= c[0].length]
-        result.sort(key=lambda c: c[0].length, reverse=(sort_order != "asc"))
-        logger.debug(f"all chains: {len(result)}", start_timer=_start)
+            result = [chain for chain in result if min_length <= chain.length]
+        result.sort(key=lambda chain: chain.length, reverse=(sort_order != "asc"))
         return result
 
     def get_component(
@@ -250,31 +295,48 @@ class CrystalGraph:
             cid = self._chain.get_component_id(node_id)
             if cid is None:
                 return None
-            return ComponentProxy(self._chain, cid)
+            return self._make_component(cid)
         if component_id is not None:
-            if component_id not in self._chain._component_members:
+            if component_id not in self._chain.get_component_ids():
                 return None
-            return ComponentProxy(self._chain, component_id)
+            return self._make_component(component_id)
         if chain_id is not None:
             chain: ChainProxy | None = self.get_chain(chain_id=chain_id)
-            if chain is None or not chain._nodes:
+            if chain is None or not chain.nodes:
                 return None
-            component_id = self._chain.get_component_id(chain._nodes[0])
+            component_id = self._chain.get_component_id(chain.nodes[0].filename)
             if component_id is None:
                 return None
-            return ComponentProxy(self._chain, component_id)
+            return self._make_component(component_id)
         return None
 
     def get_all_components(self) -> list[ComponentProxy]:
         return [
-            ComponentProxy(self._chain, component_id)
-            for component_id in self._chain._component_members
+            self._make_component(component_id)
+            for component_id in self._chain.get_component_ids()
         ]
 
     # -- Links ----------------------------------------------------------
 
-    def get_all_links(self) -> set[tuple[str, str]]:
-        return set(self._chain.get_all_edges())
+    def get_all_links(self) -> list[LinkProxy]:
+        records: list[_ComparisonRecord] = self._chain.get_comparison_history()
+        logger.debug(f"records: {len(records)}")
+        return [self._make_link(record) for record in records]
+
+    def get_link_count(self) -> int:
+        return len(self._chain.get_comparison_history())
+
+    def get_node_count(self) -> int:
+        return len(self._chain.get_all_filenames())
+
+    def get_winner_only_nodes(self) -> list[NodeProxy]:
+        return [self._make_node(n) for n in self._chain.get_nodes_with_only_wins()]
+
+    def get_loser_only_nodes(self) -> list[NodeProxy]:
+        return [self._make_node(n) for n in self._chain.get_nodes_with_only_losses()]
+
+    def link_exists_between(self, a: str, b: str) -> bool:
+        return self._chain.link_exists_between(a, b)
 
     # -- Stats ----------------------------------------------------------
 
@@ -298,25 +360,13 @@ class CrystalGraph:
             or img2 not in self._chain.get_all_filenames()
         ):
             return False
-        if self._chain._can_reach(img1, img2):
+        if self._chain.can_reach(img1, img2):
             return True
-        if self._chain._can_reach(img2, img1):
+        if self._chain.can_reach(img2, img1):
             return True
         return False
 
     # -- Repository facade (#47): the single DB-facing surface ----------
-
-    def get_all_images(self) -> list[dict[str, Any]]:
-        assert self._image_repo is not None
-        return self._image_repo.get_all_images()
-
-    def get_image(self, filename: str) -> dict[str, Any] | None:
-        assert self._image_repo is not None
-        return self._image_repo.get_image(filename)
-
-    def get_image_count(self) -> int:
-        assert self._image_repo is not None
-        return self._image_repo.get_image_count()
 
     def add_image(
         self,
@@ -372,21 +422,13 @@ class CrystalGraph:
         assert self._comparison_repo is not None
         return self._comparison_repo.get_total_comparisons()
 
-    def get_skipped_comparison_count(self) -> int:
+    def get_nodes_with_only_wins(self) -> list[str]:
         assert self._comparison_repo is not None
-        return self._comparison_repo.get_skipped_comparison_count()
+        return self._comparison_repo.get_nodes_with_only_wins()
 
-    def get_all_comparisons(self, weight: float | None = None) -> list[dict[str, Any]]:
+    def get_nodes_with_only_losses(self) -> list[str]:
         assert self._comparison_repo is not None
-        return self._comparison_repo.get_all_comparisons(weight)
-
-    def get_images_with_only_wins(self) -> list[str]:
-        assert self._comparison_repo is not None
-        return self._comparison_repo.get_images_with_only_wins()
-
-    def get_images_with_only_losses(self) -> list[str]:
-        assert self._comparison_repo is not None
-        return self._comparison_repo.get_images_with_only_losses()
+        return self._comparison_repo.get_nodes_with_only_losses()
 
     def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool:
         assert self._comparison_repo is not None
@@ -397,8 +439,6 @@ class CrystalGraph:
         filename_a: str,
         filename_b: str,
         winner: str,
-        weight: float,
-        transitive_depth: int,
         timestamp: str,
     ) -> Any:
         assert self._comparison_repo is not None
@@ -406,8 +446,6 @@ class CrystalGraph:
             filename_a=filename_a,
             filename_b=filename_b,
             winner=winner,
-            weight=weight,
-            transitive_depth=transitive_depth,
             timestamp=timestamp,
         )
 
@@ -417,8 +455,6 @@ class CrystalGraph:
         filename_b: str,
         winner: str,
         timestamp: str,
-        weight: float,
-        transitive_depth: int,
     ) -> Any:
         assert self._comparison_repo is not None
         return self._comparison_repo.add_historical_comparison(
@@ -426,8 +462,6 @@ class CrystalGraph:
             filename_b=filename_b,
             winner=winner,
             timestamp=timestamp,
-            weight=weight,
-            transitive_depth=transitive_depth,
         )
 
     def clean_comparisons(self) -> Any:
@@ -437,6 +471,11 @@ class CrystalGraph:
     def clear_all_comparisons(self) -> None:
         assert self._comparison_repo is not None
         self._comparison_repo.clear_all_comparisons()
+        self._chain.build([], all_filenames=set())
+        self._images.clear()
+        self._chain.set_db_comparison_count(0)
+        self._chain.clear_comparison_history()
+        self._loaded = False
 
     def get_chains_map(self) -> dict[int, ChainDict]:
         if self._chain_map is not None:
@@ -498,14 +537,12 @@ class CrystalGraph:
                         continue
 
                     local_main_chains = main_chains[chain_id]
-                    chain_proxy = ChainProxy(self._chain, chain_id, chain_nodes)
+                    chain_proxy = self._make_chain(chain_id, chain_nodes)
 
                     final_chain = []
                     for node_name in chain_nodes:
                         is_main_node = node_name in local_main_chains
-                        node_proxy = NodeProxy(
-                            self._chain, node_name, self._images.get(node_name)
-                        )
+                        node_proxy = self._make_node(node_name)
                         final_chain.append((node_proxy, is_main_node))
 
                     final_map[length][chain_id] = (chain_proxy, final_chain)

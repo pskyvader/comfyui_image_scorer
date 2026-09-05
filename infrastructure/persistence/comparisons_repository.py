@@ -35,8 +35,6 @@ def add_historical_comparison(
     filename_b: str,
     winner: str,
     timestamp: str,
-    weight: float,
-    transitive_depth: int,
 ) -> int:
     """Insert one historical comparison row if an exact copy does not already exist."""
     filename_a = str(filename_a)
@@ -51,15 +49,13 @@ def add_historical_comparison(
         exists = conn.execute(
             """
             SELECT id FROM comparisons
-            WHERE filename_a=? AND filename_b=? AND winner=? AND timestamp=? AND weight=? AND transitive_depth=?
+            WHERE filename_a=? AND filename_b=? AND winner=? AND timestamp=?
             """,
             (
                 canon_a,
                 canon_b,
                 winner,
                 timestamp_value,
-                float(weight),
-                int(transitive_depth),
             ),
         ).fetchone()
         if exists:
@@ -67,16 +63,14 @@ def add_historical_comparison(
 
         cur = conn.execute(
             """
-            INSERT INTO comparisons(filename_a, filename_b, winner, timestamp, weight, transitive_depth)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO comparisons(filename_a, filename_b, winner, timestamp)
+            VALUES (?, ?, ?, ?)
             """,
             (
                 canon_a,
                 canon_b,
                 winner,
                 timestamp_value,
-                float(weight),
-                int(transitive_depth),
             ),
         )
         conn.commit()
@@ -87,8 +81,6 @@ def add_comparison(
     filename_a: str,
     filename_b: str,
     winner: str,
-    weight: float,
-    transitive_depth: int,
     timestamp: str | None,
 ) -> int:
     """Record a comparison result."""
@@ -106,16 +98,14 @@ def add_comparison(
     with get_db_connection() as conn:
         cur = conn.execute(
             """
-            INSERT INTO comparisons(filename_a, filename_b, winner, timestamp, weight, transitive_depth)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO comparisons(filename_a, filename_b, winner, timestamp)
+            VALUES (?, ?, ?, ?)
             """,
             (
                 canon_a,
                 canon_b,
                 winner,
                 timestamp_value,
-                float(weight),
-                int(transitive_depth),
             ),
         )
         conn.commit()
@@ -145,28 +135,16 @@ def get_total_comparisons() -> int:
         return int(row["cnt"]) if row else 0
 
 
-def get_skipped_comparison_count() -> int:
-    with get_db_connection() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) as cnt FROM comparisons WHERE weight < 1.0"
-        ).fetchone()
-        return int(row["cnt"]) if row else 0
-
-
-def get_all_comparisons(weight: float | None = None) -> list[dict[str, Any]]:
+def list_links() -> list[dict[str, Any]]:
     query = "SELECT * FROM comparisons"
-    values: list[Any] = []
-    if weight is not None:
-        query += " WHERE weight=?"
-        values.append(float(weight))
     query += " ORDER BY timestamp ASC, id ASC"
 
     with get_db_connection() as conn:
-        rows = conn.execute(query, tuple(values)).fetchall()
+        rows = conn.execute(query, ()).fetchall()
         return [dict(row) for row in rows]
 
 
-def get_images_with_only_wins() -> list[str]:
+def get_nodes_with_only_wins() -> list[str]:
     with get_db_connection() as conn:
         rows = conn.execute("""
             SELECT DISTINCT winner AS filename FROM comparisons
@@ -177,7 +155,7 @@ def get_images_with_only_wins() -> list[str]:
         return [str(row["filename"]) for row in rows]
 
 
-def get_images_with_only_losses() -> list[str]:
+def get_nodes_with_only_losses() -> list[str]:
     with get_db_connection() as conn:
         rows = conn.execute("""
             SELECT CASE WHEN winner = filename_a THEN filename_b ELSE filename_a END AS filename
@@ -296,16 +274,12 @@ class SQLiteComparisonsRepository:
         filename_a: str,
         filename_b: str,
         winner: str,
-        weight: float,
-        transitive_depth: int,
         timestamp: str | None,
     ) -> int:
         return add_comparison(
             filename_a=filename_a,
             filename_b=filename_b,
             winner=winner,
-            weight=weight,
-            transitive_depth=transitive_depth,
             timestamp=timestamp,
         )
 
@@ -315,40 +289,31 @@ class SQLiteComparisonsRepository:
         filename_b: str,
         winner: str,
         timestamp: str,
-        weight: float,
-        transitive_depth: int,
     ) -> int:
         return add_historical_comparison(
             filename_a=filename_a,
             filename_b=filename_b,
             winner=winner,
             timestamp=timestamp,
-            weight=weight,
-            transitive_depth=transitive_depth,
         )
 
     def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool:
         return comparison_exists_for_pair(filename_a, filename_b)
 
-    def get_all_comparisons(
-        self, weight: float | None = None
-    ) -> list[dict[str, Any]]:
-        return get_all_comparisons(weight=weight)
+    def list_links(self) -> list[dict[str, Any]]:
+        return list_links()
 
     def get_total_comparisons(self) -> int:
         return get_total_comparisons()
 
-    def get_skipped_comparison_count(self) -> int:
-        return get_skipped_comparison_count()
-
     def clean_comparisons(self) -> dict[str, int]:
         return clean_comparisons()
 
-    def get_images_with_only_wins(self) -> list[str]:
-        return get_images_with_only_wins()
+    def get_nodes_with_only_wins(self) -> list[str]:
+        return get_nodes_with_only_wins()
 
-    def get_images_with_only_losses(self) -> list[str]:
-        return get_images_with_only_losses()
+    def get_nodes_with_only_losses(self) -> list[str]:
+        return get_nodes_with_only_losses()
 
     def clear_all_comparisons(self) -> int:
         return clear_all_comparisons()

@@ -9,9 +9,7 @@ execution order — the list index IS the phase number.
 from __future__ import annotations
 
 import random
-from typing import Any
 import time
-
 
 from ....core.observability.logger import get_logger, ModuleLogger
 from ....core.configuration.settings import config
@@ -24,7 +22,7 @@ from .pair_active import (
     phase_uncertainty_refine,
     phase_fallback,
 )
-from .graph_helpers import pair_key, stable_seed_pool
+from .graph_helpers import pair_key, stable_seed_pool, CrystalGraph
 from ...graph.node_proxy import NodeProxy
 
 logger: ModuleLogger = get_logger(__name__)
@@ -32,7 +30,7 @@ logger: ModuleLogger = get_logger(__name__)
 
 # Each entry is a dict whose first key is the phase name (mapping to its
 # function).  Remaining keys are metadata consumed by the frontend.
-PHASES: tuple[dict[str, Any], ...] = (
+PHASES: tuple[dict[str, object], ...] = (
     {
         "seed": phase_seed_coverage,
         "phase_label": "Phase 1 / Bootstrap Seed",
@@ -93,15 +91,15 @@ PHASES: tuple[dict[str, Any], ...] = (
 )
 
 
-def get_phases() -> list[dict[str, Any]]:
+def get_phases() -> list[dict[str, object]]:
     """Return a JSON-serializable version of PHASES (callables stripped).
 
     Each output dict includes the ``name`` key (derived from the callable
     key in the source entry) for the frontend to identify the phase.
     """
-    result: list[dict[str, Any]] = []
+    result: list[dict[str, object]] = []
     for entry in PHASES:
-        cleaned: dict[str, Any] = {}
+        cleaned: dict[str, object] = {}
         name: str | None = None
         for k, v in entry.items():
             if callable(v):
@@ -114,9 +112,9 @@ def get_phases() -> list[dict[str, Any]]:
 
 
 def select_pair(
-    all_images: list[dict[str, Any]],
-    candidate_images: list[dict[str, Any]],
-    cg: Any,
+    all_images: list[dict[str, object]],
+    candidate_images: list[dict[str, object]],
+    cg: CrystalGraph,
 ) -> tuple[tuple[str, str] | None, int | None]:
     _start = time.perf_counter()
 
@@ -129,7 +127,7 @@ def select_pair(
     existing_pairs_set: set[tuple[str, str]] = cg.get_existing_pairs()
     if len(existing_pairs_set) == 0:
         existing_pairs_set = {
-            pair_key(winner, loser) for winner, loser in cg.get_all_links()
+            pair_key(link.winner, link.loser) for link in cg.get_all_links()
         }
         cg.set_existing_pairs(existing_pairs_set)
     logger.debug(f"existing pairs: {len(existing_pairs_set)}", start_timer=_start)
@@ -181,7 +179,7 @@ def select_pair(
                 len(all_images),
             )
         elif name == "anchor":
-            result = fn(candidate_nodes, seed_pool_set, existing_pairs_set, cg)
+            result = fn(candidate_nodes, seed_pool_set, existing_pairs_set)
         elif name == "collapsible":
             result = fn(candidate_nodes, cg)
         elif name == "single_win_loss":

@@ -7,11 +7,9 @@ import os
 import shutil
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from threading import Lock
-from typing import Any, Callable
 
 from tqdm import tqdm
 
@@ -31,21 +29,10 @@ from ...domain.analysis.trueskill import (
     public_score_from_rating,
     replay_ratings,
 )
+from ...domain.files.ports import FilePort
 from .graph_service import CrystalGraph
+
 logger: ModuleLogger = get_logger(__name__)
-
-
-@dataclass
-class PathOps:
-    """Infrastructure file/path operations injected by the composition root."""
-
-    ranked_root: Callable[[], Path]
-    compute_path: Callable[[str, float], Path]
-    sync_metadata: Callable[..., bool]
-    clear_folder_cache: Callable[[], None]
-    prewarm_folder_cache: Callable[[Path], None]
-    deduplicate_scored: Callable[[Path | None], int]
-    cleanup_orphans: Callable[[Path | None], int]
 
 
 class ImageProcessor:
@@ -55,7 +42,7 @@ class ImageProcessor:
         self,
         max_workers: int,
         graph: CrystalGraph,
-        path_ops: PathOps,
+        path_ops: FilePort,
     ) -> None:
         ranking_conf = config["ranking"]
         self.max_workers = max_workers
@@ -77,7 +64,7 @@ class ImageProcessor:
         self.recent_lock: Lock = Lock()
         self.sync_processed_images_from_db()
 
-    def _extract_prompt_tags(self, data: dict[str, Any]) -> str | None:
+    def _extract_prompt_tags(self, data: dict[str, object]) -> str | None:
         return extract_prompt_tags(data)
 
     def process_image_file(
@@ -113,7 +100,8 @@ class ImageProcessor:
             initial_sigma=INITIAL_UNCERTAINTY,
         )
 
-        db_entry = self._graph.get_image(filename)
+        node = self._graph.get_node(filename)
+        db_entry = node.data if node is not None else None
         if db_entry:
             chosen_score = float(db_entry["score"])
             cleaned_json["score"] = round(chosen_score, 3)
@@ -188,7 +176,7 @@ class ImageProcessor:
         )
 
     def sync_processed_images_from_db(self) -> None:
-        all_imgs = self._graph.get_all_images()
+        all_imgs = [node.data for node in self._graph.get_all_nodes()]
         with self.processed_lock:
             self.processed_images.clear()
             for img in all_imgs:
@@ -217,12 +205,12 @@ class ImageProcessor:
         self.total_discovered = count
         return count
 
-    def process_next_batch(self, source_dir: str, batch_size: int) -> dict[str, Any]:
+    def process_next_batch(self, source_dir: str, batch_size: int) -> dict[str, object]:
         if self.is_processing:
             return {"status": "skipped", "message": "Already processing"}
 
         self.is_processing = True
-        db_count = self._graph.get_image_count()
+        db_count = self._graph.get_node_count()
         total_goal = getattr(self, "total_discovered", 0)
 
         if self.total_discovered == 0:
@@ -311,7 +299,7 @@ class ImageProcessor:
         self.is_processing = False
         return stats
 
-    def rebuild_database_from_ranked(self) -> None:
+    def rebuild_database_from_ranked(self, file_operations: bool = True) -> None:
         """Rebuild or repair the ranking database from ranked files and companion JSON."""
         ranked_root = self._path_ops.ranked_root()
         if not ranked_root.exists():
@@ -320,8 +308,10 @@ class ImageProcessor:
         self.reorganize_folder_structure()
 
         ranked_root: Path = self._path_ops.ranked_root()
-        self._path_ops.deduplicate_scored(root=ranked_root)
-        self._path_ops.cleanup_orphans(root=ranked_root)
+        file_operations = False  # testing missing filenames
+        if file_operations:
+            self._path_ops.deduplicate_scored(root=ranked_root)
+            self._path_ops.cleanup_orphans(root=ranked_root)
         self._graph.clear_all_comparisons()
         self._graph.clear_all_images()
 
@@ -333,32 +323,46 @@ class ImageProcessor:
             max_workers=int(prepare_conf["max_workers"]),
             scored_only=False,
         )
+        logger.debug(f"collected {len(all_entries)} valid entries from ranked files ")
 
-        for img_path, entry, _timestamp, _file_id in all_entries:
-            cleaned = clean_json_metadata(
-                entry,
-                default_score=self.default_score,
-                filename=Path(img_path).name,
-                initial_mu=INITIAL_MEAN,
-                initial_sigma=INITIAL_UNCERTAINTY,
-            )
-            self._graph.add_image(
-                filename=Path(img_path).name,
-                score=self.default_score,
-                comparison_count=0,
-                prompt_tags=cleaned.get("prompt_tags"),
-                rating_mu=INITIAL_MEAN,
-                rating_sigma=INITIAL_UNCERTAINTY,
-            )
+        with tqdm(
+            total=len(all_entries),
+            desc="Adding images",
+            unit="img",
+            delay=3.0,
+            position=0,
+        ) as pbar:
+            for img_path, entry, _timestamp, _file_id in all_entries:
+                cleaned = clean_json_metadata(
+                    entry,
+                    default_score=self.default_score,
+                    filename=Path(img_path).name,
+                    initial_mu=INITIAL_MEAN,
+                    initial_sigma=INITIAL_UNCERTAINTY,
+                )
+                self._graph.add_image(
+                    filename=Path(img_path).name,
+                    score=self.default_score,
+                    comparison_count=0,
+                    prompt_tags=cleaned.get("prompt_tags"),
+                    rating_mu=INITIAL_MEAN,
+                    rating_sigma=INITIAL_UNCERTAINTY,
+                )
+                pbar.update(1)
 
-        valid_filenames = {img["filename"] for img in self._graph.get_all_images()}
+        self._graph.rebuild_from_database()
+
+        valid_filenames = {node.filename for node in self._graph.get_all_nodes()}
+        logger.debug(f"valid filenames: {len(valid_filenames)} images in database")
 
         with tqdm(
             total=len(all_entries),
             desc="Adding histories from image",
             unit="img",
             delay=3.0,
+            position=0,
         ) as pbar:
+            # with tqdm(delay=3.0, position=1) as desc:
             for img_path, entry, _timestamp, file_id in all_entries:
                 filename = Path(img_path).name
 
@@ -369,15 +373,15 @@ class ImageProcessor:
                     initial_mu=INITIAL_MEAN,
                     initial_sigma=INITIAL_UNCERTAINTY,
                 )
-                prompt_tags = cleaned["prompt_tags"] or extract_prompt_tags(
-                    cleaned
-                )
-                existing = self._graph.get_image(filename)
+                prompt_tags = cleaned["prompt_tags"] or extract_prompt_tags(cleaned)
+                existing_node = self._graph.get_node(filename)
+                existing = existing_node.data if existing_node is not None else None
                 if existing and prompt_tags and existing["prompt_tags"] != prompt_tags:
                     self._graph.update_image_tags(filename, prompt_tags)
 
                 if filename in valid_filenames:
                     history = entry.get("comparison_history")
+                    # pbar.set_postfix_str(f"Processing history for {filename}")
                     if isinstance(history, list):
                         for comp in history:
                             other = comp["other"]
@@ -394,32 +398,39 @@ class ImageProcessor:
                                 filename_b=other,
                                 winner=winner_file,
                                 timestamp=str(timestamp),
-                                weight=float(comp["weight"]),
-                                transitive_depth=int(comp["transitive_depth"]),
                             )
+                # else:
+                #     desc.set_description_str(
+                #         f"Skipping history for {filename}: not in valid filenames"
+                #     )
 
                 pbar.update(1)
 
+        logger.debug(
+            f"added {len(self._graph.get_all_links())} historical comparisons from ranked files"
+        )
+
         self._graph.clean_comparisons()
+        self._graph.rebuild_from_database()
 
         self._recompute_ratings_from_database_history()
 
-        all_comparisons = self._graph.get_all_comparisons()
-        all_images = self._graph.get_all_images()
+        all_comparisons = [link.data for link in self._graph.get_all_links()]
+        all_images = [node.data for node in self._graph.get_all_nodes()]
 
         filename_to_path: dict[str, Path] = {}
-        filename_to_entry: dict[str, dict[str, Any]] = {}
+        filename_to_entry: dict[str, dict[str, object]] = {}
         for img_path, _entry, _ts, _fid in all_entries:
             p = Path(img_path)
             filename_to_path[p.name] = p
             filename_to_entry[p.name] = _entry
 
-        filename_to_comparisons: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        filename_to_comparisons: dict[str, list[dict[str, object]]] = defaultdict(list)
         for comp in all_comparisons:
             filename_to_comparisons[comp["filename_a"]].append(comp)
             filename_to_comparisons[comp["filename_b"]].append(comp)
 
-        filename_to_image_data: dict[str, dict[str, Any]] = {}
+        filename_to_image_data: dict[str, dict[str, object]] = {}
         for img in all_images:
             filename_to_image_data[img["filename"]] = img
 
@@ -443,15 +454,16 @@ class ImageProcessor:
             for img in all_images
         ]
         prepare_conf = config["prepare"]
-        logger.debug("sync json data...")
-        parallel_for(
-            sync_worker,
-            sync_args,
-            max_workers=int(prepare_conf["max_workers"]),
-            batch_size=int(prepare_conf["batch_size"]),
-            desc="Syncing JSON metadata",
-            unit="img",
-        )
+        if file_operations:
+            logger.debug("sync json data...")
+            parallel_for(
+                sync_worker,
+                sync_args,
+                max_workers=int(prepare_conf["max_workers"]),
+                batch_size=int(prepare_conf["batch_size"]),
+                desc="Syncing JSON metadata",
+                unit="img",
+            )
 
         self._path_ops.clear_folder_cache()
         self.sync_processed_images_from_db()
@@ -459,7 +471,7 @@ class ImageProcessor:
     def _recompute_ratings_from_database_history(self) -> int:
         self._graph.reset_all_image_ratings(score=self.default_score)
 
-        replayed = replay_ratings(self._graph.get_all_comparisons())
+        replayed = replay_ratings([link.data for link in self._graph.get_all_links()])
 
         updated = 0
         with tqdm(

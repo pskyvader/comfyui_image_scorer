@@ -1,7 +1,5 @@
 """Pose landmark naming and face/pose analysis via the injected MediaPipePort."""
 
-from typing import Any
-
 from PIL import Image
 
 from ..ports.ml_providers import MediaPipePort
@@ -50,5 +48,5 @@ class MediaPipeAnalyzer:
     def __init__(self, mediapipe: MediaPipePort) -> None:
         self._mediapipe = mediapipe
 
-    def analyze(self, img: Image.Image) -> dict[str, Any]:
+    def analyze(self, img: Image.Image) -> dict[str, list[dict[str, float]]]:
         return self._mediapipe.analyze(img)

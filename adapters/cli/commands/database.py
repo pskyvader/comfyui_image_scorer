@@ -29,7 +29,7 @@ def recalculate(deps: CLIDeps) -> int:
         logger.error("Failed to reset ratings")
         return 1
 
-    all_comparisons = deps.graph.get_all_comparisons()
+    all_comparisons = [link.data for link in deps.graph.get_all_links()]
 
     replayed = replay_ratings(all_comparisons)
 

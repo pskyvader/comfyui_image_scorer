@@ -12,11 +12,8 @@ from ...core.configuration.settings import config
 from ...core.io.serialization import atomic_write_json, load_json
 from ...core.filesystem.paths import image_root_processed
 from ..cache.memory_cache import InMemoryCache
-from .comparisons_repository import (
-    get_all_comparisons,
-)
 from .images_repository import (
-    get_image as get_image_data,
+    find_node as get_node_data,
 )
 
 logger: ModuleLogger = get_logger(__name__)
@@ -113,22 +110,16 @@ def _build_history_for_filename(
         if filename_to_image_data is not None:
             other_data = filename_to_image_data[other]
         else:
-            other_data = get_image_data(other)
+            other_data = get_node_data(other)
         history.append(
-            {
-                "comparison_id": comp["id"],
-                "other": other,
-                "opponent_score": other_data["score"] if other_data else 0.5,
-                "winner": is_winner,
-                "weight": float(comp["weight"]) if comp["weight"] is not None else 1.0,
-                "transitive_depth": (
-                    int(comp["transitive_depth"])
-                    if comp["transitive_depth"] is not None
-                    else 0
-                ),
-                "timestamp": comp["timestamp"],
-            }
-        )
+                {
+                    "comparison_id": comp["id"],
+                    "other": other,
+                    "opponent_score": other_data["score"] if other_data else 0.5,
+                    "winner": is_winner,
+                    "timestamp": comp["timestamp"],
+                }
+            )
     history.sort(key=lambda item: (item["timestamp"], item["comparison_id"]))
     return history
 
@@ -178,7 +169,7 @@ def sync_image_metadata_to_json(
             return False
 
     if filename_to_comparisons is None and all_comparisons is None:
-        all_comparisons = get_all_comparisons()
+        raise RuntimeError("Comparison history must be supplied by CrystalGraph")
 
     history = _build_history_for_filename(
         filename,

@@ -61,6 +61,16 @@ class DataTransformer:
     poly = PolynomialFeatures(degree=2, include_bias=False, interaction_only=True)
 
     def __init__(self, training_loader: Any, model_trainer: Any) -> None:
+        """Data transformer for feature engineering and interaction features.
+
+        Responsible for generating polynomial interaction features, training
+        LightGBM models for feature importance ranking, and applying cached
+        feature filters to vector representations.
+
+        Dependencies (injected through composition root):
+        - ``training_loader``: provides access to vectors, scores, and cached rules
+        - ``model_trainer``: provides LightGBM training model utilities
+        """
         self.training_loader = training_loader
         self.model_trainer = model_trainer
         feature_mapping = get_feature_mapping_from_config()
@@ -70,6 +80,15 @@ class DataTransformer:
         self.vector_ranges = feature_mapping["vector_ranges"]
 
     def get_raw_data(self) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
+        """Return feature vectors and scores as numpy arrays.
+
+        Loads keyed vectors and scores from the training loader and returns
+        them as aligned numpy arrays suitable for model training.
+
+        Returns:
+            ``x``: array of shape ``(n_features, n_samples)`` with float32 dtype
+            ``y``: array of shape ``(n_samples,)`` with float32 dtype
+        """
         vectors = self.training_loader.load_vectors()
         scores = self.training_loader.load_scores()
         order = list(scores.keys())
@@ -138,8 +157,14 @@ class DataTransformer:
         # filter out scores for missing vectors
         order: list[str] = [fid for fid in scores_keyed.keys() if fid in vectors_keyed]
 
+        # logger.debug(
+        #     f"scores: {len(scores_keyed.keys())}, vectors: {len(vectors_keyed.keys())}, order: {len(order)}"
+        # )
+
         x = np.array([vectors_keyed[fid] for fid in order], dtype=np.float32)
         y = np.array([scores_keyed[fid] for fid in order], dtype=np.float32)
+
+        logger.debug(f"y shape: {y.shape}, x shape: {x.shape}")
 
         user_verbosity = int(config["training"]["verbosity"])
 
@@ -221,12 +246,27 @@ class DataTransformer:
         n_features_in: int,
         accumulators: dict[str, Any],
     ) -> dict[str, Any]:
+        """Compute interaction feature statistics for a batch of data.
 
+        Updates accumulators with sum of interaction terms, sum of squares,
+        and dot product with targets. Used in the two-pass correlation
+        calculation for selecting top-K interaction features.
+
+        Args:
+            X_batch: input feature batch of shape ``(batch_size, n_features_in)``
+            y_batch: target values of shape ``(batch_size,)``
+            n_features_in: number of original features (before polynomial expansion)
+            accumulators: dict with keys ``sum_x``, ``sum_x_sq``, ``sum_xy``,
+                ``sum_y``, ``sum_y_sq``, ``n`` that accumulate statistics
+                across batches
+
+        Returns:
+            Updated accumulators dict with accumulated statistics.
+        """
         # Generate Poly
         X_poly_full: npt.NDArray[np.float32] = self.poly.fit_transform(X_batch)
         # Extract only interactions
         X_inter_batch = X_poly_full[:, n_features_in:]
-
         # Stats
         accumulators["sum_x"] += np.sum(X_inter_batch, axis=0)
         accumulators["sum_x_sq"] += np.sum(X_inter_batch**2, axis=0)
@@ -271,6 +311,20 @@ class DataTransformer:
         top_k_indices_local: npt.NDArray[np.intp],
         n_features_in: int,
     ) -> npt.NDArray[np.float32]:
+        """Build interaction feature batch from top-K indices.
+
+        Selects the top-K interaction features from the polynomial expansion
+        and returns them as a concatenated array.
+
+        Args:
+            X_batch: input feature batch of shape ``(batch_size, n_features_in)``
+            top_k_indices_local: indices of the top-K interaction features
+            n_features_in: number of original features (before polynomial expansion)
+
+        Returns:
+            Array of shape ``(batch_size, n_features_in + k)`` with original
+            and selected interaction features concatenated.
+        """
         X_poly_full = self.poly.fit_transform(X_batch)
         current_interactions = X_poly_full[:, n_features_in:][:, top_k_indices_local]
         del X_poly_full
@@ -424,6 +478,16 @@ class DataTransformer:
 
 
 def _label_position_slot(pos_in_unit: int) -> str:
+    """Return a position slot label by index.
+
+    Args:
+        pos_in_unit: index of the position slot (0-4 for x,y,width,height,confidence;
+                     higher values use ``slot_N`` naming)
+
+    Returns:
+        ``"x"``, ``"y"``, ``"width"``, ``"height"``, ``"confidence"``, or
+        ``"slot_N```` for indices beyond 4.
+    """
     return (
         ["x", "y", "width", "height", "confidence"][pos_in_unit]
         if pos_in_unit < 5
@@ -432,6 +496,17 @@ def _label_position_slot(pos_in_unit: int) -> str:
 
 
 def _label_keypoint_slot(vec_name: str, pos_in_unit: int) -> str:
+    """Return a keypoint slot label by vector name and index.
+
+    Args:
+        vec_name: name of the vector (e.g. ``"keypoint"``)
+        pos_in_unit: index of the keypoint slot (0-3 for x,y,z,visibility;
+                     higher values use ``slot_N`` naming)
+
+    Returns:
+        ``"vec_name_x"``, ``"vec_name_y"``, ``"vec_name_z"``, ``"vec_name_visibility"``,
+        or ``"vec_name_slot_N"`` for indices beyond 3.
+    """
     coord = (
         ["x", "y", "z", "visibility"][pos_in_unit]
         if pos_in_unit < 4
@@ -441,6 +516,18 @@ def _label_keypoint_slot(vec_name: str, pos_in_unit: int) -> str:
 
 
 def _label_person_map_slot(vec_name: str, pos_in_unit: int) -> str:
+    """Return a person-map slot label by vector name and index.
+
+    Uses the map JSON to look up category labels for person-map vectors.
+
+    Args:
+        vec_name: name of the person-map vector
+        pos_in_unit: index of the slot position
+
+    Returns:
+        Category label string at the given index, or ``"slot_N```` if the
+        index is out of range or no map JSON is found.
+    """
     labels = _load_map_slots(vec_name)
     if labels and pos_in_unit < len(labels):
         return labels[pos_in_unit]
@@ -499,7 +586,7 @@ def _print_vector_summary(
                 logger.info("    Sub-features: %s", ", ".join(all_labels))
         return
 
-    # Map vector â? Convert absolute indices to local slots and look up labels
+    # Map vector -- Convert absolute indices to local slots and look up labels
     if vec_type == "map" and kept_count > 0:
         slot_labels = _load_map_slots(vec_name)
         logger.info("  %s  (%d/%d = %.1f%%)", vec_name, kept_count, total_in_vec, pct)

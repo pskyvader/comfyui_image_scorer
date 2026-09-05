@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import erf, exp, pi, sqrt
-from typing import Any
 
 import random
 from tqdm import tqdm
@@ -111,9 +110,9 @@ def update_ratings(winner: Rating, loser: Rating) -> tuple[Rating, Rating]:
 
 
 def replay_ratings(
-    rows: list[dict[str, Any]], order: str = "random"
+    rows: list[dict[str, object]], order: str = "random"
 ) -> dict[str, tuple[Rating, int]]:
-    ordered: list[dict[str, Any]]
+    ordered: list[dict[str, object]]
     if order == "default":
         ordered = sorted(rows, key=lambda r: int(r.get("id", 0) or 0))
     elif order == "reverse":
@@ -128,7 +127,7 @@ def replay_ratings(
     counts: dict[str, int] = {}
     with tqdm(
         total=len(ordered),
-        desc=f"replaying rsting with order {order}",
+        desc=f"replaying rating with order {order}",
         unit="bucket",
         position=0,
         leave=True,
@@ -155,7 +154,7 @@ def replay_ratings(
     return {fid: (rating, counts.get(fid, 0)) for fid, rating in ratings.items()}
 
 
-def rating_from_row(row: dict[str, Any]) -> Rating:
+def rating_from_row(row: dict[str, object]) -> Rating:
     return Rating(
         mu_skill=float(row["rating_mu"]),
         sigma_uncertainty=float(row["rating_sigma"]),

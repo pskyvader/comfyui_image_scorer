@@ -5,7 +5,7 @@ node-grouping / filtering patterns that appear across multiple pair-selection
 strategies.
 """
 
-from typing import Any, Protocol
+from typing import Protocol
 import time
 
 from ....core.configuration.settings import config
@@ -13,13 +13,13 @@ from ...graph.node_proxy import NodeProxy
 
 
 class CrystalGraph(Protocol):
-    def get_node(self, node_id: str | None) -> Any: ...
+    def get_node(self, node_id: str | None) -> NodeProxy | None: ...
     def get_component(
         self,
         node_id: str | None = None,
         component_id: int | None = None,
         chain_id: int | None = None,
-    ) -> Any: ...
+    ) -> object | None: ...
     def are_in_same_path(self, img1: str, img2: str) -> bool: ...
 
 
@@ -87,15 +87,15 @@ def is_collapsable_pair(filename_a: str, filename_b: str, cg: CrystalGraph) -> b
 
 
 def filter_excluded_images(
-    images: list[dict[str, Any]],
+    images: list[dict[str, object]],
     exclude_set: set[str],
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Remove images whose filename is in exclude_set."""
     _start = time.perf_counter()
     if not exclude_set:
         return images
 
-    result: list[dict[str, Any]] = []
+    result: list[dict[str, object]] = []
     for img in images:
         filename = img["filename"]
         if filename not in exclude_set:

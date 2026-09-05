@@ -10,13 +10,13 @@ from .database import get_db_connection
 logger: ModuleLogger = get_logger(__name__)
 
 
-def get_all_images() -> list[dict[str, Any]]:
+def list_nodes() -> list[dict[str, Any]]:
     with get_db_connection() as conn:
         rows = conn.execute("SELECT * FROM images").fetchall()
         return [dict(row) for row in rows]
 
 
-def get_image(filename: str) -> dict[str, Any] | None:
+def find_node(filename: str) -> dict[str, Any] | None:
     with get_db_connection() as conn:
         row = conn.execute(
             "SELECT * FROM images WHERE filename = ?", (filename,)
@@ -125,11 +125,11 @@ def reset_all_image_ratings(score: float) -> bool:
 class SQLiteImagesRepository:
     """Injected implementation of the ImageRepository port."""
 
-    def get_image(self, filename: str) -> dict[str, Any] | None:
-        return get_image(filename)
+    def find_node(self, filename: str) -> dict[str, Any] | None:
+        return find_node(filename)
 
-    def get_all_images(self) -> list[dict[str, Any]]:
-        return get_all_images()
+    def list_nodes(self) -> list[dict[str, Any]]:
+        return list_nodes()
 
     def get_image_count(self) -> int:
         return get_image_count()

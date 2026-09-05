@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import random
 from itertools import product, islice
-from typing import Any
 
 import numpy as np
 
@@ -15,6 +14,7 @@ from ...domain.data_transformation.data_transformer import (
 )
 from ...domain.loading import TrainingLoader
 from ...domain.training.grid import around, grid_base
+from ...infrastructure.ml_models.training.model_trainer import ModelTrainer
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -24,8 +24,8 @@ NUM_CONFIGS = 5
 # be started explicitly and may not be invoked more than once at a time.
 
 
-def generate_random_config() -> dict[str, Any]:
-    cfg: dict[str, Any] = {"best_score": -1000000.0, "training_time": 0.0}
+def generate_random_config() -> dict[str, float | int]:
+    cfg: dict[str, float | int] = {"best_score": -1000000.0, "training_time": 0.0}
     for key, cell in grid_base.items():
         if cell["type"] == "int":
             cfg[key] = int(random.randint(int(cell["min"]), int(cell["max"])))
@@ -34,9 +34,9 @@ def generate_random_config() -> dict[str, Any]:
     return cfg
 
 
-def generate_fastest_setup() -> dict[str, Any]:
+def generate_fastest_setup() -> dict[str, float | int]:
     """Generates a config likely to be fast (fewer estimators, shallow trees)."""
-    cfg: dict[str, Any] = {"best_score": -1000000.0, "training_time": 99999.0}
+    cfg: dict[str, float | int] = {"best_score": -1000000.0, "training_time": 99999.0}
     force_max = {
         "min_child_samples",
         "reg_alpha",
@@ -53,9 +53,9 @@ def generate_fastest_setup() -> dict[str, Any]:
     return cfg
 
 
-def generate_slowest_setup() -> dict[str, Any]:
+def generate_slowest_setup() -> dict[str, float | int]:
     """Generates a config likely to be slow (max estimators, deep trees)."""
-    cfg: dict[str, Any] = {"best_score": -1000000.0, "training_time": 99999.0}
+    cfg: dict[str, float | int] = {"best_score": -1000000.0, "training_time": 99999.0}
     force_min = {
         "min_child_samples",
         "reg_alpha",
@@ -72,15 +72,15 @@ def generate_slowest_setup() -> dict[str, Any]:
     return cfg
 
 
-def crossover_config(cfg1: dict[str, Any], cfg2: dict[str, Any]) -> dict[str, Any]:
+def crossover_config(cfg1: dict[str, float | int], cfg2: dict[str, float | int]) -> dict[str, float | int]:
     """Merge two configs into a new child by picking each key from one parent."""
-    new_cfg: dict[str, Any] = {"best_score": -1000000.0, "training_time": 0.0}
+    new_cfg: dict[str, float | int] = {"best_score": -1000000.0, "training_time": 0.0}
     for key in grid_base.keys():
         new_cfg[key] = cfg1[key] if random.random() < 0.5 else cfg2[key]
     return new_cfg
 
 
-def _load_state() -> dict[str, Any]:
+def _load_state() -> dict[str, object]:
     training_config = config["training"]
     return {
         "configs": [
@@ -94,7 +94,7 @@ def _load_state() -> dict[str, Any]:
     }
 
 
-def _save_state(state: dict[str, Any]) -> None:
+def _save_state(state: dict[str, object]) -> None:
     data = config.section_data("training")
     for i in range(NUM_CONFIGS):
         data[f"top{i + 1}"] = state["configs"][i]
@@ -102,7 +102,7 @@ def _save_state(state: dict[str, Any]) -> None:
     config.save_section("training", data)
 
 
-def reset_hyperparameters() -> dict[str, Any]:
+def reset_hyperparameters() -> dict[str, object]:
     configs = [
         generate_random_config(),
         generate_random_config(),
@@ -116,7 +116,7 @@ def reset_hyperparameters() -> dict[str, Any]:
 
 
 def load_training_data(
-    filter_comparisons: bool, training_loader: TrainingLoader, model_trainer: Any
+    filter_comparisons: bool, training_loader: TrainingLoader, model_trainer: ModelTrainer
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load keyed vectors/scores and compress unused features. When
     filter_comparisons is True, keep only files with enough comparisons
@@ -181,7 +181,7 @@ def load_training_data(
 
 
 def _evaluate_config(
-    cfg: dict[str, Any], X: np.ndarray, y: np.ndarray, model_trainer: Any
+    cfg: dict[str, float | int], X: np.ndarray, y: np.ndarray, model_trainer: ModelTrainer
 ) -> tuple[float, float, str]:
     _, metrics = model_trainer.train_model(
         config_dict=cfg, X=X, y=y
@@ -194,13 +194,13 @@ def _evaluate_config(
 
 
 def _run_step_on_config(
-    cfg: dict[str, Any],
+    cfg: dict[str, float | int],
     used_keys: list[str],
     X: np.ndarray,
     y: np.ndarray,
     max_combos: int,
-    model_trainer: Any,
-) -> tuple[dict[str, Any], list[str]]:
+    model_trainer: ModelTrainer,
+) -> tuple[dict[str, float | int], list[str]]:
     all_keys = list(grid_base.keys())
     random.shuffle(all_keys)
 
@@ -281,11 +281,11 @@ def _run_step_on_config(
 def hpo_cycle(
     X: np.ndarray,
     y: np.ndarray,
-    model_trainer: Any,
+    model_trainer: ModelTrainer,
     optimization_steps: int,
     max_combos: int,
     cycle: int,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     state = _load_state()
     if (
         not state
@@ -386,8 +386,8 @@ def run_hpo_cycles(
     optimization_steps: int | None,
     max_combos: int | None,
     training_loader: TrainingLoader | None,
-    model_trainer: Any,
-) -> list[dict[str, Any]]:
+    model_trainer: ModelTrainer,
+) -> list[dict[str, object]]:
     """Run multiple HPO cycles. Each cycle runs optimization_steps steps
     over the top1..top5 configs and breeds the next generation."""
     training_config = config["training"]
@@ -433,8 +433,8 @@ class HpoRunner:
         optimization_steps: int | None,
         max_combos: int | None,
         training_loader: TrainingLoader | None,
-        model_trainer: Any,
-    ) -> list[dict[str, Any]]:
+        model_trainer: ModelTrainer,
+    ) -> list[dict[str, object]]:
         if self._running:
             raise RuntimeError(
                 "HPO loop is already running. Concurrent or nested runs are not allowed."

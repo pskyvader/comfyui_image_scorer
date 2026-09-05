@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
 
 import numpy as np
 import torch
 import warnings
 from PIL.Image import Image
-from collections.abc import Callable
 
 from ...core.configuration.settings import config
 from ...domain.analysis.image_analysis import ImageAnalysis
@@ -26,7 +25,7 @@ from ...domain.loading.ports import (
 )
 from ...domain.ports.cache import CacheProvider
 from ...domain.ports.ml_providers import MediaPipePort
-
+from ...infrastructure.ml_models.training.model_trainer import ModelTrainer
 
 from .vector_list import VectorList
 
@@ -39,7 +38,7 @@ class ScoringService:
         model_loader: ModelLoader,
         batch_sizer: BatchSizerFactory,
         training_loader: TrainingLoader,
-        model_trainer: Any,
+        model_trainer: ModelTrainer,
         maps_provider: MapsProvider,
         cache: CacheProvider,
         mediapipe: MediaPipePort,
@@ -89,7 +88,7 @@ class ScoringService:
         if not model_name.strip():
             raise ValueError("'model_name' must be a non-empty string.")
 
-        entry: dict[str, Any] = {
+        entry: dict[str, object] = {
             "steps": steps,
             "cfg": cfg,
             "sampler": sampler,
@@ -111,7 +110,7 @@ class ScoringService:
         images_list: list[Image] = image_analysis.prepare_image_batch(image)
         data_list = [("", entry, "", str(i)) for i, _img in enumerate(images_list)]
 
-        processed_data: list[tuple[str, dict[str, Any], str, str]] = []
+        processed_data: list[tuple[str, dict[str, object], str, str]] = []
         for i in range(0, len(images_list), self._batch_size):
             image_batch = images_list[i : i + self._batch_size]
             data_batch = data_list[i : i + self._batch_size]
@@ -196,7 +195,7 @@ class ScoringService:
         )
 
     def _predict_scores(
-        self, model: Any, filtered_vectors: list[np.ndarray]
+        self, model: object, filtered_vectors: list[np.ndarray]
     ) -> np.ndarray:
         features = np.asarray(filtered_vectors, dtype=np.float32)
         objective = None
