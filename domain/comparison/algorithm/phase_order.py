@@ -159,7 +159,7 @@ def select_pair(
     seed_pool_set: set[str] = {node.filename for node in seed_pool}
 
     reserve_count = int(config["ranking"]["reserve_count"])
-    total_comps: int = cg.get_total_comparisons()
+    total_comps: int = cg.get_link_count()
 
     if total_comps % reserve_count == 0:
         cg.reset_selection_state()

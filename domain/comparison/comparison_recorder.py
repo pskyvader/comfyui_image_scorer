@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...core.observability.logger import get_logger
+from ...core.observability.logger import get_logger, ModuleLogger
 from datetime import datetime, timezone
 
 from ..analysis.trueskill import (
@@ -10,8 +10,8 @@ from ..analysis.trueskill import (
     rating_from_row,
     update_ratings,
 )
-from ..graph.link_proxy import LinkProxy
-from ..graph.node_proxy import NodeProxy
+from ..ports.repository import PathResolver
+from ...domain.ports.graph import CrystalGraphPort
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -40,7 +40,7 @@ class ComparisonRecorder:
     def __init__(
         self,
         path_syncer: PathResolver,
-        graph_service: GraphService,
+        graph_service: CrystalGraphPort,
     ) -> None:
         self._path_syncer = path_syncer
         self._graph = graph_service

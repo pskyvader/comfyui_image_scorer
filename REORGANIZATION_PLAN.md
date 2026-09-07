@@ -1,118 +1,107 @@
-# Reorganization Plan — `comfyui_image_scorer` (v8)
+# Reorganization Plan
 
-## 0. Ground Rules & Non-Negotiables
+This roadmap covers the remaining implementation and documentation work for the image-scorer module. The rules, functionality description, and current structure are maintained separately; this file is the only roadmap that may refer to those three documentation roles.
 
-1. **Environment**: Every command runs in the ComfyUI venv (`& "E:\ComfyUI\.venv\Scripts\Activate.ps1"` first).
-2. **Imports**: Relative imports at module scope, at top of file. No inline imports (except lazy parser dispatch in `adapters/cli/main.py`).
-3. **Typing**: Pyright strict mode (`pyrightconfig.json`). Zero `Any` in protocols and domain interfaces. Strive for complete elimination of `Any`.
-4. **Error Handling**: No error-swallowing `try`/`except`. Fail fast with explicit errors. Permitted forms only: finally-only cleanup, translate-and-reraise, and GPU OOM-adaptive batching.
-5. **No Mutable Global State**: No global stores in `core`, `domain`, or `application`. State lives in `adapters` or `infrastructure`.
-6. **Layer Boundary Rules**: Inward dependencies only: `core → domain → application → adapters → infrastructure`. Nothing imports `infrastructure` except the three composition roots (`adapters/server/main.py`, `adapters/cli/deps.py`, `adapters/comfyui/services.py`).
-7. **No Default Arguments / No Optional Sentinels**: Every required value is passed explicitly at every call site. No default arguments for configuration objects or functions.
-8. **No Internet Requests**: Offline runtime loading. The only download path is user-initiated via `files download models`.
-9. **Single Database**: Sole supported database filename is `cache.db`. Automatic deletion or automatic rebuilds are strictly prohibited.
-10. **Single Graph & Database Facade**: `CrystalGraph` is the sole boundary for graph and database operations. Callers use node/link/proxy vocabulary (`NodeProxy`, `LinkProxy`, `ChainProxy`, `ComponentProxy`). No caller outside `CrystalGraph` imports or accesses repositories or database tables.
-11. **Ports Are Pure Interfaces**: Ports define abstract `Protocol` classes only. No concrete implementations, no filesystem I/O, no DB calls, and no plotting occur inside ports.
+## Documentation contract
 
----
+- The agent rulebook owns permanent engineering constraints.
+- The README owns functionality, goals, usage, and the general architecture diagram.
+- The function index owns the current live file and symbol inventory.
+- This plan owns sequencing, dependencies, acceptance criteria, and current remediation status.
 
-## 1. Task Inventory
+Every task below includes **why** the work is required and **how** it must be implemented. Each implementation must preserve the architecture boundaries, ownership rules, and validation discipline in the agent rulebook, and must use the current paths and symbols in the structure index.
 
-### Group A: Domain Ports Consolidation & Typing Hardening (Zero `Any`)
+The documentation baseline is the module-local Git repository at commit
+`c3b8655` (`plan v8`). The ComfyUI root repository is not the history source
+for these files; its virtual environment is used only to run validation.
 
-- [x] **TASK-01: Create canonical `domain/ports/graph.py` with zero `Any`** ✅ COMPLETED
-  - Define `CrystalGraphPort` (or `GraphFacadePort`) abstracting all graph read and write methods.
-  - Return types must be concrete proxies (`NodeProxy | None`, `list[NodeProxy]`, `LinkProxy`, `list[LinkProxy]`, `ChainProxy`, `list[ChainProxy]`, `ComponentProxy | None`, `list[ComponentProxy]`).
-  - Eliminate all `Any` return types and parameter types.
-  - Ensure `CrystalGraph` in `application/services/graph_service.py` satisfies this protocol exactly.
+## Documentation tasks
 
-- [x] **TASK-02: Migrate algorithm protocols to `domain/ports/graph.py`** ✅ COMPLETED
-  - Delete local `CrystalGraph` protocol in `domain/comparison/algorithm/pair_active.py` and import `domain/ports/graph.py`.
-  - Delete local `CrystalGraph` protocol in `domain/comparison/algorithm/merge_sort_ranker.py` and import `domain/ports/graph.py`.
-  - Delete local `CrystalGraph` protocol in `domain/comparison/algorithm/graph_helpers.py` and import `domain/ports/graph.py`.
-  - Replace `cg: Any` in `domain/comparison/algorithm/view.py` with `CrystalGraphPort`.
+- [ ] **D-01 — Make the four documents independent.**
+  - **Why:** duplicated or circular documentation causes agents to follow stale rules and makes current structure unclear.
+  - **Rules/structure:** follow the document-ownership and one-way-reference constraints in `AGENTS.md`; use the four current document paths listed in `FUNCTION_INDEX.md`.
+  - **How:** keep permanent rules only in `AGENTS.md`, functionality only in `README.md`, live inventory only in `FUNCTION_INDEX.md`, and roadmap work only here. Only this plan may reference the other three.
 
-- [ ] **TASK-03: Move and strictly type graph write contract in `domain/ports/graph.py`** ⚠️ PARTIAL
-  - `CrystalGraphPort` in `domain/ports/graph.py` exposes write methods with concrete return types. ✅
-  - `comparison_recorder.py` still uses a bare `GraphService` annotation (line 43) that is never imported or defined — the type is a phantom. Must be replaced with `CrystalGraphPort`. ❌
+- [ ] **D-02 — Complete the current structure index.**
+  - **Why:** every implementation task needs an accurate path and symbol anchor; missing descriptions hide ownership and make edits speculative.
+  - **Rules/structure:** follow the live-tree and current-state documentation rules in `AGENTS.md`; anchor entries to the paths currently listed by the repository structure in `FUNCTION_INDEX.md`.
+  - **How:** enumerate every current package, test, configuration, frontend, documentation, and script file. Add concise file descriptions plus reliable public classes, protocols, functions, constants, node mappings, and CLI entry-point descriptions. Do not list planned or removed files.
 
-- [x] **TASK-04: Consolidate repository ports into `domain/ports/repository.py`** ✅ COMPLETED
-  - `domain/ports/repository.py` exists with `ImageRepository`, `ComparisonRepository`, `PathResolver` protocols.
-  - `domain/database/ports/` directory deleted.
+- [ ] **D-03 — Resolve missing index descriptions before finalization.**
+  - **Why:** a blank description is an undocumented structure constraint and prevents agents from knowing what a file owns.
+  - **Rules/structure:** follow the ownership, source-of-truth, and no-future-state rules in `AGENTS.md`; name the exact live path or symbol from `FUNCTION_INDEX.md`.
+  - **How:** add each missing file or symbol here under “Index description tasks,” state the required explanation, then add that explanation to `FUNCTION_INDEX.md` before marking the task complete.
 
-- [x] **TASK-05: Consolidate filesystem port into `domain/ports/files.py`** ✅ COMPLETED
-  - `domain/ports/files.py` exists; `domain/files/ports.py` deleted.
-  - `sync_metadata` uses explicit typed parameters (no `Any`).
+## Pending implementation tasks
 
-- [x] **TASK-06: Consolidate loading ports into `domain/ports/loading.py`** ✅ COMPLETED
-  - `domain/ports/loading.py` exists; `domain/loading/ports.py` deleted.
-  - `domain/loading/__init__.py` re-exports from the new location.
+- [ ] **P-01 — Align port annotations.**
+  - **Why:** inconsistent protocol shapes allow adapters and implementations to drift, violating the typed-boundary rule.
+  - **Rules/structure:** follow strict typing, pure-port, inward-dependency, and ownership rules in `AGENTS.md`; edit the current port and facade paths recorded in `FUNCTION_INDEX.md`.
+  - **How:** parameterize bare tuples/dicts in loading ports and reconcile graph port return types with the concrete facade; preserve behavior and validate with focused type and protocol checks.
 
-- [x] **TASK-07: Consolidate cache and ML provider ports under `domain/ports/`** ✅ COMPLETED
-  - `domain/ports/cache.py` (`CacheProvider`) and `domain/ports/ml_providers.py` (`MediaPipePort`, `VisionEncodingPort`, `FeatureEnginePort`) both exist.
-  - `domain/database/ports/`, `domain/files/ports.py`, `domain/loading/ports.py` all deleted.
+- [ ] **P-02 — Centralize comparison helpers.**
+  - **Why:** pair canonicalization and timestamp ordering must have one owner to keep database cleanup and rebuild collapse deterministic.
+  - **Rules/structure:** follow pure-core, dependency-direction, and single-owner rules in `AGENTS.md`; use the current comparison algorithm and persistence paths recorded in `FUNCTION_INDEX.md`.
+  - **How:** move the pure helpers into the core-owned utility location, re-import them from repository and ranking code, and preserve sortable timestamp behavior with focused tests.
 
-### Group B: Graph Facade & Proxy Encapsulation
+- [ ] **P-03 — Complete the graph port contract.**
+  - **Why:** callers currently rely on graph methods that the port does not declare, weakening dependency inversion and strict typing.
+  - **Rules/structure:** follow protocol purity, graph-facade ownership, proxy vocabulary, and strict typing rules in `AGENTS.md`; reconcile the graph port, graph facade, and graph algorithm paths in `FUNCTION_INDEX.md`.
+  - **How:** make the graph interface a protocol, add the actually-used graph operations, and resolve `add_comparison` versus `add_link`, graph-stat value types, and cleanup return types. Confirm the facade satisfies it.
 
-- [ ] **TASK-08: Enforce graph proxy construction ownership** ⚠️ PARTIAL
-  - No external callers (adapters, CLI, endpoints) instantiate proxies directly — all receive them from `CrystalGraph` methods. ✅
-  - `NodeProxy`, `LinkProxy`, `ChainProxy`, `ComponentProxy` constructors are still named publicly (not `_NodeProxy`). The "private constructor pattern" rename is not done. ❌
+- [ ] **P-04 — Return the touched comparison record.**
+  - **Why:** reverse-searching mutable history after insertion is fragile and violates narrow ownership of the record being updated.
+  - **Rules/structure:** follow narrow ownership, public-interface compatibility, and graph/database-boundary rules in `AGENTS.md`; change only the chain manager and graph facade paths identified in `FUNCTION_INDEX.md`.
+  - **How:** have chain application return the created or updated record; stamp its database ID and timestamp directly in the graph facade without changing the public facade behavior.
 
-- [ ] **TASK-09: Complete `CrystalGraph` proxy API migration** ⚠️ PARTIAL
-  - `get_all_nodes()`, `get_node()`, `get_node_count()`, `get_all_links()`, `get_link_count()`, `get_winner_only_nodes()`, `get_loser_only_nodes()`, `link_exists_between()`, `get_all_chains()`, `get_all_components()` all implemented. ✅
-  - Legacy methods still present on `CrystalGraph`: `get_nodes_with_only_wins()`, `get_nodes_with_only_losses()`, `get_total_comparisons()` (via repo facade) and `add_historical_comparison()`. Must be deleted. ❌
+- [ ] **P-05 — Add one pure history-collapse operation.**
+  - **Why:** two-sided JSON histories can duplicate or contradict comparisons; insertion order is nondeterministic and can change ratings.
+  - **Rules/structure:** follow pure-domain, deterministic-data, graph-history, and test-isolation rules in `AGENTS.md`; place the operation beside the current comparison algorithm and repository consumers listed in `FUNCTION_INDEX.md`.
+  - **How:** normalize candidates, sort by an explicit total order, apply the existing missing-node, self-link, same-direction, and contradiction rules, and return survivors plus counts. Reuse it from cleanup and test each rule.
 
-- [x] **TASK-10: Complete write-through persistence synchronization in `CrystalGraph`** ✅ COMPLETED
-  - `add_link()` persists to `ComparisonRepository` then atomically applies to chain topology and in-memory history.
-  - Repository failure raises before in-memory state is mutated.
+- [ ] **P-06 — Rebuild history through collapse.**
+  - **Why:** inserting every historical row and cleaning afterward causes a second graph rebuild and obscures the intended survivor ordering.
+  - **Rules/structure:** follow explicit database lifecycle, graph-facade, filesystem ownership, and deterministic replay rules in `AGENTS.md`; use the current image processor, graph facade, and persistence paths in `FUNCTION_INDEX.md`.
+  - **How:** collect validated candidates, skip self-links explicitly, collapse once, insert survivors through `add_link`, rebuild only at the required seed point, replay ratings, and synchronize JSON in survivor order.
 
-- [x] **TASK-11: Sanitize residual comparison `weight` in `pair_data.py`** ✅ COMPLETED
-  - `comp.get("weight", 1.0)` removed; `pair_data.py` now hard-codes `1.0` directly without reading from comparison dicts.
+- [ ] **P-07 — Remove historical-comparison insertion.**
+  - **Why:** after P-06, the legacy insertion path duplicates graph/database ownership and leaves an obsolete API surface.
+  - **Rules/structure:** follow dead-code removal, graph/database-facade, and compatibility rules in `AGENTS.md`; verify all current callers and update the affected paths in `FUNCTION_INDEX.md`.
+  - **How:** verify zero callers, then remove the facade, repository function, repository method, and protocol declaration. Update the live index afterward.
 
-### Group C: Architecture & Directory Layout Alignment
+- [ ] **P-08 — Decide the filesystem boundary.**
+  - **Why:** direct filesystem operations in the image processor can bypass the filesystem port and violate infrastructure ownership.
+  - **Rules/structure:** follow infrastructure ownership, port purity, and narrow-boundary rules in `AGENTS.md`; inspect the image processor, filesystem port, and file manager paths recorded in `FUNCTION_INDEX.md`.
+  - **How:** route persistence and synchronization operations through the port; explicitly document any image-discovery or movement operations retained by the application. Test both delegated and intentionally owned behavior.
 
-- [x] **TASK-12: Inline `application/data_transform/config/maps.py`** ✅ COMPLETED
-  - `register_map_values()` is defined directly in `application/data_transform/prepare_data.py`.
-  - `application/data_transform/config/` directory deleted.
+- [ ] **P-09 — Replace shared row and payload `Any` types.**
+  - **Why:** untyped rows leak infrastructure details and prevent strict domain contracts from catching shape errors.
+  - **Rules/structure:** follow strict typing, boundary ownership, and no-bare-container rules in `AGENTS.md`; trace types through the proxy, service, endpoint, and repository paths listed in `FUNCTION_INDEX.md`.
+  - **How:** define narrow row/payload types at the owning boundary and thread them outward from proxy data through services and endpoints without using bare dicts as a shortcut.
 
-- [x] **TASK-13: Move parameter analysis plotting to `infrastructure/ml_models/plot.py`** ✅ COMPLETED
-  - `application/analysis/parameter_analysis.py` has no matplotlib/sklearn imports; only data calculation logic remains.
-  - Rendering lives in `infrastructure/ml_models/plot.py`.
+- [ ] **P-10 — Finish the strict type-check cleanup.**
+  - **Why:** remaining diagnostics obscure real interface errors and contradict the typed architecture rule.
+  - **Rules/structure:** follow strict typing, model/device correctness, and minimal-change rules in `AGENTS.md`; work only in the current infrastructure, transformation, and optimizer paths named in `FUNCTION_INDEX.md`.
+  - **How:** fix the known infrastructure, transformation, and optimizer diagnostics after P-09, checking that no touched file regresses.
 
-- [x] **TASK-14: Decouple `domain/analysis/attribute_analysis.py` from torchvision** ✅ COMPLETED
-  - No `torchvision` import found in `domain/analysis/attribute_analysis.py`.
+- [ ] **P-11 — Remove the test-only filesystem bypass and validate.**
+  - **Why:** leaving the bypass disables destructive operations in the real workflow and means the tested path differs from production behavior.
+  - **Rules/structure:** follow explicit destructive-operation, test-isolation, validation-order, and node-registration rules in `AGENTS.md`; validate the image processor, tests, and registration paths represented in `FUNCTION_INDEX.md`.
+  - **How:** remove it only after focused tests pass, then run lint, typing, architecture, registration, full non-real-data tests, and user-run real-data equivalence checks.
 
-- [x] **TASK-15: Consolidate static frontends into `adapters/frontend/`** ✅ COMPLETED
-  - All 9 feature frontend directories moved to `adapters/frontend/<feature>/`.
-  - Shared shell frontend moved to `adapters/frontend/shared/`.
-  - `adapters/server/main.py::SECTION_FRONTENDS` and `SERVER_FRONTEND` updated to point to `adapters/frontend/`.
-  - Old `adapters/*/frontend/` directories deleted.
+## Required rebuild invariants
 
-### Group D: Caller Migration & Vocabulary Elimination
+- Database and in-memory graph history remain synchronized.
+- Comparison IDs remain available to JSON, training, and NPZ consumers.
+- Collapse uses an explicit deterministic total order independent of file discovery completion order.
+- Replayed ratings and per-file histories remain equivalent modulo fresh IDs.
+- The ranking loop's LRU-overflow chain-cover refresh remains intact.
+- Focused coverage includes duplicate two-sided histories, contradictions, self-links, missing nodes, equal timestamps, ID uniqueness, and JSON sync.
 
-- [ ] **TASK-16: Migrate `adapters/server/endpoints/` to proxy API** ⚠️ PARTIAL
-  - Endpoints use proxy API (`get_node`, `get_node_count`, `get_all_links`) — no direct repository calls. ✅
-  - `Any` still used in request/response type annotations in `comparison.py`, `gallery.py`, `maps.py`. ❌
+## Validation
 
-- [x] **TASK-17: Migrate `application/services/image_processor.py` to graph and `FilePort`** ✅ COMPLETED
-  - All file operations route through injected `FilePort`.
-  - No direct repository access found; all graph interactions go through `CrystalGraph` node/link methods.
+For every task, follow the agent rulebook's narrow-to-broad validation order. Record the command, date, and result for any baseline. Documentation work is complete only when the four files have the correct one-way reference policy, the index describes the live tree, and every missing description has first been recorded as a task here.
 
-- [ ] **TASK-18: Migrate CLI commands and domain algorithms to node/link vocabulary** ⚠️ PARTIAL
-  - Deprecated vocabulary `get_image`, `get_all_images`, `get_all_comparisons`, `add_comparison` not found in CLI. ✅
-  - `clean_comparisons()` still called from `adapters/cli/commands/database.py::cleanup()` — this routes through `CrystalGraph` which wraps the repo, so it's not a raw repository call, but the method still exists on the facade and must be evaluated against TASK-09 cleanup. ❌ (depends on TASK-09 resolution)
+## Index description tasks
 
-### Group E: Typing Remediation & Gate Verification
-
-- [ ] **TASK-19: Eradicate `Any` across domain and application layers** ❌ NOT DONE
-  - `Any` still present in `adapters/server/endpoints/comparison.py`, `gallery.py`, `maps.py`.
-  - `Any` used in `domain/comparison/algorithm/view.py` return types.
-  - `Any` in `application/services/graph_service.py` (`_images: dict[str, dict[str, Any]]`, `_make_link`, `get_graph_stats`, `reset_all_image_ratings`, `clean_comparisons`).
-  - `Any` in `infrastructure/ml_models/training/pair_data.py` (`dict[str, Any]`).
-
-- [ ] **TASK-20: Drive Pyright Strict to <= 455 baseline** ❌ NOT DONE
-  - Not yet run / not yet verified.
-
-- [ ] **TASK-21: Full verification suite** ❌ NOT DONE
-  - `pytest`, `ruff`, architecture tests, facade tests not yet confirmed passing.
-  - ComfyUI `AestheticScore` node registration not yet verified.
+Add one entry here before finalizing the index for every file or public symbol that lacks a useful description. Each entry must name the path or symbol and state the ownership or behavior the index description must explain.

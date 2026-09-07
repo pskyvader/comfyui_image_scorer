@@ -4,8 +4,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .chain_manager import ChainManager
-    from .node_proxy import NodeProxy
-    from .chain_proxy import ChainProxy
 
 from . import node_proxy as _node_proxy
 from . import chain_proxy as _chain_proxy

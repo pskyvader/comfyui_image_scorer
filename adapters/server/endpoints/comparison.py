@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, Flask, current_app, jsonify, request
 
 from ....core.observability.logger import get_logger, ModuleLogger
 from ....core.configuration.settings import config
@@ -131,7 +131,7 @@ def get_status():
             "total_images": total,
             "ranked_images": ranked,
             "unranked_images": total - ranked,
-            "total_comparisons": deps.graph.get_total_comparisons(),
+            "total_comparisons": deps.graph.get_link_count(),
             "skipped_comparisons": 0,
             "min_images": 2,
             "current_target": level_stats["current_target"],
@@ -310,6 +310,6 @@ def sync_all_to_json():
     return result
 
 
-def register_ranking_routes(app: Any, deps: ServerDeps) -> None:
+def register_ranking_routes(app: Flask, deps: ServerDeps) -> None:
     app.extensions["server_deps"] = deps
     app.register_blueprint(ranking_bp)

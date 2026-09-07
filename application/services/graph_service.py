@@ -319,7 +319,7 @@ class CrystalGraph:
     # -- Links ----------------------------------------------------------
 
     def get_all_links(self) -> list[LinkProxy]:
-        records: list[_ComparisonRecord] = self._chain.get_comparison_history()
+        records = self._chain.get_comparison_history()
         logger.debug(f"records: {len(records)}")
         return [self._make_link(record) for record in records]
 
@@ -414,17 +414,9 @@ class CrystalGraph:
         assert self._image_repo is not None
         self._image_repo.clear_all_images()
 
-    def reset_all_image_ratings(self, score: float) -> Any:
+    def reset_all_image_ratings(self, score: float) -> bool:
         assert self._image_repo is not None
         return self._image_repo.reset_all_image_ratings(score)
-
-    def get_nodes_with_only_wins(self) -> list[str]:
-        assert self._comparison_repo is not None
-        return self._comparison_repo.get_nodes_with_only_wins()
-
-    def get_nodes_with_only_losses(self) -> list[str]:
-        assert self._comparison_repo is not None
-        return self._comparison_repo.get_nodes_with_only_losses()
 
     def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool:
         assert self._comparison_repo is not None
@@ -436,7 +428,7 @@ class CrystalGraph:
         filename_b: str,
         winner: str,
         timestamp: str,
-    ) -> Any:
+    ) -> int:
         assert self._comparison_repo is not None
         return self._comparison_repo.add_historical_comparison(
             filename_a=filename_a,

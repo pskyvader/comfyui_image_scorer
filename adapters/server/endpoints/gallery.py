@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Flask, jsonify, request
 
 from ....core.observability.logger import get_logger, ModuleLogger
 from ..deps import ServerDeps, get_server_deps
@@ -184,6 +184,6 @@ def get_image_history(filename: str):
     return result
 
 
-def register_gallery_routes(app: Any, deps: ServerDeps) -> None:
+def register_gallery_routes(app: Flask, deps: ServerDeps) -> None:
     app.extensions["server_deps"] = deps
     app.register_blueprint(gallery_bp)

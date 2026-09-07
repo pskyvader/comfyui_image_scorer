@@ -1,10 +1,13 @@
-"""Architecture gates: layer-import scan + DB-proxy scan (REORGANIZATION_PLAN §4)."
+"""Architecture gates: layer-import scan + DB-proxy scan + proxy-ownership scan."
 
 The layer gate parses every module, resolves each import to its top-level
 layer, and enforces the README dependency table. The DB-proxy gate flags any
 module importing ``get_db_connection`` or ``infrastructure.persistence``
 symbols outside the graph/persistence allowlist and the three composition
-roots (blocking since the §3.12 #47 flip).
+roots (blocking since the §3.12 #47 flip). The proxy-ownership gate flags any
+``NodeProxy``/``LinkProxy``/``ChainProxy``/``ComponentProxy`` construction
+outside ``CrystalGraph``'s factories and proxy-to-proxy navigation: external
+code must receive proxies from ``CrystalGraph`` methods, never build them.
 """
 
 import ast
@@ -25,6 +28,14 @@ COMPOSITION_ROOTS = {
     "adapters/comfyui/services.py",
 }
 DB_PROXY_ALLOWED_PREFIXES = ("domain/graph/", "infrastructure/persistence/")
+PROXY_CLASS_NAMES = ("NodeProxy", "LinkProxy", "ChainProxy", "ComponentProxy")
+PROXY_CONSTRUCTION_ALLOWED = {
+    "application/services/graph_service.py",
+    "domain/graph/node_proxy.py",
+    "domain/graph/link_proxy.py",
+    "domain/graph/chain_proxy.py",
+    "domain/graph/component_proxy.py",
+}
 
 
 def _iter_layer_files():
@@ -105,3 +116,23 @@ def test_no_db_access_outside_proxies():
             if names:
                 violations.append(f"{rel}: persistence import {names}")
     assert not violations, "DB-proxy violations:\n" + "\n".join(violations)
+
+
+def test_no_proxy_construction_outside_facade():
+    violations: list[str] = []
+    for rel, path in _iter_layer_files():
+        if rel in PROXY_CONSTRUCTION_ALLOWED:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = None
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Attribute):
+                name = func.attr
+            if name in PROXY_CLASS_NAMES:
+                violations.append(f"{rel}:{node.lineno}: constructs {name}")
+    assert not violations, "proxy-construction violations:\n" + "\n".join(violations)

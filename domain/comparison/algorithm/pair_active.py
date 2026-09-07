@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import time
-from typing import Any
 
 from ....core.observability.logger import get_logger, ModuleLogger
 from ...graph.chain_proxy import ChainProxy
-
-from comfyui_image_scorer.domain.graph.node_proxy import NodeProxy as NodeProxy
+from ...graph.node_proxy import NodeProxy
 
 from ....core.configuration.settings import config
 
@@ -29,6 +27,11 @@ def phase_seed_coverage(
     seed_pool: list[NodeProxy],
     all_images_length: int,
 ) -> tuple[NodeProxy, NodeProxy] | None:
+    _start: float = time.perf_counter()
+    seed_percentage = int(config["ranking"]["seed_percentage"])
+    seed_target = int(config["ranking"]["seed_target_comparisons"])
+
+    seed_size: int = all_images_length * seed_percentage // 100
     ready_seed_pool: list[NodeProxy] = [
         i for i in seed_pool if i.comparison_count >= seed_target
     ]
@@ -139,7 +142,7 @@ def phase_anchor_insert(
         # and not cg.are_in_same_path(node_a.filename, node.filename)
     ]
     if len(nodes) < 2:
-        logger.debug(f"no pair found out of {len(pair_list)} opponents")
+        logger.debug(f"no pair found out of {len(nodes)} opponents")
         return None
 
     pair_list: list[tuple[NodeProxy, NodeProxy]] = [
@@ -236,14 +239,14 @@ def phase_collapsible_pairs(
 
     chains: list[ChainProxy] = list(cg.get_all_chains())
 
-    check_list = cg.get_nodes_with_only_losses()
+    check_list = [node.filename for node in cg.get_loser_only_nodes()]
     use_bottom = True
     nodes: list[NodeProxy] = _collect_chain_extremes(
         chains, candidate_names, check_list, use_bottom, cg
     )
 
     if len(nodes) < 2:
-        check_list = cg.get_nodes_with_only_wins()
+        check_list = [node.filename for node in cg.get_winner_only_nodes()]
         use_bottom = False
         nodes = _collect_chain_extremes(
             chains, candidate_names, check_list, use_bottom, cg

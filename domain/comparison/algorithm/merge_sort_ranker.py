@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import time
+
 from ....core.observability.logger import get_logger, ModuleLogger
-from ...graph.node_proxy import NodeProxy
-from ...graph.chain_proxy import ChainProxy
+from .graph_helpers import filter_excluded_images
+from .phase_order import select_pair
 
 from ....domain.ports.graph import CrystalGraphPort
 

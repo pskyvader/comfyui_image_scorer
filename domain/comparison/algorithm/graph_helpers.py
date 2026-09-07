@@ -81,7 +81,6 @@ def is_collapsable_pair(filename_a: str, filename_b: str, cg: CrystalGraphPort) 
 def filter_excluded_images(
     images: list[dict[str, object]],
     exclude_set: set[str],
-    cg: CrystalGraphPort,
 ) -> list[dict[str, object]]:
     """Remove images whose filename is in exclude_set."""
     _start = time.perf_counter()
