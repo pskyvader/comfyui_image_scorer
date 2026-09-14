@@ -24,6 +24,7 @@ from ...core.io.serialization import atomic_write_json, discover_files, load_jso
 from ...core.utilities.concurrency import parallel_for
 from ...core.configuration.settings import config
 from ...core.filesystem.paths import image_root_processed as _img_root
+from ...domain.comparison.algorithm.graph_helpers import safe_parse_timestamp
 
 logger: ModuleLogger = get_logger(__name__)
 JsonDict = dict[str, Any]
@@ -57,7 +58,7 @@ def _merge_comparison_histories(
                 added += 1
 
     merged.sort(
-        key=lambda e: (e.get("timestamp", "") or "", e.get("comparison_id") or 0)
+        key=lambda e: (safe_parse_timestamp(e.get("timestamp"))[1], e.get("comparison_id") or 0)
     )
     keeper["comparison_history"] = merged
     keeper["comparison_count"] = len(merged)

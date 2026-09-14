@@ -9,7 +9,7 @@ from tqdm import tqdm
 from ...core.observability.logger import get_logger
 
 from .helpers import get_value_from_entry, l2_normalize_batch
-from ...domain.loading import ModelLoader
+from ...domain.ports.loading import ModelLoader
 
 logger = get_logger(__name__)
 

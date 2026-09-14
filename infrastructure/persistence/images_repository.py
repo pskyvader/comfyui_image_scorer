@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from ...core.observability.logger import ModuleLogger, get_logger
 from .database import get_db_connection
 
 logger: ModuleLogger = get_logger(__name__)
 
 
-def list_nodes() -> list[dict[str, Any]]:
+def list_nodes() -> list[dict[str, object]]:
     with get_db_connection() as conn:
         rows = conn.execute("SELECT * FROM images").fetchall()
         return [dict(row) for row in rows]
 
 
-def find_node(filename: str) -> dict[str, Any] | None:
+def find_node(filename: str) -> dict[str, object] | None:
     with get_db_connection() as conn:
         row = conn.execute(
             "SELECT * FROM images WHERE filename = ?", (filename,)
@@ -60,7 +58,13 @@ def update_image_rating_state(
                 SET score=?, rating_mu=?, rating_sigma=?, comparison_count=?, last_compared_at=CURRENT_TIMESTAMP
                 WHERE filename=?
                 """,
-                (float(score), float(rating_mu), float(rating_sigma), int(comparison_count), filename),
+                (
+                    float(score),
+                    float(rating_mu),
+                    float(rating_sigma),
+                    int(comparison_count),
+                    filename,
+                ),
             )
         elif last_compared_at is not None:
             conn.execute(
@@ -69,7 +73,14 @@ def update_image_rating_state(
                 SET score=?, rating_mu=?, rating_sigma=?, comparison_count=?, last_compared_at=?
                 WHERE filename=?
                 """,
-                (float(score), float(rating_mu), float(rating_sigma), int(comparison_count), str(last_compared_at), filename),
+                (
+                    float(score),
+                    float(rating_mu),
+                    float(rating_sigma),
+                    int(comparison_count),
+                    str(last_compared_at),
+                    filename,
+                ),
             )
         else:
             conn.execute(
@@ -78,7 +89,13 @@ def update_image_rating_state(
                 SET score=?, rating_mu=?, rating_sigma=?, comparison_count=?
                 WHERE filename=?
                 """,
-                (float(score), float(rating_mu), float(rating_sigma), int(comparison_count), filename),
+                (
+                    float(score),
+                    float(rating_mu),
+                    float(rating_sigma),
+                    int(comparison_count),
+                    filename,
+                ),
             )
         conn.commit()
     return True
@@ -125,10 +142,10 @@ def reset_all_image_ratings(score: float) -> bool:
 class SQLiteImagesRepository:
     """Injected implementation of the ImageRepository port."""
 
-    def find_node(self, filename: str) -> dict[str, Any] | None:
+    def find_node(self, filename: str) -> dict[str, object] | None:
         return find_node(filename)
 
-    def list_nodes(self) -> list[dict[str, Any]]:
+    def list_nodes(self) -> list[dict[str, object]]:
         return list_nodes()
 
     def get_image_count(self) -> int:

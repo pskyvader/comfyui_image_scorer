@@ -51,8 +51,16 @@ from comfyui_image_scorer.core.filesystem.paths import (  # noqa: E402
 CONTRACT: list[tuple[str, tuple[str, ...], set[str]]] = [
     ("/api/training/train", ("training", "train-model"), {"train_model"}),
     ("/api/training/hpo", ("training", "hpo"), {"run_hpo"}),
-    ("/api/build/prepare", ("build", "all"), {"run_all", "run_split_vectors", "run_full_vectors"}),
-    ("/api/build/delete-vectors", ("files", "remove", "vectors"), {"delete_full_vectors"}),
+    (
+        "/api/build/prepare",
+        ("build", "all"),
+        {"run_all", "run_split_vectors", "run_full_vectors"},
+    ),
+    (
+        "/api/build/delete-vectors",
+        ("files", "remove", "vectors"),
+        {"delete_full_vectors"},
+    ),
     ("/api/database/rebuild-db", ("database", "rebuild"), {"rebuild"}),
     ("/api/database/recalculate", ("database", "recalculate"), {"recalculate"}),
     ("/api/database/cleanup", ("database", "cleanup"), {"cleanup"}),
@@ -82,7 +90,11 @@ CONTRACT: list[tuple[str, tuple[str, ...], set[str]]] = [
         {"deduplicate_scored", "cleanup_orphans"},
     ),
     ("/api/analyze/stats", ("analyze", "stats"), {"run_stats"}),
-    ("/api/analyze/analyze-parameters", ("analyze", "parameters"), {"run_parameter_analysis"}),
+    (
+        "/api/analyze/analyze-parameters",
+        ("analyze", "parameters"),
+        {"run_parameter_analysis"},
+    ),
     ("/api/analyze/analyze-matrix", ("analyze", "matrix"), {"run_matrix_analysis"}),
 ]
 
@@ -321,9 +333,7 @@ class FakeDeps:
         from comfyui_image_scorer.adapters.cli.deps import CLIDeps
 
         self.graph = StubGraph()
-        self.processor: Any = SimpleNamespace(
-            rebuild_database_from_ranked=Recorder()
-        )
+        self.processor: Any = SimpleNamespace(rebuild_database_from_ranked=Recorder())
         self.model_loader: Any = None
         self.batch_sizer_factory: Any = None
         self.maps_provider: Any = None
@@ -399,9 +409,7 @@ def test_cli_database_commands_with_fake_deps():
         ("GET", "/api/analyze/stats", None),
     ],
 )
-def test_endpoints_with_fake_deps(
-    method: str, route: str, body: dict[str, Any] | None
-):
+def test_endpoints_with_fake_deps(method: str, route: str, body: dict[str, Any] | None):
     deps = _make_fake_deps()
     app = _make_app(deps)
     client = app.test_client()
@@ -535,7 +543,9 @@ def test_live_server_smoke():
             resp.read()
             assert resp.status == 200
     except AssertionError as e:
-        raise AssertionError(f"{e}\n--- server log tail ---\n{_log_tail(log_path)}") from e
+        raise AssertionError(
+            f"{e}\n--- server log tail ---\n{_log_tail(log_path)}"
+        ) from e
     finally:
         _stop_server(proc)
 
@@ -552,20 +562,71 @@ def test_real_data_pipeline():
         base = f"http://127.0.0.1:{port}"
         _wait_ready(base, timeout=SHORT_TIMEOUT)
 
-        steps: list[tuple[str, str, str, dict[str, Any] | None, bool, Callable[[], None] | None]] = [
-            ("remove-generated-models", "POST", "/api/files/remove-generated-models", None, False, None),
-            ("remove-vector-maps", "POST", "/api/files/remove-vector-maps", None, False, _check_maps_removed),
-            ("remove-downloaded-models", "POST", "/api/files/remove-downloaded-models", None, False, None),
-            ("delete-vectors", "POST", "/api/build/delete-vectors", None, False, _check_vectors_removed),
+        steps: list[
+            tuple[str, str, str, dict[str, Any] | None, bool, Callable[[], None] | None]
+        ] = [
+            (
+                "remove-generated-models",
+                "POST",
+                "/api/files/remove-generated-models",
+                None,
+                False,
+                None,
+            ),
+            (
+                "remove-vector-maps",
+                "POST",
+                "/api/files/remove-vector-maps",
+                None,
+                False,
+                _check_maps_removed,
+            ),
+            (
+                "remove-downloaded-models",
+                "POST",
+                "/api/files/remove-downloaded-models",
+                None,
+                False,
+                None,
+            ),
+            (
+                "delete-vectors",
+                "POST",
+                "/api/build/delete-vectors",
+                None,
+                False,
+                _check_vectors_removed,
+            ),
             ("files-cleanup", "POST", "/api/files/cleanup", None, True, None),
             ("download-models", "POST", "/api/files/download-models", None, True, None),
             ("db-cleanup", "POST", "/api/database/cleanup", None, True, None),
             ("db-rebuild", "POST", "/api/database/rebuild-db", None, True, None),
             ("db-recalculate", "POST", "/api/database/recalculate", None, True, None),
-            ("build-all-100", "POST", "/api/build/prepare", {"mode": "all", "limit": 100, "batch": False}, True, _check_vectors_rebuilt),
+            (
+                "build-all-100",
+                "POST",
+                "/api/build/prepare",
+                {"mode": "all", "limit": 100, "batch": False},
+                True,
+                _check_vectors_rebuilt,
+            ),
             ("train-model", "POST", "/api/training/train", None, True, None),
-            ("hpo", "POST", "/api/training/hpo", {"cycles": 2, "optimization_steps": 2, "max_combos": 2}, True, None),
-            ("analyze-parameters", "POST", "/api/analyze/analyze-parameters", None, True, None),
+            (
+                "hpo",
+                "POST",
+                "/api/training/hpo",
+                {"cycles": 2, "optimization_steps": 2, "max_combos": 2},
+                True,
+                None,
+            ),
+            (
+                "analyze-parameters",
+                "POST",
+                "/api/analyze/analyze-parameters",
+                None,
+                True,
+                None,
+            ),
             ("analyze-matrix", "POST", "/api/analyze/analyze-matrix", None, True, None),
             ("stats", "GET", "/api/analyze/stats", None, False, None),
         ]
@@ -581,7 +642,9 @@ def test_real_data_pipeline():
                 if check:
                     check()
         except AssertionError as e:
-            raise AssertionError(f"{e}\n--- server log tail ---\n{_log_tail(log_path)}") from e
+            raise AssertionError(
+                f"{e}\n--- server log tail ---\n{_log_tail(log_path)}"
+            ) from e
     finally:
         _stop_server(proc)
 
@@ -596,19 +659,22 @@ def test_real_data_pipeline():
 
 import torch
 from unittest.mock import patch, MagicMock
-from comfyui_image_scorer.adapters.comfyui.nodes.aesthetic_score.node import AestheticScoreNode
+from comfyui_image_scorer.adapters.comfyui.nodes.aesthetic_score.node import (
+    AestheticScoreNode,
+)
 
 
 def _mock_score_return():
     """Return value for ScoringService.score() matching RETURN_TYPES."""
     return (
-        torch.zeros(1, 1, 512, 512),   # selected images (IMAGE)
-        torch.zeros(1, 1, 512, 512),   # discarded images (IMAGE)
-        True,                          # available
-        [0.7],                         # scores (LIST)
+        torch.zeros(1, 1, 512, 512),  # selected images (IMAGE)
+        torch.zeros(1, 1, 512, 512),  # discarded images (IMAGE)
+        True,  # available
+        [0.7],  # scores (LIST)
     )
 
 
+@pytest.mark.realdata
 @pytest.mark.node
 class TestAestheticScoreNodeDelegation:
     """Verify the node properly forwards all arguments to ScoringService.score()."""
@@ -621,7 +687,12 @@ class TestAestheticScoreNodeDelegation:
     def test_all_kwargs_forwarded_to_scoring_service(self):
         """Ensure calculate_score passes every INPUT_TYPE kwarg to score()."""
         node = AestheticScoreNode()
-        with patch.object(node, "_scoring_service", self._make_mock()) as mock:
+        with (
+            patch(
+                "comfyui_image_scorer.adapters.comfyui.nodes.aesthetic_score.node.verify_models_present"
+            ),
+            patch.object(node, "_scoring_service", self._make_mock()) as mock,
+        ):
             result = node.calculate_score(
                 image=torch.zeros(1, 512, 512, 3),
                 threshold=0.5,
@@ -664,6 +735,7 @@ class TestAestheticScoreNodeDelegation:
                 assert kwargs["max_images"] == 10
 
 
+@pytest.mark.realdata
 @pytest.mark.node
 class TestAestheticScoreNodeReturnTypes:
     """Verify the node returns a 4-tuple matching RETURN_TYPES."""
@@ -671,7 +743,12 @@ class TestAestheticScoreNodeReturnTypes:
     def test_returns_four_tuple(self):
         """RETURN_TYPES = (IMAGE, IMAGE, BOOLEAN, LIST)."""
         node = AestheticScoreNode()
-        with patch.object(node, "_scoring_service", MagicMock()) as mock:
+        with (
+            patch(
+                "comfyui_image_scorer.adapters.comfyui.nodes.aesthetic_score.node.verify_models_present"
+            ),
+            patch.object(node, "_scoring_service", MagicMock()) as mock,
+        ):
             mock.score.return_value = _mock_score_return()
             result = node.calculate_score(
                 image=torch.zeros(1, 512, 512, 3),
@@ -686,9 +763,9 @@ class TestAestheticScoreNodeReturnTypes:
                 lora_name="",
                 lora_strength=0.0,
             )
-            assert len(result) == 4, (
-                f"Expected 4-tuple matching RETURN_TYPES, got {len(result)} items"
-            )
+            assert (
+                len(result) == 4
+            ), f"Expected 4-tuple matching RETURN_TYPES, got {len(result)} items"
             selected_img, discarded_img, available, scores = result
             # Types check (not deep value check — tensor comparison is fragile)
             assert available is True

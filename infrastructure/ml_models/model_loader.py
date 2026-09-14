@@ -20,6 +20,7 @@ def set_hub_offline(enabled: bool) -> None:
     os.environ["HF_HUB_OFFLINE"] = value
     _hub_constants.HF_HUB_OFFLINE = value == "1"
 
+
 import torch
 from torch import nn
 from safetensors.torch import load_file as load_safetensors
@@ -30,8 +31,11 @@ from ...core.configuration.settings import config
 from ...core.filesystem.paths import mediapipe_models_dir
 from sentence_transformers import SentenceTransformer
 from transformers import (
-    CLIPVisionConfig, CLIPVisionModel,
-    CLIPImageProcessor, AutoImageProcessor, AutoModelForImageClassification,
+    CLIPVisionConfig,
+    CLIPVisionModel,
+    CLIPImageProcessor,
+    AutoImageProcessor,
+    AutoModelForImageClassification,
 )
 from huggingface_hub import snapshot_download
 
@@ -70,9 +74,7 @@ class MultiTaskClipVisionModel(nn.Module):
         self.gender_head = nn.Linear(hidden_size, num_labels["gender"])
         self.race_head = nn.Linear(hidden_size, num_labels["race"])
 
-    def forward(
-        self, pixel_values: torch.Tensor
-    ) -> dict[str, torch.Tensor]:
+    def forward(self, pixel_values: torch.Tensor) -> dict[str, torch.Tensor]:
         outputs = self.vision_model(pixel_values=pixel_values)
         pooled = outputs.pooler_output
         return {
@@ -98,9 +100,7 @@ class ModelLoader:
 
     def __init__(self):
         self.embedding_model: tuple[SentenceTransformer, int] | None = None
-        self.vision_model_cache: dict[
-            str, tuple[nn.Module, int, int, Compose]
-        ] = {}
+        self.vision_model_cache: dict[str, tuple[nn.Module, int, int, Compose]] = {}
         self._model_info_cache: dict[str, dict[str, object]] = {}
         self._hf_model_cache: dict[str, tuple[nn.Module, int, object]] = {}
         self._hf_model_lock = threading.Lock()
@@ -114,14 +114,14 @@ class ModelLoader:
             return ModelLoader._CLIP_NORM
         return ModelLoader._IMAGENET_NORM
 
-    def load_vision_model(
-        self, model_key: str
-    ) -> tuple[nn.Module, int, int, Compose]:
+    def load_vision_model(self, model_key: str) -> tuple[nn.Module, int, int, Compose]:
         cached = self.vision_model_cache.get(model_key)
         if cached is not None:
             return cached
 
-        vision_models: dict[str, dict[str, object]] = self.prepare_config["vision_models"]
+        vision_models: dict[str, dict[str, object]] = self.prepare_config[
+            "vision_models"
+        ]
         if model_key not in vision_models:
             raise KeyError(
                 f"Vision model key '{model_key}' not found in prepare_config. "
@@ -220,8 +220,12 @@ class ModelLoader:
         self._hf_model_cache[model_key] = result
         return result
 
-    def _load_hf_vision_model_impl(self, model_key: str) -> tuple[nn.Module, int, object]:
-        attribute_models: dict[str, dict[str, object]] = self.prepare_config["attribute_models"]
+    def _load_hf_vision_model_impl(
+        self, model_key: str
+    ) -> tuple[nn.Module, int, object]:
+        attribute_models: dict[str, dict[str, object]] = self.prepare_config[
+            "attribute_models"
+        ]
         if model_key not in attribute_models:
             raise KeyError(
                 f"Attribute model key '{model_key}' not found in prepare_config. "
@@ -252,7 +256,9 @@ class ModelLoader:
                 model.load_state_dict(state_dict, strict=False)
                 model = model.eval()
                 model.to(device)
-                logger.info("Attribute model '%s' loaded on device: %s", model_key, device)
+                logger.info(
+                    "Attribute model '%s' loaded on device: %s", model_key, device
+                )
                 result = (model, output_dim, processor)
             elif model_key == "nsfw":
                 processor = AutoImageProcessor.from_pretrained(name)
@@ -295,7 +301,8 @@ def verify_models_present() -> None:
     for key, model_config in prepare["attribute_models"].items():
         name = model_config["name"]
         if "url" in model_config:
-            if not os.path.exists(os.path.join(mediapipe_models_dir, name)):
+            model_path = os.path.join(mediapipe_models_dir, name)
+            if not os.path.exists(model_path):
                 missing.append(f"MediaPipe model '{name}'")
             continue
         try:

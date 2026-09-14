@@ -37,6 +37,12 @@ class FilePort(Protocol):
     def make_directory(self, path: str) -> None:
         """Create *path* including any missing parents; no-op if it exists."""
 
+    def move_file(self, src: Path, dst: Path) -> bool:
+        """Move a file from src to dst through the filesystem port."""
+
+    def remove_file(self, path: Path) -> None:
+        """Delete a file through the filesystem port."""
+
     def ranked_root(self) -> Path: ...
 
     def compute_path(self, filename: str, score: float) -> Path: ...

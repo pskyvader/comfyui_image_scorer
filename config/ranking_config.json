@@ -1,15 +1,15 @@
 {
     "subfolder_threshold": 1000,
-    "lru_size": 240,
+    "lru_size": 300,
     "max_workers": 100,
     "default_score": 0.5,
     "reserve_count": 30,
     "parallel_requests": true,
-    "timeout_ms": 30000,
+    "timeout_ms": 90000,
     "seed_percentage": 5,
     "seed_target_comparisons": 10,
     "insertion_target_comparisons": 2,
     "score_steepness": 1.5,
     "sigma_threshold": 3.0,
-    "compress_images": false
+    "compress_images": true
 }

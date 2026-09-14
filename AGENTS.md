@@ -10,10 +10,24 @@ These rules govern every change inside `comfyui_image_scorer`. They are complete
 - Do not revert user changes or unrelated work.
 - Do not add telemetry, analytics, uploads, update checks, remote config, or other outbound internet paths. Model downloads are explicit user actions.
 - Treat legacy reference material as read-only.
+- `FUNCTION_INDEX.md` is a live current-state inventory. It may describe only files, symbols, ownership, and behavior that exist now; it must not describe planned interfaces, future migrations, removed APIs, or acceptance criteria. Update it after any change that alters the live tree, symbols, ownership, or public interfaces.
+
+## Documentation ownership
+
+Four documents describe this module. Each owns a distinct category; no document may duplicate another's content.
+
+| Document | Owns |
+|---|---|
+| `AGENTS.md` | Permanent engineering constraints, including the documentation ownership rules above. |
+| `README.md` | Module purpose, goals, functionality, usage, and the general architecture diagram. |
+| `FUNCTION_INDEX.md` | Current live file, symbol, ownership, and behavior inventory. Must never describe planned or removed state. |
+| `REORGANIZATION_PLAN.md` | Sequencing, dependencies, acceptance criteria, and current remediation status. |
+
+Cross-references may identify the document that owns a fact, but no document may duplicate another document's rules, functionality, inventory, or roadmap status.
 
 ## Architecture
 
-The dependency direction is `core -> domain -> application -> adapters`. Infrastructure implements domain ports and is imported only by these composition roots: `adapters/server/main.py`, `adapters/cli/deps.py`, and `adapters/comfyui/services.py`.
+The dependency direction is `core -> domain -> application -> adapters`. Infrastructure implements domain ports and is imported only by these composition roots: `adapters/server/main.py`, `adapters/cli/deps.py`, and `adapters/comfyui/services.py`. These roots construct concrete infrastructure services and inject them through ports; core, domain, and application code must not import infrastructure implementations directly.
 
 - `core` contains generic configuration, filesystem, IO, logging, and utility primitives. It imports no higher layer or ComfyUI code.
 - `domain` contains business logic, algorithms, models, and pure port interfaces. It imports only `core`.
@@ -38,6 +52,7 @@ The dependency direction is `core -> domain -> application -> adapters`. Infrast
 - Treat dtype, device placement, VRAM use, offloading, and cleanup as correctness concerns across CPU, CUDA, ROCm, MPS, DirectML, XPU, and NPU paths. Use existing cast, offload, and memory-management helpers at the owning boundary.
 - Use existing ComfyUI optimized operations and model-management helpers before writing local kernels. Do not inspect backend implementation identity.
 - Nodes follow `INPUT_TYPES`, `RETURN_TYPES`, `FUNCTION`, `CATEGORY`, and the local registration mapping. Nodes translate and delegate; they do not patch model internals or expose pass-through values they do not own. Prefer existing nodes over new compatibility wrappers.
+- Do not re-export functions, create empty init files, or write trivial wrappers in the form `a(b): return c(b)`. The sole exception is `__init__.py`, which must re-export `NODE_CLASS_MAPPINGS` and `NODE_DISPLAY_NAME_MAPPINGS` from `adapters/comfyui/node_registry` so ComfyUI's custom-node loader can discover the module.
 
 ## Data and lifecycle rules
 
@@ -71,7 +86,7 @@ For node registration, verify the `NODE_CLASS_MAPPINGS` entry, required
 expected `AestheticScore` mapping. The minimal smoke check is:
 
 ```powershell
-python -c "import sys; sys.path.insert(0, '..'); from comfyui_image_scorer.adapters.comfyui import NODE_CLASS_MAPPINGS; assert 'AestheticScore' in NODE_CLASS_MAPPINGS; print(list(NODE_CLASS_MAPPINGS))"
+python -c "import sys; sys.path.insert(0, '..'); from comfyui_image_scorer.adapters.comfyui.node_registry import NODE_CLASS_MAPPINGS; assert 'AestheticScore' in NODE_CLASS_MAPPINGS; print(list(NODE_CLASS_MAPPINGS))"
 ```
 
 ## Editing and review

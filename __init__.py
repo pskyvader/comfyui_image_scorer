@@ -1,3 +1,1 @@
-from .adapters.comfyui import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
-
-__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
+from .adapters.comfyui.node_registry import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS

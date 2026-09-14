@@ -18,7 +18,7 @@ from ...core.observability.logger import get_logger, ModuleLogger
 
 import math
 
-from ...domain.loading import TrainingLoader
+from ...domain.ports.loading import TrainingLoader
 from ...core.configuration.settings import config
 from ...domain.training.calibration import apply_score_calibration, extract_score_calibration
 

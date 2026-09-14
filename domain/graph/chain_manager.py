@@ -8,7 +8,7 @@ import time
 from tqdm import tqdm
 
 from ...core.observability.logger import get_logger, ModuleLogger
-from .link_proxy import _ComparisonRecord
+from .link_proxy import ComparisonRecord
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -282,7 +282,7 @@ class ChainManager:
         self._common_chains: dict[int, tuple[list[str], bool]] = {}
         self._node_chains: dict[str, dict[int, bool]] = {}
 
-        self._comparison_history: list[_ComparisonRecord] = []
+        self._comparison_history: list[ComparisonRecord] = []
 
     # ==================================================================
     # Public accessors
@@ -298,10 +298,18 @@ class ChainManager:
         return list(self._bottom_nodes)
 
     def get_nodes_with_only_wins(self) -> list[str]:
-        return [node for node in self._all_filenames if self._worse_than[node] == [] and self._better_than[node]]
+        return [
+            node
+            for node in self._all_filenames
+            if self._worse_than[node] == [] and self._better_than[node]
+        ]
 
     def get_nodes_with_only_losses(self) -> list[str]:
-        return [node for node in self._all_filenames if self._better_than[node] == [] and self._worse_than[node]]
+        return [
+            node
+            for node in self._all_filenames
+            if self._better_than[node] == [] and self._worse_than[node]
+        ]
 
     def get_better_than(self, node_id: str) -> list[str]:
         return self._better_than.get(node_id, [])
@@ -346,7 +354,7 @@ class ChainManager:
     def set_db_comparison_count(self, count: int) -> None:
         self._db_comparison_count = count
 
-    def get_comparison_history(self) -> list[_ComparisonRecord]:
+    def get_comparison_history(self) -> list[ComparisonRecord]:
         return list(self._comparison_history)
 
     def clear_comparison_history(self) -> None:
@@ -373,7 +381,7 @@ class ChainManager:
         self._build_chains()
         # Replace history with fresh entries from this build
         self._comparison_history = [
-            _ComparisonRecord(
+            ComparisonRecord(
                 id=comp["id"] if "id" in comp else index,
                 winner=comp["winner"],
                 loser=(
@@ -437,9 +445,14 @@ class ChainManager:
                 entry.timestamp = ts
                 break
         else:
-            self._comparison_history.append(_ComparisonRecord(
-                id=len(self._comparison_history), winner=winner, loser=loser, timestamp=ts
-            ))
+            self._comparison_history.append(
+                ComparisonRecord(
+                    id=len(self._comparison_history),
+                    winner=winner,
+                    loser=loser,
+                    timestamp=ts,
+                )
+            )
 
         self._db_comparison_count += 1
         self._built_at = datetime.now(timezone.utc)
@@ -640,6 +653,7 @@ class ChainManager:
             pick = min(remaining_sccs)
             queue.append(pick)
 
+        logger.debug(f"Forward dp...", start_timer=_start)
         # 4. Forward DP (single pass on SCC DAG, reverse topo order)
         downward_chains: dict[str, list[str]] = {}
         for n in self._all_filenames:
@@ -689,7 +703,7 @@ class ChainManager:
                     elif new_bttm == old_bttm and len(cand) > len(cur):
                         downward_chains[pred] = cand
                         q.append(pred)
-
+        logger.debug(f"Backward dp...", start_timer=_start)
         # 5. Backward DP (single pass on SCC DAG, forward topo order)
         upward_chains: dict[str, list[str]] = {}
         for n in self._all_filenames:
@@ -737,7 +751,7 @@ class ChainManager:
                     elif new_tp == old_tp and len(cand) > len(cur):
                         upward_chains[succ] = cand
                         q.append(succ)
-
+        logger.debug(f"Building unique chains...", start_timer=_start)
         # Build unique chains and assign main chains
         seen: dict[tuple[str, ...], int] = {}
         next_id: int = 0
@@ -746,6 +760,7 @@ class ChainManager:
             desc="Building main chains",
             unit="node",
             delay=3.0,
+            mininterval=1.0,
         ) as pbar:
             for n in self._all_filenames:
                 down_chain: list[str] = self._dedup_path(downward_chains[n])
@@ -773,6 +788,7 @@ class ChainManager:
             desc="Setting common chains",
             unit="chain",
             delay=3.0,
+            mininterval=1.0,
         ) as pbar:
             for chain_id, chain in self._chains.items():
                 self._common_chains[chain_id] = (chain, True)

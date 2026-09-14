@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import os
-import shutil
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
 from threading import Lock
+import time
 
 from tqdm import tqdm
 
@@ -29,6 +28,7 @@ from ...domain.analysis.trueskill import (
     public_score_from_rating,
     replay_ratings,
 )
+from ...domain.comparison.algorithm.history_collapse import collapse_comparison_history
 from ...domain.ports.files import FilePort
 from .graph_service import CrystalGraph
 
@@ -74,7 +74,7 @@ class ImageProcessor:
         filename = image_path.name
         json_path = image_path.with_suffix(".json")
 
-        if not json_path.exists():
+        if not self._path_ops.file_exists(str(json_path)):
             with self.processed_lock:
                 self.processed_images.add(filename)
             return (
@@ -89,8 +89,7 @@ class ImageProcessor:
         if filename in self.processed_images:
             return (False, "Already processed", None, None, False, None)
 
-        with open(json_path, "r", encoding="utf-8") as handle:
-            json_data = json.load(handle)
+        json_data = self._path_ops.read_json(str(json_path))
 
         cleaned_json = clean_json_metadata(
             json_data,
@@ -116,19 +115,20 @@ class ImageProcessor:
             cleaned_json["comparison_count"] = 0
 
         tmp_json = json_path.parent / f"{json_path.name}.tmp"
-        with open(tmp_json, "w", encoding="utf-8") as handle:
-            json.dump(cleaned_json, handle, indent=2, ensure_ascii=False)
-        os.replace(str(tmp_json), str(json_path))
+        self._path_ops.write_json(str(tmp_json), cleaned_json)
+        self._path_ops.move_file(tmp_json, json_path)
 
         dest_image = self._path_ops.compute_path(filename, chosen_score)
-        dest_image.parent.mkdir(parents=True, exist_ok=True)
+        self._path_ops.make_directory(str(dest_image.parent))
         dest_json = dest_image.with_suffix(".json")
 
-        if dest_image.exists() and image_path.exists():
+        if self._path_ops.file_exists(str(dest_image)) and self._path_ops.file_exists(
+            str(image_path)
+        ):
             if image_path.stat().st_size == dest_image.stat().st_size:
-                if json_path.exists():
-                    shutil.move(str(json_path), str(dest_json))
-                image_path.unlink(missing_ok=True)
+                if self._path_ops.file_exists(str(json_path)):
+                    self._path_ops.move_file(json_path, dest_json)
+                self._path_ops.remove_file(image_path)
                 with self.processed_lock:
                     self.processed_images.add(dest_image.name)
                 return (
@@ -145,22 +145,20 @@ class ImageProcessor:
             index = 1
             while True:
                 candidate = dest_image.parent / f"{stem}_{index}{suffix}"
-                if not candidate.exists():
+                if not self._path_ops.file_exists(str(candidate)):
                     dest_image = candidate
                     dest_json = candidate.with_suffix(".json")
                     break
                 index += 1
 
         def safe_move(src: Path, dst: Path) -> bool:
-            if not src.exists():
-                return dst.exists()
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dst))
-            return True
+            return self._path_ops.move_file(src, dst)
 
         if not safe_move(image_path, dest_image):
             return (False, "Image move failed", None, None, False, None)
-        if json_path.exists() and not safe_move(json_path, dest_json):
+        if self._path_ops.file_exists(str(json_path)) and not safe_move(
+            json_path, dest_json
+        ):
             return (False, "JSON move failed", None, None, False, None)
 
         with self.processed_lock:
@@ -299,8 +297,9 @@ class ImageProcessor:
         self.is_processing = False
         return stats
 
-    def rebuild_database_from_ranked(self, file_operations: bool = True) -> None:
+    def rebuild_database_from_ranked(self) -> None:
         """Rebuild or repair the ranking database from ranked files and companion JSON."""
+        _start: float = time.perf_counter()
         ranked_root = self._path_ops.ranked_root()
         if not ranked_root.exists():
             return
@@ -308,10 +307,8 @@ class ImageProcessor:
         self.reorganize_folder_structure()
 
         ranked_root: Path = self._path_ops.ranked_root()
-        file_operations = False  # testing missing filenames
-        if file_operations:
-            self._path_ops.deduplicate_scored(root=ranked_root)
-            self._path_ops.cleanup_orphans(root=ranked_root)
+        self._path_ops.deduplicate_scored(root=ranked_root)
+        self._path_ops.cleanup_orphans(root=ranked_root)
         self._graph.clear_all_comparisons()
         self._graph.clear_all_images()
 
@@ -353,8 +350,12 @@ class ImageProcessor:
         self._graph.rebuild_from_database()
 
         valid_filenames = {node.filename for node in self._graph.get_all_nodes()}
-        logger.debug(f"valid filenames: {len(valid_filenames)} images in database")
+        logger.debug(
+            f"valid filenames: {len(valid_filenames)} images in database",
+            start_timer=_start,
+        )
 
+        comparison_rows: list[dict[str, object]] = []
         with tqdm(
             total=len(all_entries),
             desc="Adding histories from image",
@@ -362,7 +363,6 @@ class ImageProcessor:
             delay=3.0,
             position=0,
         ) as pbar:
-            # with tqdm(delay=3.0, position=1) as desc:
             for img_path, entry, _timestamp, file_id in all_entries:
                 filename = Path(img_path).name
 
@@ -379,35 +379,66 @@ class ImageProcessor:
                 if existing and prompt_tags and existing["prompt_tags"] != prompt_tags:
                     self._graph.update_image_tags(filename, prompt_tags)
 
-                if filename in valid_filenames:
-                    history = entry.get("comparison_history")
-                    # pbar.set_postfix_str(f"Processing history for {filename}")
-                    if isinstance(history, list):
-                        for comp in history:
-                            other = comp["other"]
-                            timestamp = comp["timestamp"]
-                            if not other or not timestamp:
-                                continue
-                            if other not in valid_filenames:
-                                continue
-                            winner_file = filename if comp["winner"] else other
-                            if winner_file not in valid_filenames:
-                                continue
-                            self._graph.add_historical_comparison(
-                                filename_a=filename,
-                                filename_b=other,
-                                winner=winner_file,
-                                timestamp=str(timestamp),
-                            )
-                # else:
-                #     desc.set_description_str(
-                #         f"Skipping history for {filename}: not in valid filenames"
-                #     )
+                if filename not in valid_filenames:
+                    pbar.update(1)
+                    continue
 
+                history = entry.get("comparison_history")
+                if not isinstance(history, list):
+                    pbar.update(1)
+                    continue
+
+                for comp in history:
+                    other = str(comp.get("other", ""))
+                    timestamp = comp.get("timestamp")
+                    if not other or not timestamp:
+                        continue
+                    if other not in valid_filenames:
+                        continue
+                    if filename == other:
+                        continue
+                    winner_file = filename if bool(comp.get("winner")) else other
+                    if winner_file not in valid_filenames:
+                        continue
+
+                    comparison_rows.append(
+                        {
+                            "filename_a": filename,
+                            "filename_b": other,
+                            "winner": winner_file,
+                            "timestamp": str(timestamp),
+                        }
+                    )
+
+                pbar.update(1)
+        logger.debug(
+            f"collected {len(comparison_rows)} historical comparisons",
+            start_timer=_start,
+        )
+        survivors, counts = collapse_comparison_history(
+            comparison_rows,
+            valid_filenames,
+        )
+        with tqdm(
+            total=len(survivors),
+            desc="Adding survivors to database",
+            unit="comp",
+            delay=3.0,
+        ) as pbar:
+            for row in survivors:
+                self._graph.add_link(
+                    filename_a=str(row["filename_a"]),
+                    filename_b=str(row["filename_b"]),
+                    winner=str(row["winner"]),
+                    timestamp=str(row.get("timestamp") or ""),
+                )
                 pbar.update(1)
 
         logger.debug(
-            f"added {len(self._graph.get_all_links())} historical comparisons from ranked files"
+            "collapsed %s historical comparisons from ranked files into %s survivors",
+            len(comparison_rows),
+            counts.get("kept", len(survivors)),
+            start_timer=_start,
         )
 
         self._graph.clean_comparisons()
@@ -454,19 +485,23 @@ class ImageProcessor:
             for img in all_images
         ]
         prepare_conf = config["prepare"]
-        if file_operations:
-            logger.debug("sync json data...")
-            parallel_for(
-                sync_worker,
-                sync_args,
-                max_workers=int(prepare_conf["max_workers"]),
-                batch_size=int(prepare_conf["batch_size"]),
-                desc="Syncing JSON metadata",
-                unit="img",
-            )
+        logger.debug("sync json data...")
+        parallel_for(
+            sync_worker,
+            sync_args,
+            max_workers=int(prepare_conf["max_workers"]),
+            batch_size=int(prepare_conf["batch_size"]),
+            desc="Syncing JSON metadata",
+            unit="img",
+        )
 
         self._path_ops.clear_folder_cache()
         self.sync_processed_images_from_db()
+        logger.debug(
+            "Rebuild complete. %s images in database.",
+            len(all_images),
+            start_timer=_start,
+        )
 
     def _recompute_ratings_from_database_history(self) -> int:
         self._graph.reset_all_image_ratings(score=self.default_score)
@@ -522,9 +557,8 @@ class ImageProcessor:
                     continue
                 json_path = loose_file.with_suffix(".json")
                 score = self.default_score
-                if json_path.exists():
-                    with open(json_path, "r", encoding="utf-8") as handle:
-                        meta = json.load(handle)
+                if self._path_ops.file_exists(str(json_path)):
+                    meta = self._path_ops.read_json(str(json_path))
                     score = float(meta["score"])
                 target_path = self._path_ops.compute_path(loose_file.name, score)
                 if target_path == loose_file:
@@ -541,10 +575,12 @@ class ImageProcessor:
         ) as pbar:
             for loose_file, target_path in moves:
                 json_path = loose_file.with_suffix(".json")
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(loose_file), str(target_path))
-                if json_path.exists():
-                    shutil.move(str(json_path), str(target_path.with_suffix(".json")))
+                self._path_ops.make_directory(str(target_path.parent))
+                self._path_ops.move_file(loose_file, target_path)
+                if self._path_ops.file_exists(str(json_path)):
+                    self._path_ops.move_file(
+                        json_path, target_path.with_suffix(".json")
+                    )
                 moved_count += 1
                 pbar.update(1)
 

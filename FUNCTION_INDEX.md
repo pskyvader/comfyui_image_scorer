@@ -40,14 +40,20 @@ are implementation details.
 | `core/utilities/concurrency.py` | `parallel_for` | Run argument tuples through a worker pool. |
 | `domain/graph/chain_manager.py` | `ChainManager` | Own in-memory graph topology, chains, components, and comparison history. |
 | `domain/graph/node_proxy.py` | `NodeProxy` | Expose graph node data and navigation. |
+| `domain/graph/link_proxy.py` | `ComparisonRecord` | Public comparison edge record carrying the winner/loser link payload. |
 | `domain/graph/link_proxy.py` | `LinkProxy` | Expose one comparison link record. |
 | `domain/graph/chain_proxy.py` | `ChainProxy` | Expose one graph chain. |
 | `domain/graph/component_proxy.py` | `ComponentProxy` | Expose one connected component. |
 | `domain/analysis/trueskill.py` | `update_ratings` | Apply one winner/loser rating update. |
 | `domain/analysis/trueskill.py` | `replay_ratings` | Replay comparison history into ratings. |
+| `domain/comparison/algorithm/history_collapse.py` | `canonicalize_pair` | Canonicalize an unordered image pair into a stable sort key. |
+| `domain/comparison/algorithm/history_collapse.py` | `safe_parse_timestamp` | Parse and normalize timestamps into comparable datetime values for deterministic ordering. |
+| `domain/comparison/algorithm/history_collapse.py` | `collapse_comparison_history` | Collapse comparison history to a deterministic survivor set via missing-node, self-link, same-direction, and contradiction rules. |
+| `domain/comparison/algorithm/graph_helpers.py` | `collapse_comparisons` | Collapse comparison history to a deterministic survivor set via missing-node, self-link, same-direction, and contradiction rules. |
 | `domain/comparison/algorithm/graph_helpers.py` | `pair_key` | Canonicalize an unordered image pair. |
+| `domain/comparison/algorithm/graph_helpers.py` | `safe_parse_timestamp` | Parse ISO timestamp strings into comparable datetime objects for deterministic ordering. |
 | `domain/comparison/algorithm/merge_sort_ranker.py` | `select_pair_for_comparison` | Select the next ranking pair. |
-| `domain/ports/graph.py` | `CrystalGraphPort` | Graph and database boundary protocol. |
+| `domain/ports/graph.py` | `CrystalGraphPort` | Protocol graph/database boundary; `add_link` replaces `add_comparison`. |
 | `domain/ports/repository.py` | `ImageRepository` | Image persistence protocol. |
 | `domain/ports/repository.py` | `ComparisonRepository` | Comparison persistence protocol. |
 | `domain/ports/files.py` | `FilePort` | Filesystem operations protocol. |
@@ -64,6 +70,41 @@ are implementation details.
 | `adapters/cli/main.py` | `main` | Parse CLI arguments and dispatch commands. |
 | `adapters/cli/commands/database.py` | `rebuild` | Explicitly rebuild the ranking database from ranked files. |
 | `adapters/cli/commands/database.py` | `recalculate` | Replay existing comparison history into ratings. |
+| `adapters/cli/commands/database.py` | `cleanup` | Clean stale comparisons and VACUUM the database. |
+| `adapters/cli/commands/server.py` | `run_server` | Start the ranking server from CLI. |
+| `adapters/cli/commands/vectors.py` | `run_split_vectors` | Build split vector files. |
+| `adapters/cli/commands/vectors.py` | `run_full_vectors` | Build full vectors and text data. |
+| `adapters/cli/commands/vectors.py` | `run_scores` | Build scores and comparisons. |
+| `adapters/cli/commands/vectors.py` | `run_all` | Run the full build pipeline. |
+| `adapters/cli/commands/training.py` | `train_model` | Train model from vectors and scores. |
+| `adapters/cli/commands/training.py` | `run_hpo` | Run hyperparameter optimization. |
+| `domain/comparison/constants.py` | `IMAGES_CACHE_TTL` | Image cache time-to-live constant. |
+| `domain/comparison/constants.py` | `MAX_PAIR_CANDIDATES` | Maximum pair candidates for ranking. |
+| `domain/comparison/constants.py` | `MIN_CHAIN_THRESHOLD` | Minimum chain threshold for pair selection. |
+| `domain/analysis/image_analysis.py` | `ImageEntry` | Tuple type for image analysis entries. |
+| `domain/analysis/image_analysis.py` | `ImageAnalysis` | Image metrics, metadata, and batch analysis orchestration class. |
+| `domain/analysis/image_analysis.py` | `process_single_batch` | Process one batch of images through prepare, analyze, and save. |
+| `domain/analysis/attribute_analysis.py` | `FaceAttributeAnalyzer` | Predicts perceived age, gender, and race from face images. |
+| `domain/analysis/attribute_analysis.py` | `NSFWAnalyzer` | Predicts NSFW score from images. |
+| `domain/analysis/attribute_analysis.py` | `AGE_LABELS` | Age category label set. |
+| `domain/analysis/attribute_analysis.py` | `GENDER_LABELS` | Gender category label set. |
+| `domain/analysis/attribute_analysis.py` | `RACE_LABELS` | Race category label set. |
+| `domain/analysis/mediapipe_analysis.py` | `MediaPipeAnalyzer` | Detects faces and body pose through the injected MediaPipe provider. |
+| `domain/analysis/mediapipe_analysis.py` | `POSE_LANDMARK_NAMES` | MediaPipe Pose landmark names in model output order. |
+| `domain/analysis/trueskill.py` | `Rating` | Dataclass holding mu_skill and sigma_uncertainty. |
+| `domain/analysis/trueskill.py` | `INITIAL_MEAN` | Initial rating mean constant. |
+| `domain/analysis/trueskill.py` | `INITIAL_UNCERTAINTY` | Initial rating uncertainty constant. |
+| `domain/comparison/comparison_recorder.py` | `ComparisonRecorder` | Comparison persistence and graph recording port consumer. |
+| `domain/comparison/comparison_recorder.py` | `update_scores_after_comparison` | Update scores and ratings after one comparison. |
+| `infrastructure/external_services/mediapipe_models.py` | `download_mediapipe_models` | Explicit MediaPipe model download and location handling. |
+| `infrastructure/persistence/cleanup_orphans.py` | `cleanup_orphans` | Clean orphaned image and JSON companion files. |
+| `infrastructure/persistence/folder_organizer.py` | `ensure_tier_structure` | Ensure score folders scored_0.0 through scored_1.0 exist. |
+| `core/utilities/analysis.py` | `distribute` | Distribute values into named buckets by threshold. |
+| `core/utilities/helpers.py` | `remove_directory` | Remove a directory and its contents. |
+| `core/filesystem/paths.py` | `models_dir` | Path to the models output directory. |
+| `core/filesystem/paths.py` | `mediapipe_models_dir` | Path to the downloaded MediaPipe models directory. |
+| `core/filesystem/paths.py` | `training_plots_dir` | Path to the training plots directory. |
+| `core/filesystem/paths.py` | `training_model` | Path to the training model artifact. |
 | `infrastructure/persistence/database.py` | `get_db_connection` | Open a configured SQLite connection. |
 | `infrastructure/persistence/images_repository.py` | `list_nodes` | Read image rows from SQLite. |
 | `infrastructure/persistence/comparisons_repository.py` | `add_comparison` | Insert a comparison row into SQLite. |
@@ -110,7 +151,7 @@ are implementation details.
 | `domain/__init__.py` | Domain package marker and overview. |
 | `domain/database/__init__.py` | Legacy database package marker retained in the current tree. |
 | `domain/graph/__init__.py` | Graph package exports. |
-| `domain/graph/chain_manager.py` | In-memory directed comparison graph, chains, components, and history. |
+| `domain/graph/chain_manager.py` | In-memory directed comparison graph, chains, components, and history; `apply_comparison` returns the updated comparison record. |
 | `domain/graph/link_proxy.py` | Link record proxy. |
 | `domain/graph/node_proxy.py` | Node data and graph-navigation proxy. |
 | `domain/graph/chain_proxy.py` | Chain navigation proxy. |
@@ -147,7 +188,7 @@ are implementation details.
 | `domain/comparison/comparison_recorder.py` | Comparison persistence and graph recording port consumer. |
 | `domain/comparison/algorithm/__init__.py` | Ranking algorithm package marker. |
 | `domain/comparison/algorithm/phase_order.py` | Ranking phase ordering. |
-| `domain/comparison/algorithm/graph_helpers.py` | Graph-query, pair-key, and candidate-pool helpers. |
+| `domain/comparison/algorithm/graph_helpers.py` | Graph-query, pair-key, timestamp parsing, candidate-pool helpers, and history collapse. |
 | `domain/comparison/algorithm/merge_sort_ranker.py` | Pair selection orchestration for merge-sort ranking. |
 | `domain/comparison/algorithm/pair_active.py` | Active pair selection. |
 | `domain/comparison/algorithm/view.py` | Ranking view and response shaping helpers. |
@@ -158,7 +199,7 @@ are implementation details.
 | `domain/ports/repository.py` | Image and comparison repository protocols. |
 | `domain/ports/files.py` | Filesystem service protocol. |
 | `domain/ports/loading.py` | Model, map, batch, and training loader protocols. |
-| `domain/ports/graph.py` | CrystalGraph application port. |
+| `domain/ports/graph.py` | CrystalGraph application port (Protocol). |
 
 ## Application
 
@@ -308,12 +349,12 @@ are implementation details.
 | `infrastructure/__init__.py` | Infrastructure package marker. |
 | `infrastructure/persistence/__init__.py` | Persistence package exports. |
 | `infrastructure/persistence/database.py` | SQLite connection and schema lifecycle. |
-| `infrastructure/persistence/comparisons_repository.py` | Comparison table operations and history cleanup. |
+| `infrastructure/persistence/comparisons_repository.py` | Comparison table operations and history cleanup; uses domain comparison helpers for canonicalization and timestamp parsing. |
 | `infrastructure/persistence/cleanup_orphans.py` | Orphaned-file cleanup. |
-| `infrastructure/persistence/deduplicate_scored.py` | Duplicate scored-file cleanup. |
+| `infrastructure/persistence/deduplicate_scored.py` | Duplicate scored-file cleanup; uses domain comparison helper for timestamp sorting. |
 | `infrastructure/persistence/folder_organizer.py` | Ranked-folder organization. |
 | `infrastructure/persistence/images_repository.py` | Image table operations. |
-| `infrastructure/persistence/path_handler.py` | Runtime path and image-file handling. |
+| `infrastructure/persistence/path_handler.py` | Runtime path, image-file handling, and history sorting using domain comparison helper. |
 | `infrastructure/persistence/file_manager.py` | Concrete filesystem-port implementation. |
 | `infrastructure/external_services/__init__.py` | External-service package marker. |
 | `infrastructure/external_services/mediapipe_models.py` | Explicit MediaPipe model download and location handling. |

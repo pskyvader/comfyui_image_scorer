@@ -1,1 +1,0 @@
-"""IO and serialization — JSONL streaming (load/write), atomic JSON writes via temp file + replace, recursive JSON parsing, filesystem discovery of image/metadata pairs, and multi-file batch collection (collect_valid_files)."""

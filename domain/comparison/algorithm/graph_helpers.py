@@ -8,6 +8,7 @@ strategies.
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 
 from ....core.configuration.settings import config
 from ...graph.node_proxy import NodeProxy
@@ -16,11 +17,23 @@ from ....domain.ports.graph import CrystalGraphPort
 
 
 def pair_key(filename_a: str, filename_b: str) -> tuple[str, str]:
+    first = str(filename_a)
+    second = str(filename_b)
     return (
-        (filename_a, filename_b)
-        if filename_a <= filename_b
-        else (filename_b, filename_a)
+        (first, second)
+        if first <= second
+        else (second, first)
     )
+
+
+def safe_parse_timestamp(timestamp: str | None) -> tuple[int, datetime]:
+    if not timestamp:
+        return 1, datetime.min.replace(tzinfo=timezone.utc)
+    ts = str(timestamp).replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(ts)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return 0, parsed
 
 
 def stable_seed_pool(images: list[NodeProxy]) -> list[NodeProxy]:
@@ -94,3 +107,86 @@ def filter_excluded_images(
             result.append(img)
 
     return result
+
+
+def collapse_comparisons(
+    comparisons: list[dict[str, object]],
+    valid_filenames: set[str],
+) -> tuple[list[dict[str, object]], dict[str, int]]:
+    """Collapse comparison history to a deterministic survivor set.
+
+    Applies missing-node removal, self-link removal, same-direction duplicate
+    removal, and contradiction resolution. Returns the surviving rows and a
+    dict of removed counts.
+    """
+    missing_nodes_removed = 0
+    self_links_removed = 0
+    same_direction_duplicates_removed = 0
+    contradictions_removed = 0
+
+    grouped: dict[tuple[str, str], list[dict[str, object]]] = {}
+    for row in comparisons:
+        filename_a = str(row.get("filename_a", ""))
+        filename_b = str(row.get("filename_b", ""))
+        if filename_a not in valid_filenames or filename_b not in valid_filenames:
+            missing_nodes_removed += 1
+            continue
+        if filename_a == filename_b:
+            self_links_removed += 1
+            continue
+        canon_a, canon_b = pair_key(filename_a, filename_b)
+        row["filename_a"] = canon_a
+        row["filename_b"] = canon_b
+        key = (canon_a, canon_b)
+        if key not in grouped:
+            grouped[key] = []
+        grouped[key].append(row)
+
+    kept_rows: list[dict[str, object]] = []
+    for pair_rows in grouped.values():
+        by_winner: dict[str, list[dict[str, object]]] = {}
+        for row in pair_rows:
+            winner = str(row["winner"])
+            if winner not in by_winner:
+                by_winner[winner] = []
+            by_winner[winner].append(row)
+
+        survivors_by_winner: list[dict[str, object]] = []
+        for same_winner_rows in by_winner.values():
+            ordered = sorted(
+                same_winner_rows,
+                key=lambda r: (
+                    safe_parse_timestamp(r.get("timestamp"))[1],
+                    int(r.get("id", 0)),
+                ),
+            )
+            if len(ordered) > 1:
+                same_direction_duplicates_removed += len(ordered) - 1
+            survivors_by_winner.append(ordered[-1])
+
+        survivors_by_winner.sort(
+            key=lambda r: (
+                safe_parse_timestamp(r.get("timestamp"))[1],
+                int(r.get("id", 0)),
+            )
+        )
+        if len(survivors_by_winner) > 1:
+            contradictions_removed += len(survivors_by_winner) - 1
+        kept_rows.append(survivors_by_winner[-1])
+
+    kept_rows.sort(
+        key=lambda r: (
+            safe_parse_timestamp(r.get("timestamp"))[1],
+            int(r.get("id", 0)),
+        )
+    )
+
+    survivors = kept_rows
+    counts = {
+        "missing_nodes_removed": missing_nodes_removed,
+        "self_links_removed": self_links_removed,
+        "same_direction_duplicates_removed": same_direction_duplicates_removed,
+        "contradictions_removed": contradictions_removed,
+        "kept": len(survivors),
+    }
+    return survivors, counts

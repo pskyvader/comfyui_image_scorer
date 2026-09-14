@@ -6,14 +6,21 @@ performance test for large linear chains that scales via DATASET_SIZE.
 
 import logging
 import time
+import pytest
 import tqdm
 from ..chain_manager import ChainManager
+from ....core.observability.logger import (
+    get_logger,
+    configure_package_logging,
+    ModuleLogger,
+)
 
-logger = logging.getLogger(__name__)
+configure_package_logging(logging.DEBUG)
+logger: ModuleLogger = get_logger(__name__)
 
 # Change this variable to test the 30-second time limit on large chains.
 # Set to 1000 by default. To stress test performance limits, try 10000 or 35000.
-DATASET_SIZE = 1000
+DATASET_SIZE = 30000
 
 
 def _build_manager(
@@ -23,6 +30,21 @@ def _build_manager(
     cm = ChainManager()
     cm.build(comparisons, all_filenames=all_filenames)
     return cm
+
+
+def _load_real_data() -> tuple[list[dict], set[str]]:
+    """Load real comparison data from the database."""
+    from comfyui_image_scorer.infrastructure.persistence.images_repository import (
+        list_nodes,
+    )
+    from comfyui_image_scorer.infrastructure.persistence.comparisons_repository import (
+        list_links,
+    )
+
+    images = list_nodes()
+    comparisons = list_links()
+    all_filenames = {img["filename"] for img in images}
+    return comparisons, all_filenames
 
 
 def test_bottom_nodes_are_chain_last() -> None:
@@ -215,3 +237,34 @@ def test_chain_snapshot_matches_known_optimal() -> None:
     # Exactly 2 unique chains
     chain_tuples = {tuple(c) for c in cm.get_chains().values()}
     assert chain_tuples == {("a1", "a2", "a3", "a4"), ("b1", "b2", "b3")}
+
+
+def test_real_data_performance() -> None:
+    """Test ChainManager performance on real database data (~30K nodes, ~96K comparisons)."""
+    logger.debug("Starting test_real_data_performance...")
+    cm = ChainManager()
+
+    comparisons, all_filenames = _load_real_data()
+    logger.info(
+        f"Loaded {len(comparisons)} comparisons, {len(all_filenames)} images from database"
+    )
+
+    start_time = time.perf_counter()
+    cm.build(comparisons, all_filenames=all_filenames)
+    end_time = time.perf_counter()
+
+    elapsed = end_time - start_time
+    logger.info(
+        f"ChainManager.build processed {len(comparisons)} comparisons on {len(all_filenames)} nodes in {elapsed:.2f} seconds"
+    )
+    logger.info(
+        f"Built {len(cm.get_chains())} chains, {cm.get_component_count()} components"
+    )
+
+    # Log chain stats
+    chains = cm.get_chains()
+    lengths = [len(c) for c in chains.values()]
+    if lengths:
+        logger.info(
+            f"Chain lengths: min={min(lengths)}, max={max(lengths)}, avg={sum(lengths)/len(lengths):.1f}"
+        )

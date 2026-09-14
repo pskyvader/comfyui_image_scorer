@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .chain_manager import ChainManager
@@ -19,11 +19,11 @@ class NodeProxy:
         self,
         chain: ChainManager,
         node_id: str,
-        image_data: dict[str, Any] | None = None,
+        image_data: dict[str, object] | None = None,
     ) -> None:
         self._chain: ChainManager = chain
         self._node_id: str = node_id
-        self._image_data: dict[str, Any] = image_data or {}
+        self._image_data: dict[str, object] = image_data or {}
 
     @property
     def id(self) -> str:
@@ -80,7 +80,7 @@ class NodeProxy:
         return self._image_data.get("last_compared_at")
 
     @property
-    def data(self) -> dict[str, Any]:
+    def data(self) -> dict[str, object]:
         """Return the persisted image fields for adapter serialization."""
         return dict(self._image_data, filename=self._node_id)
 
@@ -148,8 +148,6 @@ class NodeProxy:
         return f"NodeProxy({self._node_id})"
 
 
+# Protocol alias
 
-
-  # Protocol alias
-
-  # Protocol alias
+# Protocol alias

@@ -42,8 +42,8 @@ class ComparisonRecorder:
         path_syncer: PathResolver,
         graph_service: CrystalGraphPort,
     ) -> None:
-        self._path_syncer = path_syncer
-        self._graph = graph_service
+        self._path_syncer: PathResolver = path_syncer
+        self._graph: CrystalGraphPort = graph_service
 
     def _persist_image_state(self, filename: str, data: dict[str, object]) -> bool:
         return self._graph.update_image_rating_state(
@@ -85,15 +85,15 @@ class ComparisonRecorder:
 
         winner_data, loser_data = update_scores_after_comparison(
             winner_data, loser_data
-        )
+        )  # modify object only
 
-        ts = datetime.now(timezone.utc).isoformat()
+        ts: str = datetime.now(timezone.utc).isoformat()
         comp_id = self._graph.add_link(
             filename_a=filename_a,
             filename_b=filename_b,
             winner=winner,
             timestamp=ts,
-        )
+        )  # add to comparison database, add link in memory , return comparison id
         if not comp_id:
             logger.error(
                 "Failed to insert comparison into DB: %s vs %s, winner=%s",
@@ -103,12 +103,15 @@ class ComparisonRecorder:
             )
             return False
 
+        # update image database, update node in memory
         if not self._persist_image_state(winner_filename, winner_data):
             return False
         if not self._persist_image_state(loser_filename, loser_data):
             return False
 
         all_comparisons = [link.data for link in self._graph.get_all_links()]
+
+        # add comparison to json files.
         saved_winner = self._path_syncer.sync_image_metadata_to_json(
             filename=winner_filename,
             score=float(winner_data["score"]),

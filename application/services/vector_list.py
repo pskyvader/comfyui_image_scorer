@@ -18,7 +18,7 @@ from ...domain.vectors.person_map_vector import PersonMapVector
 
 from ...core.filesystem.paths import split_dir
 from ...core.io.serialization import load_single_jsonl, write_single_jsonl
-from ...domain.loading import BatchSizerFactory, MapsProvider, ModelLoader
+from ...domain.ports.loading import BatchSizerFactory, MapsProvider, ModelLoader
 from ...domain.ports.cache import CacheProvider
 
 logger: ModuleLogger = get_logger(__name__)

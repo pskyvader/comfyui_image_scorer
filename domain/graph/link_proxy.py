@@ -9,8 +9,8 @@ if TYPE_CHECKING:
 from . import node_proxy as _node_proxy
 
 
-class _ComparisonRecord:
-    """Internal record for a comparison link — not exposed outside the graph subsystem."""
+class ComparisonRecord:
+    """Public comparison record carrying the ordered comparison edge data."""
 
     __slots__ = ("id", "winner", "loser", "timestamp")
 
@@ -27,10 +27,10 @@ class LinkProxy:
     def __init__(
         self,
         chain: ChainManager,
-        comparison_record: _ComparisonRecord,
+        comparison_record: ComparisonRecord,
     ) -> None:
         self._chain: ChainManager = chain
-        self._record: _ComparisonRecord = comparison_record
+        self._record: ComparisonRecord = comparison_record
 
     @property
     def id(self) -> int:
@@ -70,12 +70,12 @@ class LinkProxy:
         return f"LinkProxy(id={self._record.id}, winner={self._record.winner}, loser={self._record.loser})"
 
 
-  # Protocol alias
-  # Protocol alias
+# Protocol alias
+# Protocol alias
 
-  # Protocol alias
-  # Protocol alias
+# Protocol alias
+# Protocol alias
 
-  # Protocol alias
+# Protocol alias
 
-  # Protocol alias
+# Protocol alias

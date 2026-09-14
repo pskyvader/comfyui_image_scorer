@@ -21,8 +21,9 @@ from ...core.io.serialization import (
 from ...core.configuration.settings import config
 from ...domain.analysis.image_analysis import ImageAnalysis
 from ...domain.analysis.trueskill import replay_ratings, public_score_from_rating
-from ...domain.loading import BatchSizerFactory, MapsProvider, ModelLoader
+from ...domain.ports.loading import BatchSizerFactory, MapsProvider, ModelLoader
 from ...domain.ports.cache import CacheProvider
+from ...domain.vectors.helpers import get_value_from_entry
 from ...application.services.vector_list import VectorList
 
 logger: ModuleLogger = get_logger(__name__)

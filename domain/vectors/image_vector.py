@@ -13,7 +13,7 @@ import numpy as np
 
 from ...core.observability.logger import get_logger
 from ...core.configuration.settings import config
-from ...domain.loading import BatchSizerFactory, ModelLoader, BatchSizer
+from ...domain.ports.loading import BatchSizerFactory, ModelLoader, BatchSizer
 from .helpers import l2_normalize_batch
 from ...core.io.serialization import load_json
 from ...core.filesystem.paths import vectors_size_file

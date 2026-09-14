@@ -144,6 +144,8 @@ def get_status():
         }
     )
 
+    logger.debug("status retrieved", start_timer=_start)
+
     return result
 
 
@@ -207,6 +209,7 @@ def get_next_pair():
     }
 
     result = jsonify(response_data)
+    logger.debug(f"next pair: {filename_a} vs {filename_b}", start_timer=_start)
     return result
 
 
@@ -218,6 +221,7 @@ def reset_ranking_queue():
         with processor.recent_lock:
             processor.clear_old_cache(force=True)
     result = jsonify({"status": "success", "message": "Ranking queue reset."})
+    logger.debug("ranking queue reset", start_timer=_start)
     return result
 
 
@@ -230,6 +234,7 @@ def skip_image():
         with processor.recent_lock:
             processor.recent_images.append(req.filename)
     result = jsonify({"status": "ok"})
+    logger.debug(f"skipped {req.filename}", start_timer=_start)
     return result
 
 
@@ -280,6 +285,7 @@ def submit_comparison():
             },
         }
     )
+    logger.debug("comparison recorded", start_timer=_start)
     return result
 
 

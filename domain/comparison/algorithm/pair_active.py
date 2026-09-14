@@ -174,23 +174,46 @@ def _collect_chain_extremes(
     """Return up to 10 qualifying chain extremes, least-compared first."""
     nodes: list[NodeProxy] = []
     seen: set[str] = set()
+    # errors = {
+    #     "none": 0,
+    #     "none_2": 0,
+    #     "candidate_missing": 0,
+    #     "checklist_missing": 0,
+    #     "not_real_extreme": 0,
+    #     "seen": 0,
+    # }
     for chain in chains:
-        chain_extreme = chain.last if use_bottom else chain.first
-        if not (
-            chain_extreme
-            and chain_extreme.filename in candidate_names
-            and chain_extreme.filename in check_list
-            and (chain_extreme.is_bottom() if use_bottom else chain_extreme.is_top())
-        ):
+        chain_extreme: NodeProxy | None = chain.last if use_bottom else chain.first
+        if not chain_extreme:
+            # errors["none"] += 1
             continue
-        filename = chain_extreme.filename
+        filename: str = chain_extreme.filename
         if filename in seen:
+            # errors["seen"] += 1
             continue
         seen.add(filename)
-        node = cg.get_node(filename)
+        if chain_extreme.filename not in candidate_names:
+            # errors["candidate_missing"] += 1
+            continue
+        if not chain_extreme.is_bottom() if use_bottom else not chain_extreme.is_top():
+            # errors["not_real_extreme"] += 1
+            continue
+        if chain_extreme.filename not in check_list:
+            # errors["checklist_missing"] += 1
+            # logger.debug(
+            #     f"skipping {filename} because not in check_list, use_bottom={use_bottom}, check_list={len(check_list)}"
+            # )
+            continue
+
+        node: NodeProxy | None = cg.get_node(filename)
         if node is None:
+            # errors["none_2"] += 1
             continue
         nodes.append(node)
+    # logger.debug(
+    #     f"collected {len(nodes)} chain extremes, bottom={use_bottom}, check_list={len(check_list)}, errors={errors}",
+    # )
+    # logger.debug(f"check list: {check_list[:5]}... (len={len(check_list)})")
     nodes.sort(key=lambda node: node.comparison_count)
     return nodes[:10]
 
@@ -231,7 +254,7 @@ def phase_collapsible_pairs(
 
     # insertion_target = int(config["ranking"]["insertion_target_comparisons"])
 
-    candidate_names = {
+    candidate_names: set[str] = {
         node.filename
         for node in candidate_nodes
         # if node.comparison_count > insertion_target
@@ -239,7 +262,7 @@ def phase_collapsible_pairs(
 
     chains: list[ChainProxy] = list(cg.get_all_chains())
 
-    check_list = [node.filename for node in cg.get_loser_only_nodes()]
+    check_list: list[str] = [node.filename for node in cg.get_loser_only_nodes()]
     use_bottom = True
     nodes: list[NodeProxy] = _collect_chain_extremes(
         chains, candidate_names, check_list, use_bottom, cg
@@ -263,7 +286,9 @@ def phase_collapsible_pairs(
     pair_list: list[tuple[NodeProxy, NodeProxy]] = [
         (node_a, node_b) for node_b in nodes[1:]
     ]
-    result = _closest_score_pair(pair_list, closest=False)
+    result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
+        pair_list, closest=False
+    )
     if not result:
         logger.info(
             f"no pair found, len:{len(nodes)}, bottom:{use_bottom}, checklist:{len(check_list)}",

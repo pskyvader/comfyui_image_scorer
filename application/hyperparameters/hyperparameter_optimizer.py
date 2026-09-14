@@ -12,7 +12,7 @@ from ...domain.data_transformation.data_transformer import (
     DataTransformer,
     list_filtered_features,
 )
-from ...domain.loading import TrainingLoader
+from ...domain.ports.loading import TrainingLoader
 from ...domain.training.grid import around, grid_base
 from ...infrastructure.ml_models.training.model_trainer import ModelTrainer
 

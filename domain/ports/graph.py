@@ -6,19 +6,35 @@ must satisfy this protocol exactly. Return types are concrete proxy types — no
 
 from __future__ import annotations
 
+from typing import Protocol
+
 from ...domain.graph.component_proxy import ComponentProxy
 from ...domain.graph.link_proxy import LinkProxy
 from ...domain.graph.chain_proxy import ChainProxy
 from ...domain.graph.node_proxy import NodeProxy
 
 
-class CrystalGraphPort:
+class CrystalGraphPort(Protocol):
     """Abstract interface for graph-level selection memory accessors.
 
     Callers use node/link/proxy vocabulary (NodeProxy, LinkProxy, ChainProxy,
     ComponentProxy). No caller outside CrystalGraph imports repositories or
     accesses database tables directly.
     """
+
+    # -- Graph lifecycle ----------------------------------------------------
+
+    def is_loaded(self) -> bool: ...
+
+    def rebuild_from_database(
+        self,
+        images: list[dict[str, object]] | None = None,
+        comparisons: list[dict[str, object]] | None = None,
+    ) -> None: ...
+
+    def read_json_file(self, path: str) -> dict[str, object]: ...
+
+    def write_json_file(self, path: str, data: dict[str, object]) -> None: ...
 
     # -- Node lookups -------------------------------------------------------
 
@@ -29,6 +45,10 @@ class CrystalGraphPort:
     ) -> list[NodeProxy]: ...
 
     def get_node_count(self) -> int: ...
+
+    def get_node_chain_length(self, filename: str) -> int: ...
+
+    def get_main_chain_member_count(self, chain_id: int) -> int: ...
 
     # -- Chain lookups ------------------------------------------------------
 
@@ -63,9 +83,11 @@ class CrystalGraphPort:
 
     def link_exists_between(self, a: str, b: str) -> bool: ...
 
+    def are_in_same_path(self, img1: str, img2: str) -> bool: ...
+
     # -- Stats --------------------------------------------------------------
 
-    def get_graph_stats(self) -> dict[str, int]: ...
+    def get_graph_stats(self) -> dict[str, object]: ...
 
     # -- Selection working memory                                         #
 
@@ -119,11 +141,11 @@ class CrystalGraphPort:
 
     def clear_all_images(self) -> None: ...
 
-    def reset_all_image_ratings(self, score: float) -> None: ...
+    def reset_all_image_ratings(self, score: float) -> bool: ...
 
     def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool: ...
 
-    def add_comparison(
+    def add_link(
         self,
         filename_a: str,
         filename_b: str,
@@ -131,10 +153,12 @@ class CrystalGraphPort:
         timestamp: str,
     ) -> int: ...
 
-    def apply_comparison(self, winner: str, loser: str) -> None: ...
+    def apply_comparison(self, winner: str, loser: str) -> LinkProxy | None: ...
 
-    def clean_comparisons(self) -> None: ...
+    def clean_comparisons(self) -> dict[str, int]: ...
 
     def clear_all_comparisons(self) -> None: ...
 
-    def get_chains_map(self) -> dict[int, dict[int, tuple[ChainProxy, list[tuple[NodeProxy, bool]]]]]: ...
+    def get_chains_map(
+        self,
+    ) -> dict[int, dict[int, tuple[ChainProxy, list[tuple[NodeProxy, bool]]]]]: ...

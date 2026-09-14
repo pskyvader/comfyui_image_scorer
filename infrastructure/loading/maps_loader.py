@@ -4,6 +4,7 @@ import json
 
 from ...core.filesystem.paths import maps_dir
 from ...core.observability.logger import get_logger
+from ...domain.ports.loading import CategoryValue
 
 logger = get_logger(__name__)
 
@@ -95,7 +96,7 @@ class MapsLoader:
         if key not in self.mapping[name]:
             self.add_value(name, key)
 
-    def add_value(self, name: str, value: str) -> tuple[int, int]:
+    def add_value(self, name: str, value: str) -> CategoryValue:
         """return index of the new added value to the current map
 
         Args:
@@ -119,9 +120,9 @@ class MapsLoader:
         key = (value or "").strip()
         current_map.append(key)
         self._save_single_map(name)
-        return len(current_map) - 1, len(current_map)
+        return CategoryValue(count=len(current_map) - 1, value=len(current_map))
 
-    def get_value(self, name: str, value: str) -> tuple[int, int]:
+    def get_value(self, name: str, value: str) -> CategoryValue:
         """get a value from the current map
 
         Args:
@@ -140,9 +141,7 @@ class MapsLoader:
         key = (value).strip()
         if key == "":
             return 0, len(current_map)
-        if key in current_map:
-            return current_map.index(key), len(current_map)
-        return -1, len(current_map)
+        return CategoryValue(count=current_map.index(key), value=len(current_map)) if key in current_map else CategoryValue(count=-1, value=len(current_map))
 
     def _save_single_map(self, name: str) -> None:
         current_map = self.mapping[name]

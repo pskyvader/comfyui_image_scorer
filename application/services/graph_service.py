@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import cast
 from tqdm import tqdm
 import time
 
 
 from ...core.observability.logger import get_logger, ModuleLogger
 
+ComparisonRow = dict[str, object]
+
 from ...domain.ports.repository import ImageRepository, ComparisonRepository
 from ...domain.graph.chain_manager import ChainManager
 from ...domain.graph.node_proxy import NodeProxy
 from ...domain.graph.chain_proxy import ChainProxy
 from ...domain.graph.component_proxy import ComponentProxy
-from ...domain.graph.link_proxy import LinkProxy
+from ...domain.graph.link_proxy import LinkProxy, ComparisonRecord
 from ...domain.ports.cache import CacheProvider
 from ...domain.ports.files import FilePort
 
@@ -38,7 +40,7 @@ class CrystalGraph:
         file_port: FilePort | None = None,
     ) -> None:
         self._chain: ChainManager = ChainManager()
-        self._images: dict[str, dict[str, Any]] = {}
+        self._images: dict[str, dict[str, object]] = {}
         self._chain_map: dict[int, ChainDict] | None = None
         self._rebuilding: bool = False
         self._creating_chain_map: bool = False
@@ -62,15 +64,15 @@ class CrystalGraph:
     def _make_component(self, component_id: int) -> ComponentProxy:
         return ComponentProxy(self._chain, component_id)
 
-    def _make_link(self, record: Any) -> LinkProxy:
+    def _make_link(self, record: ComparisonRecord) -> LinkProxy:
         return LinkProxy(self._chain, record)
 
-    def read_json_file(self, path: str) -> dict[str, Any]:
+    def read_json_file(self, path: str) -> dict[str, object]:
         if self._file_port is None:
             raise RuntimeError("No filesystem port provided")
         return self._file_port.read_json(path)
 
-    def write_json_file(self, path: str, data: dict[str, Any]) -> None:
+    def write_json_file(self, path: str, data: dict[str, object]) -> None:
         if self._file_port is None:
             raise RuntimeError("No filesystem port provided")
         self._file_port.write_json(path, data)
@@ -97,8 +99,8 @@ class CrystalGraph:
 
     def rebuild_from_database(
         self,
-        images: list[dict[str, Any]] | None = None,
-        comparisons: list[dict[str, Any]] | None = None,
+        images: list[dict[str, object]] | None = None,
+        comparisons: list[ComparisonRow] | None = None,
     ) -> None:
         _start = time.perf_counter()
         if self._rebuilding:
@@ -120,15 +122,20 @@ class CrystalGraph:
                 )
             comparisons = self._comparison_repo.list_links()
 
-        self._images = {img["filename"]: img for img in images}
+        typed_images: list[dict[str, object]] = images
+        self._images = {}
+        for img in typed_images:
+            filename = img.get("filename")
+            if isinstance(filename, str):
+                self._images[filename] = img
         self._chain.set_db_comparison_count(len(comparisons))
         self._chain.set_built_at(datetime.now(timezone.utc))
 
         all_filenames: set[str] = set(self._images.keys())
-        comp: dict[str, Any]
+        comp: dict[str, object]
         for comp in comparisons:
-            all_filenames.add(comp["filename_a"])
-            all_filenames.add(comp["filename_b"])
+            all_filenames.add(str(comp["filename_a"]))
+            all_filenames.add(str(comp["filename_b"]))
 
         self._chain.build(comparisons, all_filenames=all_filenames)
         self._loaded = True
@@ -137,8 +144,11 @@ class CrystalGraph:
         self._rebuilding = False
         logger.info("rebuild from database complete", start_timer=_start)
 
-    def apply_comparison(self, winner: str, loser: str) -> None:
-        self._chain.apply_comparison(winner, loser)
+    def apply_comparison(self, winner: str, loser: str) -> LinkProxy | None:
+        record = self._chain.apply_comparison(winner, loser)
+        if record is None:
+            return None
+        return LinkProxy(self._chain, record)
 
     def add_link(
         self,
@@ -156,15 +166,10 @@ class CrystalGraph:
             timestamp=timestamp,
         )
         loser = filename_b if winner == filename_a else filename_a
-        self._chain.apply_comparison(winner, loser)
-        history = self._chain.get_comparison_history()
-        record = next(
-            item
-            for item in reversed(history)
-            if item.winner == winner and item.loser == loser
-        )
-        record.id = link_id
-        record.timestamp = timestamp
+        record = self._chain.apply_comparison(winner, loser)
+        if record is not None:
+            record.id = link_id
+            record.timestamp = timestamp
         return link_id
 
     # -- Selection working memory (#49/#50) ------------------------------
@@ -193,12 +198,21 @@ class CrystalGraph:
 
     # -- Images snapshot cache (replaces domain/comparison/state.py) -----
 
-    def get_images_snapshot(self) -> list[dict[str, Any]] | None:
+    def get_images_snapshot(self) -> list[dict[str, object]] | None:
         if self._cache is None:
             return None
-        return self._cache.get("images")
+        cached = self._cache.get("images")
+        if cached is None:
+            return None
+        if not isinstance(cached, list):
+            return None
+        snapshot: list[dict[str, object]] = []
+        for item in cached:
+            if isinstance(item, dict):
+                snapshot.append(cast(dict[str, object], item))
+        return snapshot
 
-    def set_images_snapshot(self, images: list[dict[str, Any]]) -> None:
+    def set_images_snapshot(self, images: list[dict[str, object]]) -> None:
         assert self._cache is not None
         self._cache.set("images", images)
 
@@ -340,7 +354,7 @@ class CrystalGraph:
 
     # -- Stats ----------------------------------------------------------
 
-    def get_graph_stats(self) -> dict[str, Any]:
+    def get_graph_stats(self) -> dict[str, object]:
         chains: list[list[str]] = list((self._chain.get_chains()).values())
         built_at: datetime | None = self._chain.get_built_at()
         return {
@@ -397,6 +411,21 @@ class CrystalGraph:
         touch_timestamp: bool,
     ) -> bool:
         assert self._image_repo is not None
+
+        self._images[filename].update(
+            {
+                "score": score,
+                "rating_mu": rating_mu,
+                "rating_sigma": rating_sigma,
+                "comparison_count": comparison_count,
+                "last_compared_at": (
+                    datetime.now(timezone.utc).isoformat()
+                    if touch_timestamp
+                    else self._images[filename].get("last_compared_at")
+                ),
+            }
+        )
+
         return self._image_repo.update_image_rating_state(
             filename=filename,
             score=score,
@@ -422,22 +451,7 @@ class CrystalGraph:
         assert self._comparison_repo is not None
         return self._comparison_repo.comparison_exists_for_pair(filename_a, filename_b)
 
-    def add_historical_comparison(
-        self,
-        filename_a: str,
-        filename_b: str,
-        winner: str,
-        timestamp: str,
-    ) -> int:
-        assert self._comparison_repo is not None
-        return self._comparison_repo.add_historical_comparison(
-            filename_a=filename_a,
-            filename_b=filename_b,
-            winner=winner,
-            timestamp=timestamp,
-        )
-
-    def clean_comparisons(self) -> Any:
+    def clean_comparisons(self) -> dict[str, int]:
         assert self._comparison_repo is not None
         return self._comparison_repo.clean_comparisons()
 

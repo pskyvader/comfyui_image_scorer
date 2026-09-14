@@ -5,12 +5,12 @@ from __future__ import annotations
 import math
 import os
 from pathlib import Path
-from typing import Any
 
 from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.configuration.settings import config
 from ...core.io.serialization import atomic_write_json, load_json
 from ...core.filesystem.paths import image_root_processed
+from ...domain.comparison.algorithm.graph_helpers import safe_parse_timestamp
 from ..cache.memory_cache import InMemoryCache
 from .images_repository import (
     find_node as get_node_data,
@@ -86,10 +86,10 @@ def find_image_path(filename: str) -> Path | None:
 
 def _build_history_for_filename(
     filename: str,
-    all_comparisons: list[dict[str, Any]] | None = None,
-    filename_to_comparisons: dict[str, list[dict[str, Any]]] | None = None,
-    filename_to_image_data: dict[str, dict[str, Any]] | None = None,
-) -> list[dict[str, Any]]:
+    all_comparisons: list[dict[str, object]] | None = None,
+    filename_to_comparisons: dict[str, list[dict[str, object]]] | None = None,
+    filename_to_image_data: dict[str, dict[str, object]] | None = None,
+) -> list[dict[str, object]]:
     if filename_to_comparisons is not None:
         comps = filename_to_comparisons[filename]
     elif all_comparisons is not None:
@@ -101,7 +101,7 @@ def _build_history_for_filename(
     else:
         comps = []
 
-    history: list[dict[str, Any]] = []
+    history: list[dict[str, object]] = []
     for comp in comps:
         is_winner = comp["winner"] == filename
         other = (
@@ -112,15 +112,20 @@ def _build_history_for_filename(
         else:
             other_data = get_node_data(other)
         history.append(
-                {
-                    "comparison_id": comp["id"],
-                    "other": other,
-                    "opponent_score": other_data["score"] if other_data else 0.5,
-                    "winner": is_winner,
-                    "timestamp": comp["timestamp"],
-                }
-            )
-    history.sort(key=lambda item: (item["timestamp"], item["comparison_id"]))
+            {
+                "comparison_id": comp["id"],
+                "other": other,
+                "opponent_score": other_data["score"] if other_data else 0.5,
+                "winner": is_winner,
+                "timestamp": comp["timestamp"],
+            }
+        )
+    history.sort(
+        key=lambda item: (
+            safe_parse_timestamp(item["timestamp"])[1],
+            item["comparison_id"],
+        )
+    )
     return history
 
 
@@ -140,11 +145,11 @@ def sync_image_metadata_to_json(
     rating_mu: float,
     rating_sigma: float,
     comparison_count: int,
-    all_comparisons: list[dict[str, Any]] | None = None,
+    all_comparisons: list[dict[str, object]] | None = None,
     filename_to_path: dict[str, Path] | None = None,
-    filename_to_comparisons: dict[str, list[dict[str, Any]]] | None = None,
-    filename_to_image_data: dict[str, dict[str, Any]] | None = None,
-    filename_to_entry: dict[str, dict[str, Any]] | None = None,
+    filename_to_comparisons: dict[str, list[dict[str, object]]] | None = None,
+    filename_to_image_data: dict[str, dict[str, object]] | None = None,
+    filename_to_entry: dict[str, dict[str, object]] | None = None,
 ) -> bool:
     """Rewrite one JSON companion file from DB-backed state."""
 

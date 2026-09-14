@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-from ...domain.loading import MapsProvider
+from ...domain.ports.loading import MapsProvider
 from ...core.configuration.settings import config
 from .helpers import get_value_from_entry
 

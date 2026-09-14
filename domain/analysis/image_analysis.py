@@ -14,7 +14,7 @@ from .attribute_analysis import FaceAttributeAnalyzer, NSFWAnalyzer
 from ...core.configuration.settings import config
 from ...core.io.serialization import atomic_write_json
 from ...core.observability.logger import get_logger, ModuleLogger
-from ...domain.loading import BatchSizerFactory, ModelLoader
+from ...domain.ports.loading import BatchSizerFactory, ModelLoader
 from ...domain.ports.cache import CacheProvider
 from ..vectors.image_vector import ImageVector
 
@@ -23,21 +23,23 @@ logger: ModuleLogger = get_logger(__name__)
 # Type Alias for the shared data structure
 ImageEntry = tuple[str, dict[str, object], str, str]
 
-REQUIRED_ANALYSIS_FIELDS: frozenset[str] = frozenset({
-    "original_width",
-    "original_height",
-    "final_width",
-    "final_height",
-    "final_aspect_ratio",
-    "original_aspect_ratio",
-    "analysis",
-    "bbox",
-    *POSE_LANDMARK_NAMES,
-    "age",
-    "gender",
-    "race",
-    "nsfw_score",
-})
+REQUIRED_ANALYSIS_FIELDS: frozenset[str] = frozenset(
+    {
+        "original_width",
+        "original_height",
+        "final_width",
+        "final_height",
+        "final_aspect_ratio",
+        "original_aspect_ratio",
+        "analysis",
+        "bbox",
+        *POSE_LANDMARK_NAMES,
+        "age",
+        "gender",
+        "race",
+        "nsfw_score",
+    }
+)
 
 METRIC_KEYS: tuple[str, ...] = (
     "contrast",
@@ -162,7 +164,9 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _contrast(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
+    def _contrast(
+        self, img: Image.Image, entry: dict[str, object]
+    ) -> dict[str, object]:
         if "contrast" in entry:
             return entry
         _start = time.perf_counter()
@@ -172,7 +176,9 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _sharpness(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
+    def _sharpness(
+        self, img: Image.Image, entry: dict[str, object]
+    ) -> dict[str, object]:
         if "sharpness" in entry:
             return entry
         _start = time.perf_counter()
@@ -189,7 +195,9 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _noise_score(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
+    def _noise_score(
+        self, img: Image.Image, entry: dict[str, object]
+    ) -> dict[str, object]:
         if "noise_score" in entry:
             return entry
         _start = time.perf_counter()
@@ -207,7 +215,9 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _colorfulness(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
+    def _colorfulness(
+        self, img: Image.Image, entry: dict[str, object]
+    ) -> dict[str, object]:
         if "colorfulness" in entry:
             return entry
         _start = time.perf_counter()
@@ -243,7 +253,9 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _edge_density(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
+    def _edge_density(
+        self, img: Image.Image, entry: dict[str, object]
+    ) -> dict[str, object]:
         if "edge_density" in entry:
             return entry
         _start = time.perf_counter()
@@ -255,7 +267,9 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _texture_lbp(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
+    def _texture_lbp(
+        self, img: Image.Image, entry: dict[str, object]
+    ) -> dict[str, object]:
         if "texture_lbp" in entry:
             return entry
         _start = time.perf_counter()
@@ -269,7 +283,9 @@ class ImageAnalysis(ImageVector):
 
         return entry
 
-    def _mediapipe_analysis(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
+    def _mediapipe_analysis(
+        self, img: Image.Image, entry: dict[str, object]
+    ) -> dict[str, object]:
         mp_fields = {"bbox"} | set(POSE_LANDMARK_NAMES)
         if mp_fields.issubset(entry.keys()):
             return entry
@@ -288,7 +304,9 @@ class ImageAnalysis(ImageVector):
         entry["analysis"] = analysis
         return entry
 
-    def _nsfw_analysis(self, img: Image.Image, entry: dict[str, object]) -> dict[str, object]:
+    def _nsfw_analysis(
+        self, img: Image.Image, entry: dict[str, object]
+    ) -> dict[str, object]:
         if "nsfw_score" in entry:
             return entry
         entry["nsfw_score"] = self._nsfw.predict(img)
