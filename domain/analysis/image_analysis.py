@@ -2,6 +2,7 @@ import time
 import os
 import numpy as np
 import numpy.typing as npt
+import torch
 from tqdm import tqdm
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,9 +15,13 @@ from .attribute_analysis import FaceAttributeAnalyzer, NSFWAnalyzer
 from ...core.configuration.settings import config
 from ...core.io.serialization import atomic_write_json
 from ...core.observability.logger import get_logger, ModuleLogger
-from ...domain.ports.loading import BatchSizerFactory, ModelLoader
+from ...domain.ports.loading import BatchSizer, BatchSizerFactory, ModelLoader
 from ...domain.ports.cache import CacheProvider
-from ..vectors.image_vector import ImageVector
+from ..vectors.image_vector import (
+    ImageVector,
+    probe_bound_for_failed,
+    scaled_batch_size,
+)
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -69,6 +74,17 @@ def process_single_batch(
     return result
 
 
+def _is_out_of_memory(error: BaseException) -> bool:
+    """Whether a failure is really CUDA running out of memory.
+
+    Some OOMs surface as a plain RuntimeError, so the type alone is not enough,
+    but an unrelated RuntimeError must not be reported as an OOM.
+    """
+    if isinstance(error, torch.cuda.OutOfMemoryError):
+        return True
+    return "out of memory" in str(error).lower()
+
+
 class ImageAnalysis(ImageVector):
     def __init__(
         self,
@@ -96,6 +112,14 @@ class ImageAnalysis(ImageVector):
         self._mediapipe = MediaPipeAnalyzer(mediapipe)
         self._face_attr = FaceAttributeAnalyzer(model_loader)
         self._nsfw = NSFWAnalyzer(model_loader)
+        # Attribute models are calibrated on their own. Borrowing the vision
+        # model's number put a 764-image face pass on a 16 GB card.
+        self._face_sizer = batch_sizer_factory(
+            self._face_attr.MODEL_KEY, "attribute_models"
+        )
+        self._nsfw_sizer = batch_sizer_factory(
+            self._nsfw.MODEL_KEY, "attribute_models"
+        )
 
         for data in self.raw_data:
             image_path = data[0]
@@ -312,6 +336,55 @@ class ImageAnalysis(ImageVector):
         entry["nsfw_score"] = self._nsfw.predict(img)
         return entry
 
+    def _run_attribute_pass(
+        self,
+        result: list[ImageEntry],
+        sizer: BatchSizer,
+        run_pass: Callable[[list[ImageEntry]], list[ImageEntry]],
+        desc: str,
+    ) -> None:
+        """Run one attribute pass in calibrated batches, recovering from OOM.
+
+        The vision path already recalculates and retries when CUDA runs out of
+        memory. Attribute models are sized independently now, so they need the
+        same recovery rather than propagating the error to the endpoint.
+        """
+        batch_size = max(sizer.get(0, 0, False), 1)
+        logger.info(f"Running {desc} attribute analysis...")
+        _start = time.perf_counter()
+        with tqdm(total=len(result), desc=desc, unit="img", delay=3.0) as pbar:
+            idx = 0
+            while idx < len(result):
+                batch = result[idx : idx + batch_size]
+                try:
+                    result[idx : idx + len(batch)] = run_pass(batch)
+                except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+                    if not _is_out_of_memory(e):
+                        raise
+                    if batch_size <= 1:
+                        raise RuntimeError(
+                            f"CUDA out of memory running {desc} analysis on a "
+                            "single image"
+                        ) from e
+                    failed_size = batch_size
+                    torch.cuda.empty_cache()
+                    probe = sizer.get(
+                        0, 0, True, probe_bound_for_failed(failed_size)
+                    )
+                    batch_size = max(scaled_batch_size(probe), 1)
+                    logger.warning(
+                        f"CUDA out of memory in {desc} analysis at batch size "
+                        f"{failed_size}, recalculating and retrying with "
+                        f"{batch_size}: {e}"
+                    )
+                    continue
+                idx += len(batch)
+                pbar.update(len(batch))
+        logger.info(
+            f"{desc} done: {len(result)} images in "
+            f"{time.perf_counter() - _start:.1f}s"
+        )
+
     def _run_face_pass(self, entries: list[ImageEntry]) -> list[ImageEntry]:
         indices = [i for i, (_, e, _, _) in enumerate(entries) if "age" not in e]
         if not indices:
@@ -438,29 +511,12 @@ class ImageAnalysis(ImageVector):
                         result.extend(res)
                         pbar.update(len(res))
 
-            attr_batch_size = max(self.get_batch_size(224, 224, False), 4)
-
-            logger.info("Running face attribute analysis...")
-            _face_start = time.perf_counter()
-            with tqdm(total=total, desc="Face", unit="img", delay=3.0) as pbar:
-                for idx in range(0, len(result), attr_batch_size):
-                    batch = result[idx : idx + attr_batch_size]
-                    batch = self._run_face_pass(batch)
-                    result[idx : idx + attr_batch_size] = batch
-                    pbar.update(len(batch))
-            _face_end = time.perf_counter()
-            logger.info("Face done: %d images in %.1fs", total, _face_end - _face_start)
-
-            logger.info("Running NSFW analysis...")
-            _nsfw_start = time.perf_counter()
-            with tqdm(total=total, desc="NSFW", unit="img", delay=3.0) as pbar:
-                for idx in range(0, len(result), attr_batch_size):
-                    batch = result[idx : idx + attr_batch_size]
-                    batch = self._run_nsfw_pass(batch)
-                    result[idx : idx + attr_batch_size] = batch
-                    pbar.update(len(batch))
-            _nsfw_end = time.perf_counter()
-            logger.info("NSFW done: %d images in %.1fs", total, _nsfw_end - _nsfw_start)
+            self._run_attribute_pass(
+                result, self._face_sizer, self._run_face_pass, "Face"
+            )
+            self._run_attribute_pass(
+                result, self._nsfw_sizer, self._run_nsfw_pass, "NSFW"
+            )
 
         for entry in result:
             self._cache.set(f"analysis:{entry[3]}", entry)

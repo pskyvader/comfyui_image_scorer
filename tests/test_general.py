@@ -32,7 +32,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 import pytest
 from flask import Flask
@@ -140,12 +140,15 @@ def _cli_leaf_commands() -> set[tuple[str, ...]]:
     from comfyui_image_scorer.adapters.cli import main as cli_main
 
     recorder = _TreeRecorder()
-    cli_main._add_server_parser(recorder)  # type: ignore[reportPrivateUsage]
-    cli_main._add_training_parser(recorder)  # type: ignore[reportPrivateUsage]
-    cli_main._add_build_parser(recorder)  # type: ignore[reportPrivateUsage]
-    cli_main._add_database_parser(recorder)  # type: ignore[reportPrivateUsage]
-    cli_main._add_files_parser(recorder)  # type: ignore[reportPrivateUsage]
-    cli_main._add_analyze_parser(recorder)  # type: ignore[reportPrivateUsage]
+    # The parser builders are typed against argparse's concrete base classes;
+    # the recorder implements the same surface structurally.
+    any_recorder = cast(Any, recorder)
+    cli_main.add_server_parser(any_recorder)
+    cli_main.add_training_parser(any_recorder)
+    cli_main.add_build_parser(any_recorder)
+    cli_main.add_database_parser(any_recorder)
+    cli_main.add_files_parser(any_recorder)
+    cli_main.add_analyze_parser(any_recorder)
 
     leaves: set[tuple[str, ...]] = set()
 
@@ -162,28 +165,28 @@ def _cli_leaf_commands() -> set[tuple[str, ...]]:
 
 def _make_app(deps: Any):
     from comfyui_image_scorer.adapters.server.endpoints.analyze import (
-        register_analyze_routes,  # type: ignore[reportUnknownVariableType]
+        register_analyze_routes,
     )
     from comfyui_image_scorer.adapters.server.endpoints.build import (
-        register_build_routes,  # type: ignore[reportUnknownVariableType]
+        register_build_routes,
     )
     from comfyui_image_scorer.adapters.server.endpoints.comparison import (
-        register_ranking_routes,  # type: ignore[reportUnknownVariableType]
+        register_ranking_routes,
     )
     from comfyui_image_scorer.adapters.server.endpoints.database import (
-        register_database_routes,  # type: ignore[reportUnknownVariableType]
+        register_database_routes,
     )
     from comfyui_image_scorer.adapters.server.endpoints.files import (
-        register_files_routes,  # type: ignore[reportUnknownVariableType]
+        register_files_routes,
     )
     from comfyui_image_scorer.adapters.server.endpoints.gallery import (
-        register_gallery_routes,  # type: ignore[reportUnknownVariableType]
+        register_gallery_routes,
     )
     from comfyui_image_scorer.adapters.server.endpoints.maps import (
-        register_maps_routes,  # type: ignore[reportUnknownVariableType]
+        register_maps_routes,
     )
     from comfyui_image_scorer.adapters.server.endpoints.training import (
-        register_training_routes,  # type: ignore[reportUnknownVariableType]
+        register_training_routes,
     )
 
     app = Flask(__name__)
@@ -200,8 +203,11 @@ def _make_app(deps: Any):
 
 def _api_rules(app: Flask) -> list[tuple[str, str, set[str]]]:
     rules: list[tuple[str, str, set[str]]] = []
-    for rule in app.url_map.iter_rules():  # type: ignore[reportUnknownMemberType]
-        rules.append((rule.rule, rule.endpoint, set(rule.methods)))  # type: ignore[reportUnknownMemberType, reportArgumentType]
+    # Flask ships no stubs, so url_map is unknown. The attribute names are part
+    # of Flask's documented public Rule surface.
+    url_map = cast(Any, app.url_map)
+    for rule in url_map.iter_rules():
+        rules.append((rule.rule, rule.endpoint, set(rule.methods)))
     return rules
 
 
@@ -237,12 +243,13 @@ def test_endpoint_bodies_are_single_calls():
     deps = _make_fake_deps()
     app = _make_app(deps)
     view_functions = app.view_functions
+    url_map = cast(Any, app.url_map)
 
     for route, _path, tokens in CONTRACT:
-        for rule in app.url_map.iter_rules():  # type: ignore[reportUnknownMemberType]
-            if rule.rule != route:  # type: ignore[reportUnknownMemberType]
+        for rule in url_map.iter_rules():
+            if rule.rule != route:
                 continue
-            view = view_functions[rule.endpoint]  # type: ignore[reportUnknownMemberType]
+            view = view_functions[rule.endpoint]
             source = inspect.getsource(view)
             assert "capture_log_output" in source, f"{route}: missing log capture"
             for token in tokens:
@@ -325,6 +332,9 @@ class StubGraph:
         self.calls.append("update_image_rating_state")
         return True
 
+    def rebuild_from_database(self) -> None:
+        self.calls.append("rebuild_from_database")
+
 
 class FakeDeps:
     """Stub dependency container shaped like both CLIDeps and ServerDeps."""
@@ -332,34 +342,34 @@ class FakeDeps:
     def __init__(self) -> None:
         from comfyui_image_scorer.adapters.cli.deps import CLIDeps
 
-        self.graph = StubGraph()
+        self.graph: Any = StubGraph()
         self.processor: Any = SimpleNamespace(rebuild_database_from_ranked=Recorder())
         self.model_loader: Any = None
         self.batch_sizer_factory: Any = None
         self.maps_provider: Any = None
         self.training_loader: Any = None
         self.model_trainer: Any = None
-        self.cache = StubGraph()  # cache provider stub; never read by these paths
-        self.hpo_runner = Recorder()
+        self.cache: Any = StubGraph()  # cache provider stub; never read by these paths
+        self.hpo_runner: Any = Recorder()
         self.plot_manager: Any = None
         self.mediapipe: Any = None
-        self.vacuum_database = Recorder()
-        self.deduplicate_scored = Recorder()
-        self.cleanup_orphans = Recorder()
-        self.download_configured_models = Recorder()
-        self.download_mediapipe_models = Recorder()
-        self.set_hub_offline = Recorder()
+        self.vacuum_database: Any = Recorder()
+        self.deduplicate_scored: Any = Recorder()
+        self.cleanup_orphans: Any = Recorder()
+        self.download_configured_models: Any = Recorder()
+        self.download_mediapipe_models: Any = Recorder()
+        self.set_hub_offline: Any = Recorder()
         self.path_resolver: Any = None
         self._cli_deps = CLIDeps(
-            processor=self.processor,  # type: ignore[arg-type]
-            graph=self.graph,  # type: ignore[arg-type]
-            model_loader=self.model_loader,  # type: ignore[arg-type]
-            batch_sizer_factory=self.batch_sizer_factory,  # type: ignore[arg-type]
-            maps_provider=self.maps_provider,  # type: ignore[arg-type]
+            processor=self.processor,
+            graph=self.graph,
+            model_loader=self.model_loader,
+            batch_sizer_factory=self.batch_sizer_factory,
+            maps_provider=self.maps_provider,
             training_loader=self.training_loader,
             model_trainer=self.model_trainer,
-            cache=self.cache,  # type: ignore[arg-type]
-            hpo_runner=self.hpo_runner,  # type: ignore[arg-type]
+            cache=self.cache,
+            hpo_runner=self.hpo_runner,
             plot_manager=self.plot_manager,
             mediapipe=self.mediapipe,
             vacuum_database=self.vacuum_database,
@@ -488,6 +498,13 @@ def _log_tail(log_path: Path, n: int = 25) -> str:
         return "<no server log>"
 
 
+def _preview(payload: Any, limit: int = 2000) -> str:
+    text = payload if isinstance(payload, str) else json.dumps(payload, default=str)
+    if len(text) > limit:
+        return f"{text[:limit]}... <truncated, {len(text)} chars total>"
+    return text
+
+
 def _request(
     base: str, method: str, path: str, body: dict[str, Any] | None, timeout: int
 ) -> tuple[int, Any]:
@@ -531,23 +548,27 @@ def _check_vectors_rebuilt() -> None:
     _assert_present(Path(scores_file))
 
 
-@pytest.mark.realdata
 def test_live_server_smoke():
     port = 8321
+    print(f"\n=== live-server-smoke: starting server on {port} ===", flush=True)
     proc, log_path = _start_server(port)
+    print(f"server log: {log_path}", flush=True)
     try:
         base = f"http://127.0.0.1:{port}"
         _wait_ready(base, timeout=SHORT_TIMEOUT)
+        print("server ready; GET /", flush=True)
         req = urllib.request.Request(base + "/", method="GET")
         with urllib.request.urlopen(req, timeout=30) as resp:
             resp.read()
             assert resp.status == 200
+        print("=== live-server-smoke: OK (GET / -> 200) ===\n", flush=True)
     except AssertionError as e:
         raise AssertionError(
             f"{e}\n--- server log tail ---\n{_log_tail(log_path)}"
         ) from e
     finally:
         _stop_server(proc)
+        print(f"=== live-server-smoke: server stopped ===\n", flush=True)
 
 
 @pytest.mark.realdata
@@ -557,10 +578,14 @@ def test_real_data_pipeline():
     recalculate on the stripped tree) -> build (limit=100 subset) ->
     training -> analyze. Destructive."""
     port = 8322
+    print(f"\n{'=' * 70}\n=== real-data-pipeline: starting server on {port} ===", flush=True)
     proc, log_path = _start_server(port)
+    print(f"server log: {log_path}", flush=True)
+    started = time.time()
     try:
         base = f"http://127.0.0.1:{port}"
         _wait_ready(base, timeout=SHORT_TIMEOUT)
+        print(f"server ready after {time.time() - started:.1f}s", flush=True)
 
         steps: list[
             tuple[str, str, str, dict[str, Any] | None, bool, Callable[[], None] | None]
@@ -631,22 +656,72 @@ def test_real_data_pipeline():
             ("stats", "GET", "/api/analyze/stats", None, False, None),
         ]
 
-        try:
-            for name, method, path, body, long, check in steps:
-                timeout = LONG_TIMEOUT if long else SHORT_TIMEOUT
+        failure: str | None = None
+        attempted = 0
+        for index, (name, method, path, body, long, check) in enumerate(steps, start=1):
+            attempted = index
+            timeout = LONG_TIMEOUT if long else SHORT_TIMEOUT
+            step_start = time.time()
+            print(
+                f"\n--- step {index}/{len(steps)} START {name}: "
+                f"{method} {path} body={_preview(body, 500)} "
+                f"(timeout {timeout}s) ---",
+                flush=True,
+            )
+            try:
                 status: int
                 payload: Any
                 status, payload = _request(base, method, path, body, timeout=timeout)
-                assert status == 200, f"{name}: HTTP {status}: {payload}"
-                assert payload.get("status") == "done", f"{name}: {payload}"
+                elapsed = time.time() - step_start
+                print(
+                    f"--- step {index}/{len(steps)} RESPONSE {name}: "
+                    f"HTTP {status} in {elapsed:.1f}s :: {_preview(payload)} ---",
+                    flush=True,
+                )
+                if status != 200:
+                    raise AssertionError(f"HTTP {status}: {payload}")
+                if payload.get("status") != "done":
+                    raise AssertionError(f"unexpected payload: {payload}")
                 if check:
                     check()
-        except AssertionError as e:
+            except AssertionError as e:
+                failure = f"{name}: {e}"
+                print(
+                    f"--- step {index}/{len(steps)} FAILED {name} after "
+                    f"{time.time() - step_start:.1f}s -- stopping remaining steps ---",
+                    flush=True,
+                )
+                break
+            print(
+                f"--- step {index}/{len(steps)} OK {name} "
+                f"(total {time.time() - started:.1f}s) ---",
+                flush=True,
+            )
+
+        if failure is not None:
+            skipped = [s[0] for s in steps[attempted:]]
+            skipped_text = ", ".join(skipped) if skipped else "<none>"
+            print(
+                f"\n=== real-data-pipeline: FAILED after "
+                f"{time.time() - started:.1f}s ===\n"
+                f"--- skipped {len(skipped)} step(s): {skipped_text} ---\n"
+                f"--- server log tail ---\n{_log_tail(log_path, n=200)}\n",
+                flush=True,
+            )
             raise AssertionError(
-                f"{e}\n--- server log tail ---\n{_log_tail(log_path)}"
-            ) from e
+                f"{failure}\n"
+                f"--- skipped {len(skipped)} step(s): {skipped_text} ---\n"
+                f"--- server log tail ---\n{_log_tail(log_path, n=200)}"
+            )
+
+        print(
+            f"\n=== real-data-pipeline: all {len(steps)} steps passed in "
+            f"{time.time() - started:.1f}s ===\n",
+            flush=True,
+        )
     finally:
         _stop_server(proc)
+        print("=== real-data-pipeline: server stopped ===\n", flush=True)
 
 
 # ── AestheticScoreNode tests ─────────────────────────────────────────────
@@ -674,8 +749,6 @@ def _mock_score_return():
     )
 
 
-@pytest.mark.realdata
-@pytest.mark.node
 class TestAestheticScoreNodeDelegation:
     """Verify the node properly forwards all arguments to ScoringService.score()."""
 
@@ -708,14 +781,14 @@ class TestAestheticScoreNodeDelegation:
             )
             # Verify 4-tuple return matching RETURN_TYPES
             assert len(result) == 4, f"Expected 4-tuple, got {len(result)} items"
-            selected_img, discarded_img, available, scores = result
+            _, _, available, scores = result
             assert available is True
             assert isinstance(scores, list) and len(scores) == 1
 
             # Verify every kwarg was forwarded — use call_args to avoid
             # tensor-comparison pitfalls in assert_called_once_with
             mock.score.assert_called_once()
-            args, kwargs = mock.score.call_args
+            _, kwargs = mock.score.call_args
             assert torch.equal(kwargs["image"], torch.zeros(1, 512, 512, 3))
             assert kwargs["threshold"] == 0.5
             assert kwargs["positive"] == "test prompt"
@@ -735,8 +808,6 @@ class TestAestheticScoreNodeDelegation:
                 assert kwargs["max_images"] == 10
 
 
-@pytest.mark.realdata
-@pytest.mark.node
 class TestAestheticScoreNodeReturnTypes:
     """Verify the node returns a 4-tuple matching RETURN_TYPES."""
 

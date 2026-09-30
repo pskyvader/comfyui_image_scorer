@@ -10,7 +10,6 @@ import time
 import os
 from pathlib import Path
 import argparse
-from typing import Any
 
 from flask import Flask, send_from_directory, request, send_file, Response
 from pydantic import ValidationError
@@ -67,6 +66,7 @@ from ...infrastructure.ml_models.batch_sizer import BatchSizer
 from ...infrastructure.cache.memory_cache import InMemoryCache
 from ...infrastructure.ml_models.mediapipe_provider import MediaPipeProvider
 from ...domain.comparison.constants import IMAGES_CACHE_TTL
+from ...domain.ports.repository import ComparisonRow
 from ...infrastructure.loading.training_loader import training_loader
 from ...infrastructure.ml_models.training.model_trainer import model_trainer
 from ...infrastructure.loading.maps_loader import maps_list
@@ -91,7 +91,7 @@ class _PathResolverAdapter:
         rating_mu: float,
         rating_sigma: float,
         comparison_count: int,
-        all_comparisons: list[dict[str, Any]] | None = None,
+        all_comparisons: list[ComparisonRow] | None = None,
     ) -> bool:
         return sync_image_metadata_to_json(
             filename=filename,
@@ -119,7 +119,6 @@ image_processor = ImageProcessor(
 
 deps = ServerDeps(
     path_resolver=_PathResolverAdapter(),
-    path_ops=path_ops,
     graph=graph,
     processor=image_processor,
     model_loader=model_loader,
@@ -159,8 +158,6 @@ SECTION_FRONTENDS = {
     "comparison": Path(__file__).parent.parent / "frontend" / "comparison",
     "gallery": Path(__file__).parent.parent / "frontend" / "gallery",
     "maps": Path(__file__).parent.parent / "frontend" / "maps",
-    "maps2": Path(__file__).parent.parent / "frontend" / "maps2",
-    "maps3": Path(__file__).parent.parent / "frontend" / "maps3",
     "database": Path(__file__).parent.parent / "frontend" / "database",
     "build": Path(__file__).parent.parent / "frontend" / "build",
     "training": Path(__file__).parent.parent / "frontend" / "training",

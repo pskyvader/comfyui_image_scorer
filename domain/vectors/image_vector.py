@@ -8,12 +8,17 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 from tqdm import tqdm
 from collections import defaultdict, OrderedDict
 import torch
-from torchvision import transforms
 import numpy as np
 
 from ...core.observability.logger import get_logger
 from ...core.configuration.settings import config
-from ...domain.ports.loading import BatchSizerFactory, ModelLoader, BatchSizer
+from ...domain.ports.loading import (
+    BatchSizerFactory,
+    ModelLoader,
+    BatchSizer,
+    VisionModel,
+    Transform,
+)
 from .helpers import l2_normalize_batch
 from ...core.io.serialization import load_json
 from ...core.filesystem.paths import vectors_size_file
@@ -49,11 +54,11 @@ class ImageVector:
         self.image_list: dict[str, Image.Image] = {}
         self.path_list: dict[str, str] = {}
         self.vector_list: vectorDict = {}
-        self.model: object | None = None
+        self.model: VisionModel | None = None
         self.vector_length: int = 0
-        self._transform: transforms.Compose | None = None
+        self._transform: Transform | None = None
         self.variable_input: bool = True
-        self.model_input_size: sizeTuple | None = None
+        self.model_input_size: sizeTuple = (0, 0)
         self.model_loader = model_loader
         self.batch_sizer: BatchSizer = batch_sizer_factory(model_key)
 
@@ -126,20 +131,21 @@ class ImageVector:
         """
         if self._transform is None:
             raise RuntimeError("Model transform not set. Cannot process batch.")
+        if self.model is None:
+            raise RuntimeError("Model not set. Cannot process batch.")
         batch_id, image_batch = zip(*current_batch)
 
         model = self.model
         transformed_images: list[torch.Tensor] = [
             self._transform(img) for img in image_batch
         ]
-        device = next(model.parameters()).device
+        device = model.device
 
         batch_tensor = torch.stack(transformed_images, dim=0).to(
             device, non_blocking=True
         )
 
-        with torch.no_grad():
-            outputs = model(batch_tensor)
+        outputs = model(batch_tensor)
 
         # Validate output shape against the model's own output dim and the
         # configured slot_size. A mismatch means the config is out of sync with
@@ -185,12 +191,11 @@ class ImageVector:
             self.model_loader.load_vision_model(self.model_key)
         )
         model_info = self.model_loader.get_model_info(self.model_key)
-        self.variable_input = model_info["variable_input"]
-        self.model_input_size = sizeTuple(
-            model_info["input_size"]
-            if not self.variable_input and model_info["input_size"] is not None
-            else list(entries.values())[0].size
-        )
+        self.variable_input = model_info.variable_input
+        if not self.variable_input:
+            self.model_input_size = sizeTuple(model_info.input_size)
+        else:
+            self.model_input_size = sizeTuple(list(entries.values())[0].size)
         bw, bh = self.model_input_size
         batch_size: int = scaled_batch_size(self.get_batch_size(bw, bh, rebuild))
         logger.debug(
@@ -218,8 +223,14 @@ class ImageVector:
             self.model_loader.load_vision_model(self.model_key)
         )
         model_info = self.model_loader.get_model_info(self.model_key)
-        self.variable_input = model_info["variable_input"]
-        self.model_input_size = sizeTuple(model_info["input_size"])
+        self.variable_input = model_info.variable_input
+        if self.variable_input:
+            # For variable input, use first image size
+            first_img = next(iter(entries.values()))
+            with Image.open(first_img) as img:
+                self.model_input_size = sizeTuple(img.size)
+        else:
+            self.model_input_size = sizeTuple(model_info.input_size)
 
         total = len(entries)
         vectors: vectorDict = {}
@@ -273,9 +284,9 @@ class ImageVector:
                 max_batch_size = 0
                 for bucket_idx, (size, items) in enumerate(bucket_list, start=1):
                     num_items: int = len(items)
-                    width, height = sizeTuple(
+                    width, height = (
                         self.model_input_size
-                        if (not self.variable_input and self.model_input_size)
+                        if not self.variable_input
                         else size
                     )
                     max_batch_size = scaled_batch_size(

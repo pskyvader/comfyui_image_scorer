@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import math
 import os
+import threading
 from pathlib import Path
+from typing import cast, TypedDict
 
 from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.configuration.settings import config
 from ...core.io.serialization import atomic_write_json, load_json
 from ...core.filesystem.paths import image_root_processed
 from ...domain.comparison.algorithm.graph_helpers import safe_parse_timestamp
+from ...domain.ports.repository import ComparisonRow, ImageRow
 from ..cache.memory_cache import InMemoryCache
 from .images_repository import (
     find_node as get_node_data,
@@ -19,6 +22,15 @@ from .images_repository import (
 logger: ModuleLogger = get_logger(__name__)
 
 _folder_listdir_cache = InMemoryCache()
+
+
+class HistoryEntry(TypedDict):
+    """One companion-JSON comparison-history record written during metadata sync."""
+
+    other: str
+    opponent_score: float
+    winner: bool
+    timestamp: str
 
 
 def prewarm_folder_cache(ranked_root: Path) -> None:
@@ -56,7 +68,7 @@ def compute_path_from_filename(filename: str, score: float) -> Path:
     cache_key = str(base_folder)
     cached = _folder_listdir_cache.get(cache_key)
     if cached is not None:
-        file_count, has_subfolders = cached
+        file_count, has_subfolders = cast(tuple[int, bool], cached)
     elif base_folder.exists():
         items = os.listdir(base_folder)
         file_count = len(items)
@@ -86,10 +98,10 @@ def find_image_path(filename: str) -> Path | None:
 
 def _build_history_for_filename(
     filename: str,
-    all_comparisons: list[dict[str, object]] | None = None,
-    filename_to_comparisons: dict[str, list[dict[str, object]]] | None = None,
-    filename_to_image_data: dict[str, dict[str, object]] | None = None,
-) -> list[dict[str, object]]:
+    all_comparisons: list[ComparisonRow] | None = None,
+    filename_to_comparisons: dict[str, list[ComparisonRow]] | None = None,
+    filename_to_image_data: dict[str, ImageRow] | None = None,
+) -> list[HistoryEntry]:
     if filename_to_comparisons is not None:
         comps = filename_to_comparisons[filename]
     elif all_comparisons is not None:
@@ -101,31 +113,27 @@ def _build_history_for_filename(
     else:
         comps = []
 
-    history: list[dict[str, object]] = []
+    history: list[HistoryEntry] = []
     for comp in comps:
         is_winner = comp["winner"] == filename
         other = (
             comp["filename_b"] if comp["filename_a"] == filename else comp["filename_a"]
         )
         if filename_to_image_data is not None:
-            other_data = filename_to_image_data[other]
+            other_data = filename_to_image_data.get(other)
+            other_score = other_data["score"] if other_data is not None else 0.5
         else:
             other_data = get_node_data(other)
+            other_score = other_data["score"] if other_data is not None else 0.5
         history.append(
             {
-                "comparison_id": comp["id"],
                 "other": other,
-                "opponent_score": other_data["score"] if other_data else 0.5,
+                "opponent_score": other_score,
                 "winner": is_winner,
-                "timestamp": comp["timestamp"],
+                "timestamp": comp.get("timestamp", ""),
             }
         )
-    history.sort(
-        key=lambda item: (
-            safe_parse_timestamp(item["timestamp"])[1],
-            item["comparison_id"],
-        )
-    )
+    history.sort(key=lambda item: safe_parse_timestamp(item["timestamp"])[1])
     return history
 
 
@@ -139,16 +147,31 @@ def _move_image_and_json(current_image: Path, current_json: Path, score: float) 
     os.replace(str(current_json), str(target_json))
 
 
+_sync_writes = 0
+_sync_skips = 0
+_sync_lock = threading.Lock()
+
+
+def pop_sync_counters() -> tuple[int, int]:
+    """Return (files written, files skipped as unchanged) and reset both counters."""
+    global _sync_writes, _sync_skips
+    with _sync_lock:
+        written, skipped = _sync_writes, _sync_skips
+        _sync_writes = 0
+        _sync_skips = 0
+    return written, skipped
+
+
 def sync_image_metadata_to_json(
     filename: str,
     score: float,
     rating_mu: float,
     rating_sigma: float,
     comparison_count: int,
-    all_comparisons: list[dict[str, object]] | None = None,
+    all_comparisons: list[ComparisonRow] | None = None,
     filename_to_path: dict[str, Path] | None = None,
-    filename_to_comparisons: dict[str, list[dict[str, object]]] | None = None,
-    filename_to_image_data: dict[str, dict[str, object]] | None = None,
+    filename_to_comparisons: dict[str, list[ComparisonRow]] | None = None,
+    filename_to_image_data: dict[str, ImageRow] | None = None,
     filename_to_entry: dict[str, dict[str, object]] | None = None,
 ) -> bool:
     """Rewrite one JSON companion file from DB-backed state."""
@@ -158,7 +181,7 @@ def sync_image_metadata_to_json(
     else:
         img_path = find_image_path(filename)
     if not img_path:
-        logger.warning("Image file not found for %s, cannot sync JSON.", filename)
+        logger.warning(f"Image file not found for {filename}, cannot sync JSON.")
         return False
     json_path = img_path.with_suffix(".json")
 
@@ -176,6 +199,8 @@ def sync_image_metadata_to_json(
     if filename_to_comparisons is None and all_comparisons is None:
         raise RuntimeError("Comparison history must be supplied by CrystalGraph")
 
+    global _sync_skips, _sync_writes
+
     history = _build_history_for_filename(
         filename,
         all_comparisons=all_comparisons,
@@ -187,7 +212,7 @@ def sync_image_metadata_to_json(
     old_mu = data.get("rating_mu")
     old_sigma = data.get("rating_sigma")
     old_count = data.get("comparison_count")
-    old_history = data.get("comparison_history") or []
+    old_history: object = data.get("comparison_history") or []
 
     data["score"] = float(score)
     data["rating_mu"] = float(rating_mu)
@@ -203,8 +228,12 @@ def sync_image_metadata_to_json(
         and old_count == data["comparison_count"]
         and old_history == data["comparison_history"]
     ):
+        with _sync_lock:
+            _sync_skips += 1
         return True
 
     atomic_write_json(str(json_path), data, indent=2)
     _move_image_and_json(img_path, json_path, score)
+    with _sync_lock:
+        _sync_writes += 1
     return True

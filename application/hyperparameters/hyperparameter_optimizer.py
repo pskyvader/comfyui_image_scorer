@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import random
 from itertools import product, islice
+from typing import Any, TypedDict
 
 import numpy as np
 
@@ -19,6 +20,16 @@ from ...infrastructure.ml_models.training.model_trainer import ModelTrainer
 logger: ModuleLogger = get_logger(__name__)
 
 NUM_CONFIGS = 5
+
+
+class HpoState(TypedDict):
+    """Persisted HPO state read from and written to the training section."""
+
+    configs: list[dict[str, float | int]]
+    step: int
+    cycle: int
+    used_keys: list[str]
+
 
 # Guard to prevent re-entrant or concurrent HPO loop runs. The HPO loop must
 # be started explicitly and may not be invoked more than once at a time.
@@ -45,11 +56,12 @@ def generate_fastest_setup() -> dict[str, float | int]:
         "learning_rate",
     }
     for key, cell in grid_base.items():
-        bound_key = "max" if key in force_max else "min"
-        if cell["type"] == "int":
-            cfg[key] = int(cell[bound_key])
+        cell_min = float(cell.get("min", 0))
+        cell_max = float(cell.get("max", 0))
+        if cell.get("type") == "int":
+            cfg[key] = int(cell_max if key in force_max else cell_min)
         else:
-            cfg[key] = float(cell[bound_key])
+            cfg[key] = float(cell_max if key in force_max else cell_min)
     return cfg
 
 
@@ -64,11 +76,12 @@ def generate_slowest_setup() -> dict[str, float | int]:
         "learning_rate",
     }
     for key, cell in grid_base.items():
-        bound_key = "min" if key in force_min else "max"
-        if cell["type"] == "int":
-            cfg[key] = int(cell[bound_key])
+        cell_min = float(cell.get("min", 0))
+        cell_max = float(cell.get("max", 0))
+        if cell.get("type") == "int":
+            cfg[key] = int(cell_min if key in force_min else cell_max)
         else:
-            cfg[key] = float(cell[bound_key])
+            cfg[key] = float(cell_min if key in force_min else cell_max)
     return cfg
 
 
@@ -80,12 +93,13 @@ def crossover_config(cfg1: dict[str, float | int], cfg2: dict[str, float | int])
     return new_cfg
 
 
-def _load_state() -> dict[str, object]:
+def _load_state() -> HpoState:
     training_config = config["training"]
+    configs: list[dict[str, float | int]] = [
+        dict(training_config[f"top{i}"]) for i in range(1, NUM_CONFIGS + 1)
+    ]
     return {
-        "configs": [
-            dict(training_config[f"top{i}"]) for i in range(1, NUM_CONFIGS + 1)
-        ],
+        "configs": configs,
         "step": 0,
         "cycle": 0,
         "used_keys": (
@@ -94,7 +108,7 @@ def _load_state() -> dict[str, object]:
     }
 
 
-def _save_state(state: dict[str, object]) -> None:
+def _save_state(state: HpoState) -> None:
     data = config.section_data("training")
     for i in range(NUM_CONFIGS):
         data[f"top{i + 1}"] = state["configs"][i]
@@ -102,7 +116,7 @@ def _save_state(state: dict[str, object]) -> None:
     config.save_section("training", data)
 
 
-def reset_hyperparameters() -> dict[str, object]:
+def reset_hyperparameters() -> HpoState:
     configs = [
         generate_random_config(),
         generate_random_config(),
@@ -110,7 +124,7 @@ def reset_hyperparameters() -> dict[str, object]:
         generate_fastest_setup(),
         generate_random_config(),
     ]
-    state = {"configs": configs, "step": 0, "cycle": 0, "used_keys": []}
+    state: HpoState = {"configs": configs, "step": 0, "cycle": 0, "used_keys": []}
     _save_state(state)
     return state
 
@@ -194,13 +208,13 @@ def _evaluate_config(
 
 
 def _run_step_on_config(
-    cfg: dict[str, float | int],
+    cfg: dict[str, Any],
     used_keys: list[str],
     X: np.ndarray,
     y: np.ndarray,
     max_combos: int,
     model_trainer: ModelTrainer,
-) -> tuple[dict[str, float | int], list[str]]:
+) -> tuple[dict[str, Any], list[str]]:
     all_keys = list(grid_base.keys())
     random.shuffle(all_keys)
 
@@ -213,7 +227,7 @@ def _run_step_on_config(
         chosen_key = all_keys[0]
         used_keys = []
 
-    varied_vals = around(chosen_key, cfg[chosen_key])
+    varied_vals = around(chosen_key, float(cfg[chosen_key]))
     logger.info(
         "    Varying: %s (current=%s) -> %s",
         chosen_key,
@@ -231,8 +245,8 @@ def _run_step_on_config(
     combos = list(islice(iter(all_combos), max_combos))
 
     best_cfg = cfg.copy()
-    best_score = cfg.get("best_score")
-    best_time = cfg.get("training_time")
+    best_score = cfg["best_score"]
+    best_time = cfg["training_time"]
     training_objective = config["training"]["objective"]
     improved = False
 
@@ -285,7 +299,7 @@ def hpo_cycle(
     optimization_steps: int,
     max_combos: int,
     cycle: int,
-) -> dict[str, object]:
+) -> HpoState:
     state = _load_state()
     if (
         not state
@@ -366,7 +380,7 @@ def hpo_cycle(
     logger.info("  Parent 2:  score=%s", f"{parents[1].get('best_score', -1):.6f}")
 
     new_configs = [parents[0], parents[1], child1, child2, random_child]
-    new_state = {
+    new_state: HpoState = {
         "configs": new_configs,
         "step": 0,
         "cycle": cycle + 1,
@@ -387,7 +401,7 @@ def run_hpo_cycles(
     max_combos: int | None,
     training_loader: TrainingLoader | None,
     model_trainer: ModelTrainer,
-) -> list[dict[str, object]]:
+) -> list[HpoState]:
     """Run multiple HPO cycles. Each cycle runs optimization_steps steps
     over the top1..top5 configs and breeds the next generation."""
     training_config = config["training"]
@@ -397,8 +411,8 @@ def run_hpo_cycles(
         optimization_steps = int(training_config["optimization_steps"])
     if max_combos is None:
         max_combos = int(training_config["max_combos"])
-    if training_loader is None or model_trainer is None:
-        raise RuntimeError("training_loader and model_trainer must be provided")
+    if training_loader is None:
+        raise RuntimeError("training_loader must be provided")
 
     X, y = load_training_data(
         filter_comparisons=True,
@@ -406,7 +420,7 @@ def run_hpo_cycles(
         model_trainer=model_trainer,
     )
 
-    results = []
+    results: list[HpoState] = []
     for i in range(cycles):
         logger.info("[run_hpo_cycles] Starting cycle %s/%s", i + 1, cycles)
         res = hpo_cycle(
@@ -434,7 +448,7 @@ class HpoRunner:
         max_combos: int | None,
         training_loader: TrainingLoader | None,
         model_trainer: ModelTrainer,
-    ) -> list[dict[str, object]]:
+    ) -> list[HpoState]:
         if self._running:
             raise RuntimeError(
                 "HPO loop is already running. Concurrent or nested runs are not allowed."

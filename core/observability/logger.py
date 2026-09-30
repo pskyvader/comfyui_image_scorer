@@ -33,11 +33,13 @@ def _custom_find_caller(
     stack_info: bool = False,
     _stacklevel: int = 1,
 ) -> tuple[str, int, str, str | None]:
-    f = sys._getframe(1)  # pyright: ignore[reportPrivateUsage]
+    # Walking frames is the only way to attribute a record to its real caller;
+    # the logging package exposes no public equivalent.
+    f = sys._getframe(1)  # noqa: SLF001
     while f is not None and getattr(f, "f_code", None):
         co = f.f_code
         filename = os.path.normcase(co.co_filename)
-        if "logger.py" in filename or filename == logging._srcfile:
+        if "logger.py" in filename or filename == logging._srcfile:  # noqa: SLF001
             f = f.f_back
         else:
             break
@@ -390,10 +392,12 @@ def configure_package_logging(
     pkg_logger = logging.getLogger("comfyui_image_scorer")
     pkg_logger.setLevel(level)
     # Rewire parent links in case any child loggers were created before
-    # the package logger existed, then clear level caches.
-    logging.root.manager._fixupParents(pkg_logger)
+    # the package logger existed, then clear level caches. Both steps are
+    # stdlib internals with no public replacement.
+    # stdlib internals: logging exposes no public rewire or level-cache reset.
+    logging.root.manager._fixupParents(pkg_logger)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]  # noqa: SLF001
     for _log_name, _log in list(logging.root.manager.loggerDict.items()):
         if isinstance(_log, logging.Logger) and _log_name.startswith(
             "comfyui_image_scorer"
         ):
-            _log._cache.clear()
+            _log._cache.clear()  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]  # noqa: SLF001

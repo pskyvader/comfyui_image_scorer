@@ -10,9 +10,14 @@ import time
 
 from ...core.observability.logger import get_logger, ModuleLogger
 
-ComparisonRow = dict[str, object]
-
-from ...domain.ports.repository import ImageRepository, ComparisonRepository
+from ...domain.ports.repository import (
+    ComparisonRow,
+    ImageRepository,
+    ComparisonRepository,
+    ImageRow,
+    ImageRowForInsert,
+    RatingStateUpdate,
+)
 from ...domain.graph.chain_manager import ChainManager
 from ...domain.graph.node_proxy import NodeProxy
 from ...domain.graph.chain_proxy import ChainProxy
@@ -40,7 +45,7 @@ class CrystalGraph:
         file_port: FilePort | None = None,
     ) -> None:
         self._chain: ChainManager = ChainManager()
-        self._images: dict[str, dict[str, object]] = {}
+        self._images: dict[str, ImageRow] = {}
         self._chain_map: dict[int, ChainDict] | None = None
         self._rebuilding: bool = False
         self._creating_chain_map: bool = False
@@ -99,7 +104,7 @@ class CrystalGraph:
 
     def rebuild_from_database(
         self,
-        images: list[dict[str, object]] | None = None,
+        images: list[ImageRow] | None = None,
         comparisons: list[ComparisonRow] | None = None,
     ) -> None:
         _start = time.perf_counter()
@@ -107,7 +112,7 @@ class CrystalGraph:
             logger.warning("Already rebuilding, skipping nested call")
             return
         self._rebuilding = True
-        logger.info("Rebuilding chain from database...")
+        logger.info("Rebuilding chain from database...", start_timer=_start)
 
         if images is None:
             if self._image_repo is None:
@@ -122,20 +127,15 @@ class CrystalGraph:
                 )
             comparisons = self._comparison_repo.list_links()
 
-        typed_images: list[dict[str, object]] = images
-        self._images = {}
-        for img in typed_images:
-            filename = img.get("filename")
-            if isinstance(filename, str):
-                self._images[filename] = img
+        self._images = {img["filename"]: img for img in images}
         self._chain.set_db_comparison_count(len(comparisons))
         self._chain.set_built_at(datetime.now(timezone.utc))
 
         all_filenames: set[str] = set(self._images.keys())
-        comp: dict[str, object]
+        comp: ComparisonRow
         for comp in comparisons:
-            all_filenames.add(str(comp["filename_a"]))
-            all_filenames.add(str(comp["filename_b"]))
+            all_filenames.add(comp["filename_a"])
+            all_filenames.add(comp["filename_b"])
 
         self._chain.build(comparisons, all_filenames=all_filenames)
         self._loaded = True
@@ -145,10 +145,7 @@ class CrystalGraph:
         logger.info("rebuild from database complete", start_timer=_start)
 
     def apply_comparison(self, winner: str, loser: str) -> LinkProxy | None:
-        record = self._chain.apply_comparison(winner, loser)
-        if record is None:
-            return None
-        return LinkProxy(self._chain, record)
+        return LinkProxy(self._chain, self._chain.apply_comparison(winner, loser))
 
     def add_link(
         self,
@@ -167,10 +164,29 @@ class CrystalGraph:
         )
         loser = filename_b if winner == filename_a else filename_a
         record = self._chain.apply_comparison(winner, loser)
-        if record is not None:
+        record.id = link_id
+        record.timestamp = timestamp
+        return link_id
+
+    def add_comparisons_bulk(self, rows: list[ComparisonRow]) -> list[int]:
+        """Record many comparisons, one transaction per call, and update the chain.
+
+        The in-memory graph is updated exactly as add_link would, so callers see
+        a consistent chain as soon as the call returns.
+        """
+        if self._comparison_repo is None:
+            raise RuntimeError("No ComparisonRepository provided")
+        link_ids = self._comparison_repo.add_comparisons_bulk(rows)
+        for row, link_id in zip(rows, link_ids):
+            filename_a = str(row["filename_a"])
+            filename_b = str(row["filename_b"])
+            winner = str(row["winner"])
+            timestamp = str(row.get("timestamp") or "")
+            loser = filename_b if winner == filename_a else filename_a
+            record = self._chain.apply_comparison(winner, loser)
             record.id = link_id
             record.timestamp = timestamp
-        return link_id
+        return link_ids
 
     # -- Selection working memory (#49/#50) ------------------------------
 
@@ -198,21 +214,15 @@ class CrystalGraph:
 
     # -- Images snapshot cache (replaces domain/comparison/state.py) -----
 
-    def get_images_snapshot(self) -> list[dict[str, object]] | None:
+    def get_images_snapshot(self) -> list[ImageRow] | None:
         if self._cache is None:
             return None
         cached = self._cache.get("images")
-        if cached is None:
-            return None
         if not isinstance(cached, list):
             return None
-        snapshot: list[dict[str, object]] = []
-        for item in cached:
-            if isinstance(item, dict):
-                snapshot.append(cast(dict[str, object], item))
-        return snapshot
+        return cast(list[ImageRow], cached)
 
-    def set_images_snapshot(self, images: list[dict[str, object]]) -> None:
+    def set_images_snapshot(self, images: list[ImageRow]) -> None:
         assert self._cache is not None
         self._cache.set("images", images)
 
@@ -333,8 +343,9 @@ class CrystalGraph:
     # -- Links ----------------------------------------------------------
 
     def get_all_links(self) -> list[LinkProxy]:
+        _start = time.perf_counter()
         records = self._chain.get_comparison_history()
-        logger.debug(f"records: {len(records)}")
+        logger.debug(f"records: {len(records)}", start_timer=_start)
         return [self._make_link(record) for record in records]
 
     def get_link_count(self) -> int:
@@ -401,6 +412,22 @@ class CrystalGraph:
             rating_sigma=rating_sigma,
         )
 
+    def add_images_bulk(self, rows: list[ImageRowForInsert]) -> int:
+        assert self._image_repo is not None
+        return self._image_repo.add_images_bulk(rows)
+
+    def update_image_rating_states_bulk(
+        self, rows: list[RatingStateUpdate]
+    ) -> int:
+        assert self._image_repo is not None
+        for filename, score, rating_mu, rating_sigma, comparison_count in rows:
+            image = self._images[filename]
+            image["score"] = score
+            image["rating_mu"] = rating_mu
+            image["rating_sigma"] = rating_sigma
+            image["comparison_count"] = comparison_count
+        return self._image_repo.update_image_rating_states_bulk(rows)
+
     def update_image_rating_state(
         self,
         filename: str,
@@ -412,18 +439,15 @@ class CrystalGraph:
     ) -> bool:
         assert self._image_repo is not None
 
-        self._images[filename].update(
-            {
-                "score": score,
-                "rating_mu": rating_mu,
-                "rating_sigma": rating_sigma,
-                "comparison_count": comparison_count,
-                "last_compared_at": (
-                    datetime.now(timezone.utc).isoformat()
-                    if touch_timestamp
-                    else self._images[filename].get("last_compared_at")
-                ),
-            }
+        image = self._images[filename]
+        image["score"] = score
+        image["rating_mu"] = rating_mu
+        image["rating_sigma"] = rating_sigma
+        image["comparison_count"] = comparison_count
+        image["last_compared_at"] = (
+            datetime.now(timezone.utc).isoformat()
+            if touch_timestamp
+            else image["last_compared_at"]
         )
 
         return self._image_repo.update_image_rating_state(

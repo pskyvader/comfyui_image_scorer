@@ -4,11 +4,14 @@ import os
 from pathlib import Path
 import pickle
 import base64
+from typing import Any, cast
 from tqdm import tqdm
 
 
 from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.io.serialization import load_single_jsonl
+from ...domain.ports.loading import ScoringModel, TrainingDiagnostics
+from ...domain.ports.repository import ComparisonRow
 from ...core.filesystem.paths import (
     vectors_file,
     scores_file,
@@ -29,7 +32,7 @@ logger: ModuleLogger = get_logger(__name__)
 
 class TrainingLoader:
     def __init__(self, use_cache: bool):
-        self.training_model: object | None = None
+        self.training_model: ScoringModel | None = None
         self.interaction_data: (
             tuple[npt.NDArray[np.float32], npt.NDArray[np.intp]] | None
         ) = None
@@ -37,7 +40,7 @@ class TrainingLoader:
         self.scores: npt.NDArray[np.float32] | None = None
         self.vectors_keyed: dict[str, npt.NDArray[np.float32]] | None = None
         self.scores_keyed: dict[str, float] | None = None
-        self.comparison_rows: list[dict[str, object]] | None = None
+        self.comparison_rows: list[ComparisonRow] | None = None
         self.feature_rule: npt.NDArray[np.intp] | None = None
         self.comparison_rule: tuple[int, dict[str, tuple[float, int]]] | None = None
         self.use_cache = use_cache
@@ -106,7 +109,8 @@ class TrainingLoader:
             for rec in load_single_jsonl(vectors_file):
                 if not isinstance(rec, dict) or len(rec) != 1:
                     continue
-                fid, vec = next(iter(rec.items()))
+                row = cast("dict[str, list[float]]", rec)
+                fid, vec = next(iter(row.items()))
                 keyed[str(fid)] = np.asarray(vec, dtype=np.float32)
                 pbar.update(1)
         return keyed
@@ -174,8 +178,9 @@ class TrainingLoader:
         for rec in load_single_jsonl(scores_file):
             if not isinstance(rec, dict) or len(rec) != 1:
                 continue
-            fid, score = next(iter(rec.items()))
-            keyed[str(fid)] = float(score)
+            row = cast("dict[str, float]", rec)
+            fid, score = next(iter(row.items()))
+            keyed[str(fid)] = score
         return keyed
 
     def _load_scores_from_npz(self) -> dict[str, float] | None:
@@ -195,7 +200,7 @@ class TrainingLoader:
         keys_array = np.array(order, dtype=object)
         np.savez_compressed(scores_data, y=y_array, keys=keys_array)
 
-    def load_comparison_rows(self) -> list[dict[str, object]]:
+    def load_comparison_rows(self) -> list[ComparisonRow]:
         """Load ordered comparison rows (filename_a, filename_b, winner, id).
 
         Three-tier resolution: in-memory cache -> comparisons.npz ->
@@ -217,9 +222,9 @@ class TrainingLoader:
                 "(prepare_data) before training."
             )
         logger.debug("loading comparisons file....")
-        rows = [
+        rows: list[ComparisonRow] = [
             {
-                "id": int(c.get("comparison_id", 0) or 0),
+                "id": int(c.get("id", 0) or 0),
                 "filename_a": str(c["filename_a"]),
                 "filename_b": str(c["filename_b"]),
                 "winner": str(c["winner"]),
@@ -239,7 +244,7 @@ class TrainingLoader:
             counts[row["filename_b"]] = counts.get(row["filename_b"], 0) + 1
         return counts
 
-    def _load_comparisons_from_npz(self) -> list[dict[str, object]] | None:
+    def _load_comparisons_from_npz(self) -> list[ComparisonRow] | None:
         if os.path.exists(comparisons_data):
             data = np.load(comparisons_data, allow_pickle=True)
             if all(k in data for k in ("ids", "winners", "a", "b")):
@@ -247,7 +252,7 @@ class TrainingLoader:
                 winners = data["winners"]
                 filename_a = data["a"]
                 filename_b = data["b"]
-                return [
+                rows: list[ComparisonRow] = [
                     {
                         "id": int(ids[i]),
                         "filename_a": str(filename_a[i]),
@@ -256,12 +261,13 @@ class TrainingLoader:
                     }
                     for i in range(len(ids))
                 ]
+                return rows
         return None
 
-    def _save_comparisons_to_npz(self, rows: list[dict[str, object]]) -> None:
+    def _save_comparisons_to_npz(self, rows: list[ComparisonRow]) -> None:
         logger.debug("saving comparisons cache...")
         os.makedirs(models_dir, exist_ok=True)
-        ids = np.array([r["id"] for r in rows], dtype=np.int64)
+        ids = np.array([r.get("id", 0) for r in rows], dtype=np.int64)
         winners = np.array([r["winner"] for r in rows], dtype=object)
         filename_a = np.array([r["filename_a"] for r in rows], dtype=object)
         filename_b = np.array([r["filename_b"] for r in rows], dtype=object)
@@ -361,18 +367,27 @@ class TrainingLoader:
             self.interaction_data = saved_data
         return saved_data
 
-    def _normalize(self, val: object) -> object:
+    def _normalize(self, val: Any) -> Any:
         if isinstance(val, np.ndarray):
-            if val.shape == ():
-                return val.item()
-            return val.copy()
+            array = cast("npt.NDArray[np.generic]", val)
+            if array.shape == ():
+                return array.item()
+            return array.copy()
         return val
 
-    def load_training_model_diagnostics(self) -> dict[str, object] | None:
+    def load_training_model_diagnostics(self) -> TrainingDiagnostics | None:
         with np.load(Path(training_model), allow_pickle=True) as npz:
-            return {k: self._normalize(npz[k]) for k in npz.files}
+            keys = npz.files
+            data = {k: self._normalize(npz[k]) for k in keys}
+        if "final_score" in data:
+            return TrainingDiagnostics(
+                final_score=float(data["final_score"]) if data["final_score"] is not None else None,
+                pairwise_accuracy=float(data["pairwise_accuracy"]) if data.get("pairwise_accuracy") is not None else None,
+                score_calibration=data.get("score_calibration"),
+            )
+        return TrainingDiagnostics()
 
-    def load_training_model(self) -> object:
+    def load_training_model(self) -> ScoringModel:
         if self.training_model is not None:
             return self.training_model
 
@@ -384,8 +399,9 @@ class TrainingLoader:
             model_b64 = npz["__model_b64__"].item()
             model_bytes = base64.b64decode(model_b64.encode("ascii"))
 
-            self.training_model = pickle.loads(model_bytes)
-        return self.training_model
+            loaded: ScoringModel = pickle.loads(model_bytes)
+            self.training_model = loaded
+        return loaded
 
     def save_training_model(
         self, model: object, additional_data: dict[str, object] | None
@@ -402,7 +418,7 @@ class TrainingLoader:
         model_b64 = base64.b64encode(model_bytes).decode("ascii")
 
         # Create save data with encoded model
-        save_data = {"__model_b64__": model_b64}
+        save_data: dict[str, Any] = {"__model_b64__": model_b64}
         if additional_data:
             save_data.update(additional_data)
 

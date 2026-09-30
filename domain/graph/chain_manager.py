@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from datetime import datetime, timezone
-from typing import Any
 import sys
 import time
 from tqdm import tqdm
 
 from ...core.observability.logger import get_logger, ModuleLogger
+from ..ports.repository import ComparisonRow
 from .link_proxy import ComparisonRecord
 
 logger: ModuleLogger = get_logger(__name__)
@@ -19,7 +19,7 @@ logger: ModuleLogger = get_logger(__name__)
 
 
 def parse_comparison(
-    comp: dict[str, Any],
+    comp: ComparisonRow,
 ) -> tuple[str, str, str, str]:
     filename_a: str = comp["filename_a"]
     filename_b: str = comp["filename_b"]
@@ -51,7 +51,7 @@ def add_undirected_edge(
 
 
 def process_one_comparison(
-    comp: dict[str, Any],
+    comp: ComparisonRow,
     better_than: defaultdict[str, list[str]],
     worse_than: defaultdict[str, list[str]],
     adjacency: defaultdict[str, set[str]],
@@ -283,6 +283,7 @@ class ChainManager:
         self._node_chains: dict[str, dict[int, bool]] = {}
 
         self._comparison_history: list[ComparisonRecord] = []
+        self._history_index: dict[tuple[str, str], int] = {}
 
     # ==================================================================
     # Public accessors
@@ -297,14 +298,14 @@ class ChainManager:
     def get_bottom_nodes(self) -> list[str]:
         return list(self._bottom_nodes)
 
-    def get_nodes_with_only_wins(self) -> list[str]:
+    def get_nodes_with_only_losses(self) -> list[str]:
         return [
             node
             for node in self._all_filenames
             if self._worse_than[node] == [] and self._better_than[node]
         ]
 
-    def get_nodes_with_only_losses(self) -> list[str]:
+    def get_nodes_with_only_wins(self) -> list[str]:
         return [
             node
             for node in self._all_filenames
@@ -359,6 +360,15 @@ class ChainManager:
 
     def clear_comparison_history(self) -> None:
         self._comparison_history.clear()
+        self._history_index.clear()
+
+    def _reindex_comparison_history(self) -> None:
+        """Point each (winner, loser) at its first entry, matching scan order."""
+        self._history_index.clear()
+        for index, entry in enumerate(self._comparison_history):
+            key = (entry.winner, entry.loser)
+            if key not in self._history_index:
+                self._history_index[key] = index
 
     # ==================================================================
     # Build (full rebuild from comparison list)
@@ -366,7 +376,7 @@ class ChainManager:
 
     def build(
         self,
-        comparisons: list[dict[str, Any]],
+        comparisons: list[ComparisonRow],
         all_filenames: set[str] | None = None,
     ) -> None:
         _start: float = time.perf_counter()
@@ -382,17 +392,18 @@ class ChainManager:
         # Replace history with fresh entries from this build
         self._comparison_history = [
             ComparisonRecord(
-                id=comp["id"] if "id" in comp else index,
+                id=comp.get("id", index),
                 winner=comp["winner"],
                 loser=(
                     comp["filename_b"]
                     if comp["winner"] == comp["filename_a"]
                     else comp["filename_a"]
                 ),
-                timestamp=comp["timestamp"] if "timestamp" in comp else "",
+                timestamp=comp.get("timestamp", ""),
             )
             for index, comp in enumerate(comparisons)
         ]
+        self._reindex_comparison_history()
 
     def link_exists_between(self, first: str, second: str) -> bool:
         return first in self._worse_than[second] or second in self._worse_than[first]
@@ -406,7 +417,7 @@ class ChainManager:
         self._worse_than.clear()
         self._adjacency.clear()
 
-    def _build_from_comparisons(self, comparisons: list[dict[str, Any]]) -> set[str]:
+    def _build_from_comparisons(self, comparisons: list[ComparisonRow]) -> set[str]:
         graph_filenames: set[str] = set()
         with tqdm(
             total=len(comparisons),
@@ -429,7 +440,7 @@ class ChainManager:
     # Incremental update (single comparison, no DB)
     # ==================================================================
 
-    def apply_comparison(self, winner: str, loser: str) -> None:
+    def apply_comparison(self, winner: str, loser: str) -> ComparisonRecord:
         self._all_filenames.update([winner, loser])
 
         add_directed_edge(self._better_than, self._worse_than, winner, loser)
@@ -440,22 +451,25 @@ class ChainManager:
 
         # Record in comparison history (replaces last entry if present)
         ts = datetime.now(timezone.utc).isoformat()
-        for entry in self._comparison_history:
-            if entry.winner == winner and entry.loser == loser:
-                entry.timestamp = ts
-                break
+        key = (winner, loser)
+        existing_index = self._history_index.get(key)
+        if existing_index is not None:
+            record = self._comparison_history[existing_index]
+            record.timestamp = ts
         else:
-            self._comparison_history.append(
-                ComparisonRecord(
-                    id=len(self._comparison_history),
-                    winner=winner,
-                    loser=loser,
-                    timestamp=ts,
-                )
+            record = ComparisonRecord(
+                id=len(self._comparison_history),
+                winner=winner,
+                loser=loser,
+                timestamp=ts,
             )
+            self._history_index[key] = len(self._comparison_history)
+            self._comparison_history.append(record)
 
         self._db_comparison_count += 1
         self._built_at = datetime.now(timezone.utc)
+
+        return record
 
     def _remove_from_bottom_if_not_anymore(self, winner: str) -> None:
         if winner in self._bottom_nodes and self._worse_than[winner]:
@@ -685,23 +699,17 @@ class ChainManager:
                 for loser in self._worse_than.get(n, []):
                     if scc_id_of[loser] == scc_id:
                         internal_pred.setdefault(loser, []).append(n)
-            q: deque[str] = deque(n for n in members if len(downward_chains[n]) > 1)
+            q: deque[str] = deque(
+                n for n in members if self.is_bottom(downward_chains[n][-1])
+            )
+            reached_bottom: set[str] = set(q)
             while q:
                 src = q.popleft()
                 src_path = downward_chains[src]
                 for pred in internal_pred.get(src, []):
-                    if pred in src_path:
-                        cand = [pred, src]
-                    else:
-                        cand = [pred] + src_path
-                    cur = downward_chains[pred]
-                    new_bttm = self.is_bottom(cand[-1])
-                    old_bttm = self.is_bottom(cur[-1])
-                    if new_bttm and not old_bttm:
-                        downward_chains[pred] = cand
-                        q.append(pred)
-                    elif new_bttm == old_bttm and len(cand) > len(cur):
-                        downward_chains[pred] = cand
+                    if pred not in reached_bottom:
+                        reached_bottom.add(pred)
+                        downward_chains[pred] = [pred] + src_path
                         q.append(pred)
         logger.debug(f"Backward dp...", start_timer=_start)
         # 5. Backward DP (single pass on SCC DAG, forward topo order)
@@ -733,28 +741,44 @@ class ChainManager:
                 for beater in self._better_than.get(n, []):
                     if scc_id_of[beater] == scc_id:
                         internal_succ.setdefault(beater, []).append(n)
-            q = deque(n for n in members if len(upward_chains[n]) > 1)
+            q = deque(n for n in members if self.is_top(upward_chains[n][0]))
+            reached_top: set[str] = set(q)
             while q:
                 src = q.popleft()
                 src_path = upward_chains[src]
                 for succ in internal_succ.get(src, []):
-                    if succ in src_path:
-                        cand = [src, succ]
-                    else:
-                        cand = src_path + [succ]
-                    cur = upward_chains[succ]
-                    new_tp = self.is_top(cand[0])
-                    old_tp = self.is_top(cur[0])
-                    if new_tp and not old_tp:
-                        upward_chains[succ] = cand
-                        q.append(succ)
-                    elif new_tp == old_tp and len(cand) > len(cur):
-                        upward_chains[succ] = cand
+                    if succ not in reached_top:
+                        reached_top.add(succ)
+                        upward_chains[succ] = src_path + [succ]
                         q.append(succ)
         logger.debug(f"Building unique chains...", start_timer=_start)
         # Build unique chains and assign main chains
         seen: dict[tuple[str, ...], int] = {}
         next_id: int = 0
+        assigned: set[str] = set()
+
+        for top in self._top_nodes:
+            down_chain = self._dedup_path(downward_chains[top])
+            if down_chain and self.is_bottom(down_chain[-1]):
+                chain_key = tuple(down_chain)
+                if chain_key not in seen:
+                    seen[chain_key] = next_id
+                    self._chains[next_id] = down_chain
+                    next_id += 1
+                chain_id = seen[chain_key]
+                chain_len = len(down_chain)
+                for idx, node in enumerate(down_chain):
+                    if (
+                        len(upward_chains[node]) == idx + 1
+                        and len(downward_chains[node]) == chain_len - idx
+                    ):
+                        self._node_main_chain[node] = (chain_id, down_chain)
+                        self._node_chains[node] = {chain_id: True}
+                        self._node_to_chains.setdefault(node, []).append(
+                            (chain_id, down_chain)
+                        )
+                        assigned.add(node)
+
         with tqdm(
             total=len(self._all_filenames),
             desc="Building main chains",
@@ -763,8 +787,11 @@ class ChainManager:
             mininterval=1.0,
         ) as pbar:
             for n in self._all_filenames:
-                down_chain: list[str] = self._dedup_path(downward_chains[n])
-                up_chain: list[str] = self._dedup_path(upward_chains[n])
+                if n in assigned:
+                    pbar.update(1)
+                    continue
+                down_chain = self._dedup_path(downward_chains[n])
+                up_chain = self._dedup_path(upward_chains[n])
                 if len(up_chain) > 1:
                     prefix: set[str] = set(up_chain[:-1])
                     full: list[str] = up_chain[:-1] + [
@@ -772,12 +799,12 @@ class ChainManager:
                     ]
                 else:
                     full = down_chain
-                chain_key: tuple[str, ...] = tuple(full)
+                chain_key = tuple(full)
                 if chain_key not in seen:
                     seen[chain_key] = next_id
                     self._chains[next_id] = full
                     next_id += 1
-                chain_id: int = seen[chain_key]
+                chain_id = seen[chain_key]
                 self._node_main_chain[n] = (chain_id, full)
                 self._node_chains[n] = {chain_id: True}
                 self._node_to_chains.setdefault(n, []).append((chain_id, full))
@@ -866,7 +893,7 @@ class ChainManager:
         end: str,
     ) -> bool:
         _start = time.perf_counter()
-        max_depth = 1000  # default depth limit for BFS search
+        max_depth = 3  # default depth limit for BFS search
         reject: str | None = self._quick_reject(start, end)
         if reject is not None:
             return False

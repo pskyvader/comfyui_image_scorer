@@ -2,24 +2,31 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from ...core.observability.logger import ModuleLogger, get_logger
+from ...domain.ports.repository import (
+    ImageRow,
+    ImageRowForInsert,
+    RatingStateUpdate,
+)
 from .database import get_db_connection
 
 logger: ModuleLogger = get_logger(__name__)
 
 
-def list_nodes() -> list[dict[str, object]]:
+def list_nodes() -> list[ImageRow]:
     with get_db_connection() as conn:
         rows = conn.execute("SELECT * FROM images").fetchall()
-        return [dict(row) for row in rows]
+        return cast(list[ImageRow], [dict(row) for row in rows])
 
 
-def find_node(filename: str) -> dict[str, object] | None:
+def find_node(filename: str) -> ImageRow | None:
     with get_db_connection() as conn:
         row = conn.execute(
             "SELECT * FROM images WHERE filename = ?", (filename,)
         ).fetchone()
-        return dict(row) if row else None
+        return cast(ImageRow, dict(row)) if row else None
 
 
 def add_image(
@@ -39,6 +46,33 @@ def add_image(
             (filename, score, rating_mu, rating_sigma, comparison_count, prompt_tags),
         )
         conn.commit()
+
+
+def add_images_bulk(rows: list[ImageRowForInsert]) -> int:
+    """Insert many images in one transaction; return the row count."""
+    if not rows:
+        return 0
+    with get_db_connection() as conn:
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO images
+            (filename, score, rating_mu, rating_sigma, comparison_count, prompt_tags)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    str(row["filename"]),
+                    float(row["score"]),
+                    float(row.get("rating_mu", 0.0)),
+                    float(row.get("rating_sigma", 0.0)),
+                    int(row.get("comparison_count", 0)),
+                    row.get("prompt_tags"),
+                )
+                for row in rows
+            ],
+        )
+        conn.commit()
+    return len(rows)
 
 
 def update_image_rating_state(
@@ -101,6 +135,34 @@ def update_image_rating_state(
     return True
 
 
+def update_image_rating_states_bulk(
+    rows: list[RatingStateUpdate],
+) -> int:
+    """Apply many rating updates in one transaction; return the row count."""
+    if not rows:
+        return 0
+    with get_db_connection() as conn:
+        conn.executemany(
+            """
+            UPDATE images
+            SET score=?, rating_mu=?, rating_sigma=?, comparison_count=?
+            WHERE filename=?
+            """,
+            [
+                (
+                    float(score),
+                    float(rating_mu),
+                    float(rating_sigma),
+                    int(comparison_count),
+                    filename,
+                )
+                for filename, score, rating_mu, rating_sigma, comparison_count in rows
+            ],
+        )
+        conn.commit()
+    return len(rows)
+
+
 def update_image_tags(filename: str, prompt_tags: str) -> bool:
     with get_db_connection() as conn:
         conn.execute(
@@ -142,10 +204,10 @@ def reset_all_image_ratings(score: float) -> bool:
 class SQLiteImagesRepository:
     """Injected implementation of the ImageRepository port."""
 
-    def find_node(self, filename: str) -> dict[str, object] | None:
+    def find_node(self, filename: str) -> ImageRow | None:
         return find_node(filename)
 
-    def list_nodes(self) -> list[dict[str, object]]:
+    def list_nodes(self) -> list[ImageRow]:
         return list_nodes()
 
     def get_image_count(self) -> int:
@@ -170,6 +232,14 @@ class SQLiteImagesRepository:
         )
         return True
 
+    def add_images_bulk(self, rows: list[ImageRowForInsert]) -> int:
+        return add_images_bulk(rows)
+
+    def update_image_rating_states_bulk(
+        self, rows: list[RatingStateUpdate]
+    ) -> int:
+        return update_image_rating_states_bulk(rows)
+
     def update_image_rating_state(
         self,
         filename: str,
@@ -190,7 +260,6 @@ class SQLiteImagesRepository:
 
     def update_image_tags(self, filename: str, prompt_tags: str) -> bool:
         return update_image_tags(filename, prompt_tags)
-
     def clear_all_images(self) -> int:
         return clear_all_images()
 

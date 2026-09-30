@@ -1,5 +1,6 @@
 """CLI composition root - builds injected dependencies for the CLI commands."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from ...core.configuration.settings import config
@@ -43,7 +44,7 @@ from ...domain.ports.ml_providers import MediaPipePort
 if config["image_root"] == "":
     from folder_paths import get_output_directory
 
-    config["image_root"] = get_output_directory()
+    config.set_root("image_root", get_output_directory())
 
 
 @dataclass
@@ -61,12 +62,13 @@ class CLIDeps:
     hpo_runner: HpoRunner
     plot_manager: type[PlotManager]
     mediapipe: MediaPipePort
-    vacuum_database: callable
-    deduplicate_scored: callable
-    cleanup_orphans: callable
-    download_configured_models: callable
-    download_mediapipe_models: callable
-    set_hub_offline: callable
+    vacuum_database: Callable[[], None]
+    # Both take an optional root, so they are callable bare or with an argument.
+    deduplicate_scored: Callable[..., int]
+    cleanup_orphans: Callable[..., int]
+    download_configured_models: Callable[[], None]
+    download_mediapipe_models: Callable[[], None]
+    set_hub_offline: Callable[[bool], None]
 
 
 def build_cli_deps() -> CLIDeps:

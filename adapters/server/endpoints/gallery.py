@@ -8,6 +8,7 @@ from typing import Any
 from flask import Blueprint, Flask, jsonify, request
 
 from ....core.observability.logger import get_logger, ModuleLogger
+from ....domain.ports.repository import ImageRow
 from ..deps import ServerDeps, get_server_deps
 
 gallery_bp = Blueprint("gallery_v2", __name__, url_prefix="/api/gallery")
@@ -32,8 +33,8 @@ def list_images():
     tags_query = request.args.get("tags", "").strip().lower()
     search_tags = [tag.strip() for tag in tags_query.split(",")] if tags_query else []
 
-    filtered_and: list[dict[str, Any]] = []
-    filtered_or: list[dict[str, Any]] = []
+    filtered_and: list[ImageRow] = []
+    filtered_or: list[ImageRow] = []
     for node in nodes:
         img = node.data
         if not (score_min <= float(img["score"]) <= score_max):
@@ -54,7 +55,7 @@ def list_images():
 
     sort_by = request.args.get("sort", "score_desc")
 
-    def sort_list(items: list[dict[str, Any]]) -> None:
+    def sort_list(items: list[ImageRow]) -> None:
         if sort_by == "score_asc":
             items.sort(key=lambda item: float(item["score"]))
         elif sort_by == "score_desc":

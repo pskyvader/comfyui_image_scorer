@@ -1,6 +1,9 @@
 from __future__ import annotations
 import os
 import json
+from collections.abc import Callable
+from typing import NotRequired, TypedDict
+
 import numpy as np
 from numpy import typing as npt
 import lightgbm as lgb
@@ -10,29 +13,67 @@ import gc
 from sklearn.preprocessing import PolynomialFeatures
 
 from ...core.observability.logger import get_logger
-from ...core.configuration.settings import config
+from ...core.configuration.settings import config, VectorEntry
 from ...core.filesystem.paths import maps_dir
 from ..analysis.trueskill import (
     public_score_from_rating,
     replay_ratings,
 )
+from ..ports.loading import ModelTrainingService, TrainingLoader
 
 logger = get_logger(__name__)
 
 
-def get_feature_mapping_from_config() -> dict[str, object]:
+class FeatureInfo(TypedDict):
+    """Where one scalar feature sits inside its source vector."""
+
+    vector_name: str
+    position_in_vector: int
+    total_in_vector: int
+
+
+class VectorRange(TypedDict):
+    """Feature index span occupied by one configured vector."""
+
+    start_idx: int
+    end_idx: int
+    slot_size: int
+    type: str
+    per_unit_size: NotRequired[int]
+
+
+class FeatureMapping(TypedDict):
+    """Forward and reverse maps over the configured feature layout."""
+
+    feature_to_vector: dict[int, FeatureInfo]
+    vector_ranges: dict[str, VectorRange]
+    total_features: int
+
+
+class InteractionStats(TypedDict):
+    """Accumulated statistics for the two-pass interaction correlation scan."""
+
+    sum_x: npt.NDArray[np.float64]
+    sum_x_sq: npt.NDArray[np.float64]
+    sum_xy: npt.NDArray[np.float64]
+    sum_y: npt.NDArray[np.float32] | np.float32 | int
+    sum_y_sq: npt.NDArray[np.float32] | np.float32 | int
+    n: int
+
+
+def get_feature_mapping_from_config() -> FeatureMapping:
     """
     Creates a mapping from feature indices to vector names and positions.
     Returns both a forward map (index -> vector info) and reverse map (vector -> indices).
     """
-    feature_to_vector = {}
-    vector_ranges = {}
+    feature_to_vector: dict[int, FeatureInfo] = {}
+    vector_ranges: dict[str, VectorRange] = {}
     current_idx = 0
-    config_vectors: list[dict[str, object]] = config["vector"]["vectors"]
+    config_vectors: list[VectorEntry] = config["vector"]["vectors"]
     for vector_config in config_vectors:
         vec_name = vector_config["name"]
         slot_size = vector_config["slot_size"]
-        entry: dict[str, object] = {
+        entry: VectorRange = {
             "start_idx": current_idx,
             "end_idx": current_idx + slot_size,
             "slot_size": slot_size,
@@ -62,7 +103,7 @@ class DataTransformer:
     poly = PolynomialFeatures(degree=2, include_bias=False, interaction_only=True)
 
     def __init__(
-        self, training_loader: object, model_trainer: object
+        self, training_loader: TrainingLoader, model_trainer: ModelTrainingService
     ) -> None:
         """Data transformer for feature engineering and interaction features.
 
@@ -77,10 +118,10 @@ class DataTransformer:
         self.training_loader = training_loader
         self.model_trainer = model_trainer
         feature_mapping = get_feature_mapping_from_config()
-        self.feature_to_vector: dict[int, dict[str, object]] = feature_mapping[
+        self.feature_to_vector: dict[int, FeatureInfo] = feature_mapping[
             "feature_to_vector"
         ]
-        self.vector_ranges = feature_mapping["vector_ranges"]
+        self.vector_ranges: dict[str, VectorRange] = feature_mapping["vector_ranges"]
 
     def get_raw_data(self) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
         """Return feature vectors and scores as numpy arrays.
@@ -128,7 +169,7 @@ class DataTransformer:
             if row["filename_a"] in kept_filenames
             and row["filename_b"] in kept_filenames
         ]
-        replayed = replay_ratings(subset_rows)
+        replayed = replay_ratings(subset_rows, order="default")
         rule = {
             fid: (public_score_from_rating(rating), count)
             for fid, (rating, count) in replayed.items()
@@ -184,7 +225,7 @@ class DataTransformer:
         assert model is not None
 
         # Setup callbacks for logging
-        callbacks: list[object] = [
+        callbacks: list[Callable[..., None]] = [
             lgb.log_evaluation(period=-1)
         ]  # suppress default logger
         pbar = None
@@ -192,7 +233,7 @@ class DataTransformer:
             # Use tqdm progress bar
             pbar = tqdm(total=steps, desc="Training LightGBM", delay=3.0)
 
-            def pbar_callback(_):
+            def pbar_callback(_: int) -> None:
                 pbar.update(1)
 
             callbacks.append(pbar_callback)
@@ -203,10 +244,10 @@ class DataTransformer:
             pbar.close()
 
         # Get feature importances (gain)
-        importances: np.ndarray = model.feature_importances_
+        importances: npt.NDArray[np.float32] = model.feature_importances_
         n_features = len(importances)
 
-        n_zeros = np.sum(importances == 0)
+        n_zeros = int(np.count_nonzero(importances == 0))
         logger.debug(
             f"Found {n_zeros} features with zero gain out of {n_features} total features."
         )
@@ -245,8 +286,8 @@ class DataTransformer:
         X_batch: npt.NDArray[np.float32],
         y_batch: npt.NDArray[np.float32],
         n_features_in: int,
-accumulators: dict[str, object],
-    ) -> dict[str, object]:
+        accumulators: InteractionStats,
+    ) -> InteractionStats:
         """Compute interaction feature statistics for a batch of data.
 
         Updates accumulators with sum of interaction terms, sum of squares,
@@ -265,7 +306,9 @@ accumulators: dict[str, object],
             Updated accumulators dict with accumulated statistics.
         """
         # Generate Poly
-        X_poly_full: npt.NDArray[np.float32] = self.poly.fit_transform(X_batch)
+        X_poly_full: npt.NDArray[np.float32] = np.asarray(
+            self.poly.fit_transform(X_batch), dtype=np.float32
+        )
         # Extract only interactions
         X_inter_batch = X_poly_full[:, n_features_in:]
         # Stats
@@ -282,7 +325,7 @@ accumulators: dict[str, object],
         return accumulators
 
     def compute_correlations(
-        self, k: int, accumulators: dict[str, object], n_samples: int, dtype: np.dtype
+        self, k: int, accumulators: InteractionStats, n_samples: int, dtype: np.dtype
     ) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.intp]]:
         n = accumulators["n"]
         # Compute Correlations (Pearson)
@@ -326,7 +369,9 @@ accumulators: dict[str, object],
             Array of shape ``(batch_size, n_features_in + k)`` with original
             and selected interaction features concatenated.
         """
-        X_poly_full = self.poly.fit_transform(X_batch)
+        X_poly_full: npt.NDArray[np.float32] = np.asarray(
+            self.poly.fit_transform(X_batch), dtype=np.float32
+        )
         current_interactions = X_poly_full[:, n_features_in:][:, top_k_indices_local]
         del X_poly_full
         gc.collect()
@@ -360,7 +405,7 @@ accumulators: dict[str, object],
         n_interactions = (n_features_in * (n_features_in - 1)) // 2
 
         if n_interactions == 0:
-            return x, np.array([])
+            return x, np.array([], dtype=np.intp)
 
         # Batch Size Calculation (Target 1GB)
         BATCH_MEMORY_TARGET = 8 * 1024**3
@@ -375,7 +420,7 @@ accumulators: dict[str, object],
 
         # Accumulators for correlation calculation
 
-        accumulators: dict[str, object] = {
+        accumulators: InteractionStats = {
             "sum_x": np.zeros(n_interactions),
             "sum_x_sq": np.zeros(n_interactions),
             "sum_xy": np.zeros(n_interactions),
@@ -465,8 +510,8 @@ accumulators: dict[str, object],
             raise FileNotFoundError("Interaction data not found, must generate first")
 
         vecs_np = np.array(vecs)  # shape: (batch_size, feature_dim)
-        poly_features = self.poly.fit_transform(
-            vecs_np
+        poly_features: npt.NDArray[np.float32] = np.asarray(
+            self.poly.fit_transform(vecs_np), dtype=np.float32
         )  # shape: (batch_size, n_poly_features)
 
         n_features_in = vecs_np.shape[1]
@@ -561,7 +606,7 @@ def _print_vector_summary(
         # Multi-slot vector (position / keypoint / person_map) broken down per unit
         n_units = slot_size // per_unit_size
         local_kept = [i - start_idx for i in kept_in_vec]
-        unit_labels_fn = None
+        unit_labels_fn: Callable[[int], str] | None = None
         if vec_name == "bbox":
             unit_labels_fn = lambda upos: _label_position_slot(upos)
         elif vec_type == "keypoint":
@@ -582,7 +627,7 @@ def _print_vector_summary(
                     logger.info("    unit %d: kept(%s)", ui, ", ".join(labels))
                 elif n_units > 1:
                     pass  # skip units with nothing kept
-            if kept_count == 0 and n_units == 1 and unit_labels_fn:
+            if kept_count == 0 and n_units == 1:
                 all_labels = [unit_labels_fn(p) for p in range(per_unit_size)]
                 logger.info("    Sub-features: %s", ", ".join(all_labels))
         return

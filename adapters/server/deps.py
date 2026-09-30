@@ -28,7 +28,6 @@ class ServerDeps:
     """Dependency container for endpoints; superset of CLIDeps via to_cli_deps()."""
 
     path_resolver: PathResolver
-    path_ops: FileManager
     graph: CrystalGraph
     processor: ImageProcessor
     model_loader: ModelLoader
@@ -39,6 +38,7 @@ class ServerDeps:
     cache: CacheProvider
     hpo_runner: HpoRunner
     plot_manager: type[PlotManager]
+
     mediapipe: MediaPipePort
     vacuum_database: Callable[..., None]
     deduplicate_scored: Callable[..., int]

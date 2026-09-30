@@ -66,7 +66,13 @@ def get_graph_data():
                 {
                     "id": chain_proxy.id,
                     "component": comp.id if comp else None,
-                    "nodes": [n.filename for n in chain_proxy.nodes],
+                    "nodes": [
+                        (
+                            n.filename,
+                            n.get_chain(only_main=True)[0].id == chain_proxy.id,
+                        )
+                        for n in chain_proxy.nodes
+                    ],  # list(filename,is_main)
                 }
             )
 

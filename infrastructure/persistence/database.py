@@ -4,6 +4,7 @@ from __future__ import annotations
 import inspect
 import os
 import sqlite3
+import time
 from pathlib import Path
 
 from ...core.filesystem.paths import cache_file
@@ -150,10 +151,11 @@ def _set_meta_value(key: str, value: str) -> None:
 
 
 def vacuum_database() -> None:
+    _start = time.perf_counter()
     with get_db_connection() as conn:
         conn.execute("VACUUM")
         conn.commit()
-    logger.info("Database vacuumed")
+    logger.info("Database vacuumed", start_timer=_start)
 
 
 init_database()

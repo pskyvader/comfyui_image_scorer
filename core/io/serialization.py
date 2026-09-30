@@ -40,12 +40,16 @@ def write_single_jsonl(filename: str, data: list[Any], mode: str) -> None:
 
 
 def discover_files(root: str) -> Iterator[tuple[str, str]]:
-    _start = time.perf_counter()
-    total_files = 0
-    for dirpath, _, files in os.walk(root):
+    """Yield (image, companion json) pairs in a stable, sorted order.
+
+    os.walk yields entries in filesystem order, which changes whenever files
+    are created, moved or renamed. Callers persist and replay these in the
+    order they arrive, so the traversal must be sorted to stay reproducible.
+    """
+    for dirpath, dirs, files in os.walk(root):
+        dirs.sort()
         file_set = set(files)
-        total_files += len(files)
-        for f in files:
+        for f in sorted(files):
             if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
                 base = f.rsplit(".", 1)[0]
                 json_name = base + ".json"
@@ -92,27 +96,33 @@ def collect_valid_files(
     max_workers: int,
     scored_only: bool,
 ) -> list[tuple[str, dict[str, Any], str, str]]:
-    collected_data: list[tuple[str, dict[str, Any], str, str]] = []
+    file_list = list(files)
+    collected: list[tuple[str, dict[str, Any], str, str] | None] = [None] * len(
+        file_list
+    )
+    if not file_list:
+        return []
 
-    if files:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(collect_single_file, file) for file in files
-            ]
-            # total=len(files)
-            with tqdm(desc="Collecting", unit=" files", delay=3.0) as pbar:
-                for future in as_completed(futures):
-                    result = future.result()
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(collect_single_file, file): index
+            for index, file in enumerate(file_list)
+        }
+        with tqdm(
+            total=len(file_list), desc="Collecting", unit=" files", delay=3.0
+        ) as pbar:
+            for future in as_completed(futures):
+                result = future.result()
 
-                    pbar.update(1)
-                    if result is None:
-                        continue
-                    if scored_only and ("score" not in result[1]):
-                        continue
+                pbar.update(1)
+                if result is None:
+                    continue
+                if scored_only and ("score" not in result[1]):
+                    continue
 
-                    collected_data.append(result)
+                collected[futures[future]] = result
 
-    return collected_data
+    return [entry for entry in collected if entry is not None]
 
 
 def _recursive_parse_json(obj: Any, path: str | None) -> Any:
@@ -211,7 +221,7 @@ def clean_json_metadata(
         "rating_sigma",
     }
 
-    if not isinstance(json_data, dict) or not json_data:
+    if not json_data:
         base: dict[str, Any] = {}
     else:
         if len(json_data) == 1:

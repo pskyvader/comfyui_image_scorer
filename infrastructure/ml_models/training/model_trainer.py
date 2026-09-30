@@ -416,17 +416,12 @@ class ModelTrainer:
                 "callbacks": self.callbacks,
             }
 
-            if self.training_model is None:
-                raise RuntimeError("Training model was not created")
             logger.debug("beginning training...")
             self.training_model.fit(
                 **parameters,
                 group=group_train,
                 eval_group=[group_train, group_test],
             )
-
-            if self.training_model is None:
-                raise RuntimeError("Training failed")
 
             if self.user_verbosity >= 0:
                 progress_bar.close()
@@ -527,9 +522,6 @@ class ModelTrainer:
                 )
             else:
                 self.training_model.fit(**parameters)
-
-            if self.training_model is None:
-                raise RuntimeError("Training failed")
 
             if self.user_verbosity >= 0:
                 progress_bar.close()

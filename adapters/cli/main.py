@@ -21,7 +21,7 @@ class _SubParsers(Protocol):
     def add_parser(self, name: str, **kwargs: Any) -> argparse.ArgumentParser: ...
 
 
-def _add_server_parser(
+def add_server_parser(
     subparsers: _SubParsers,
 ) -> argparse.ArgumentParser:
     server_parser: argparse.ArgumentParser = subparsers.add_parser(
@@ -34,7 +34,7 @@ def _add_server_parser(
     return server_parser
 
 
-def _add_training_parser(
+def add_training_parser(
     subparsers: _SubParsers,
 ) -> argparse.ArgumentParser:
     training_parser: argparse.ArgumentParser = subparsers.add_parser(
@@ -69,7 +69,7 @@ def _add_training_parser(
     return training_parser
 
 
-def _add_build_parser(
+def add_build_parser(
     subparsers: _SubParsers,
 ) -> argparse.ArgumentParser:
     build_parser: argparse.ArgumentParser = subparsers.add_parser(
@@ -114,7 +114,7 @@ def _add_build_parser(
     return build_parser
 
 
-def _add_database_parser(
+def add_database_parser(
     subparsers: _SubParsers,
 ) -> argparse.ArgumentParser:
     database_parser: argparse.ArgumentParser = subparsers.add_parser(
@@ -139,7 +139,7 @@ def _add_database_parser(
     return database_parser
 
 
-def _add_files_parser(
+def add_files_parser(
     subparsers: _SubParsers,
 ) -> tuple[
     argparse.ArgumentParser,
@@ -184,7 +184,7 @@ def _add_files_parser(
     return files_parser, remove, download
 
 
-def _add_analyze_parser(
+def add_analyze_parser(
     subparsers: _SubParsers,
 ) -> argparse.ArgumentParser:
     analyze_parser: argparse.ArgumentParser = subparsers.add_parser(
@@ -218,17 +218,17 @@ def main() -> int:
 
     subparsers: _SubParsers = parser.add_subparsers(dest="command")
 
-    _add_server_parser(subparsers)
-    training_parser: argparse.ArgumentParser = _add_training_parser(subparsers)
-    build_parser: argparse.ArgumentParser = _add_build_parser(subparsers)
-    database_parser: argparse.ArgumentParser = _add_database_parser(subparsers)
+    add_server_parser(subparsers)
+    training_parser: argparse.ArgumentParser = add_training_parser(subparsers)
+    build_parser: argparse.ArgumentParser = add_build_parser(subparsers)
+    database_parser: argparse.ArgumentParser = add_database_parser(subparsers)
     files_parser: argparse.ArgumentParser
     files_remove_parser: argparse.ArgumentParser
     files_download_parser: argparse.ArgumentParser
-    files_parser, files_remove_parser, files_download_parser = _add_files_parser(
+    files_parser, files_remove_parser, files_download_parser = add_files_parser(
         subparsers
     )
-    analyze_parser: argparse.ArgumentParser = _add_analyze_parser(subparsers)
+    analyze_parser: argparse.ArgumentParser = add_analyze_parser(subparsers)
 
     args: argparse.Namespace = parser.parse_args()
 

@@ -9,7 +9,7 @@ import torch
 import warnings
 from PIL.Image import Image
 
-from ...core.configuration.settings import config
+from ...core.configuration.settings import config, ImageVectorEntry
 from ...domain.analysis.image_analysis import ImageAnalysis
 from ...domain.vectors.image_vector import ImageVector
 from ...domain.data_transformation.data_transformer import DataTransformer
@@ -20,12 +20,13 @@ from ...domain.training.calibration import (
 from ...domain.ports.loading import (
     ModelLoader,
     MapsProvider,
+    ModelTrainingService,
+    ScoringModel,
     TrainingLoader,
     BatchSizerFactory,
 )
 from ...domain.ports.cache import CacheProvider
 from ...domain.ports.ml_providers import MediaPipePort
-from ...infrastructure.ml_models.training.model_trainer import ModelTrainer
 
 from .vector_list import VectorList
 
@@ -38,7 +39,7 @@ class ScoringService:
         model_loader: ModelLoader,
         batch_sizer: BatchSizerFactory,
         training_loader: TrainingLoader,
-        model_trainer: ModelTrainer,
+        model_trainer: ModelTrainingService,
         maps_provider: MapsProvider,
         cache: CacheProvider,
         mediapipe: MediaPipePort,
@@ -127,14 +128,18 @@ class ScoringService:
         )
         vector_list.create_vectors()
 
-        vector_config = config["vector"]["vectors"]
-        for entry in (v for v in vector_config if v["type"] == "image"):
-            name = entry["name"]
-            model_key = entry["model_key"]
+        image_entries: list[ImageVectorEntry] = [
+            vector_entry
+            for vector_entry in config["vector"]["vectors"]
+            if vector_entry["type"] == "image"
+        ]
+        for vector_entry in image_entries:
+            name = vector_entry["name"]
+            model_key = vector_entry["model_key"]
             image_vector = ImageVector(
                 name,
                 model_key=model_key,
-                slot_size=entry["slot_size"],
+                slot_size=vector_entry["slot_size"],
                 model_loader=self._model_loader,
                 batch_sizer_factory=self._batch_sizer,
             )
@@ -191,16 +196,14 @@ class ScoringService:
             self._export_batch(selected_images),
             self._export_batch(discarded_images),
             len(selected_images) > 0,
-            all_scores,
+            all_scores.tolist(),
         )
 
     def _predict_scores(
-        self, model: object, filtered_vectors: list[np.ndarray]
+        self, model: ScoringModel, filtered_vectors: list[np.ndarray]
     ) -> np.ndarray:
         features = np.asarray(filtered_vectors, dtype=np.float32)
-        objective = None
-        if hasattr(model, "get_params"):
-            objective = model.get_params().get("objective")
+        objective = model.get_params().get("objective")
 
         with warnings.catch_warnings():
             warnings.filterwarnings(

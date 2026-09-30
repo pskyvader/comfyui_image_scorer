@@ -223,20 +223,20 @@ class PlotManager:
             )
         if metrics is not None:
             if objective == "lambdarank":
-                if "pairwise_accuracy" in metrics:
+                if hasattr(metrics, "pairwise_accuracy") and metrics.pairwise_accuracy is not None:
                     logger.info(
                         "Stored metrics: pairwise_accuracy=%.4f",
-                        float(metrics["pairwise_accuracy"]),
+                        float(metrics.pairwise_accuracy),
                     )
                 if (
-                    "score" in metrics
-                    and "primary_metric" in metrics
-                    and metrics["primary_metric"] != "pairwise_accuracy"
+                    hasattr(metrics, "score")
+                    and hasattr(metrics, "primary_metric")
+                    and metrics.primary_metric != "pairwise_accuracy"
                 ):
                     logger.info(
                         "Stored metrics: %s=%.4f",
-                        metrics["primary_metric"],
-                        float(metrics["score"]),
+                        metrics.primary_metric,
+                        float(metrics.score),
                     )
             elif "r2" in metrics:
                 logger.info("Stored metrics: r2=%.4f", float(metrics["r2"]))
@@ -258,10 +258,6 @@ class PlotManager:
         x_sample = x[indices]
         y_sample = y[indices]
         model = training_loader.load_training_model()
-
-        if model is None:
-            logger.warning("No trained model found. Skipping comparison.")
-            return
 
         with warnings.catch_warnings():
             warnings.filterwarnings(
@@ -351,7 +347,6 @@ class PlotManager:
         result_metrics: dict[str, Any] | None = None,
         save_path: str | None = None,
         show: bool = True,
-        training_loader: TrainingLoader | None = None,
     ) -> None:
         curves = None
 
@@ -361,11 +356,6 @@ class PlotManager:
             and result_metrics["curves"] is not None
         ):
             curves = result_metrics["curves"]
-
-        if curves is None and training_loader is not None:
-            data = training_loader.load_training_model_diagnostics()
-            if data is not None and "curves" in data:
-                curves = data["curves"]
 
         if curves is None:
             logger.info("No curves available to plot.")
@@ -417,7 +407,7 @@ class PlotManager:
 
         y_classes = np.digitize(y_plot, bins=np.arange(0, 1.01, 0.1), right=False)
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+        _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
         ax1.hist(y_plot, bins=50, alpha=0.7, edgecolor="black")
         ax1.set_xlabel("Score")
         ax1.set_ylabel("Frequency")
@@ -487,7 +477,7 @@ class PlotManager:
 
     @staticmethod
     def plot_discrete_analysis(
-        data_dict: dict[str, dict[str | int, list[float]]],
+        data_dict: dict[str, dict[int, list[float]]],
         group_name: str,
         x_label: str,
         y_label: str,
@@ -504,7 +494,8 @@ class PlotManager:
         for i, title in enumerate(titles):
             ax = axes.flat[i]
             inner_dict = data_dict[title]
-            x_coords, y_coords = [], []
+            x_coords: list[float] = []
+            y_coords: list[float] = []
             for x_val, y_list in inner_dict.items():
                 for y_val in y_list:
                     x_coords.append(x_val)
@@ -649,8 +640,10 @@ class PlotManager:
                 bin_centers = unique_x
                 bin_indices = np.searchsorted(unique_x, x_raw) + 1
 
-            means, stds, counts = [], [], []
-            actual_centers = []
+            means: list[float] = []
+            stds: list[float] = []
+            counts: list[int] = []
+            actual_centers: list[float] = []
 
             for b_idx in range(1, len(bin_centers) + 1):
                 mask = bin_indices == b_idx
@@ -663,10 +656,10 @@ class PlotManager:
                 counts.append(len(group_y))
                 actual_centers.append(bin_centers[b_idx - 1])
 
-            counts = np.array(counts)
+            counts_array = np.array(counts)
             if len(actual_centers) > 1:
                 max_width = (actual_centers[1] - actual_centers[0]) * 0.8
-                widths = (counts / counts.max()) * max_width
+                widths = (counts_array / counts_array.max()) * max_width
             else:
                 widths = [0.5]
 
@@ -812,9 +805,9 @@ class PlotManager:
             d = outer[next(iter(outer))]
             s = float(scores[i])
 
-            age_list = d.get("age") or []
-            gender_list = d.get("gender") or []
-            race_list = d.get("race") or []
+            age_list: list[dict[str, Any]] = d.get("age") or []
+            gender_list: list[dict[str, Any]] = d.get("gender") or []
+            race_list: list[dict[str, Any]] = d.get("race") or []
             if age_list and gender_list and race_list:
                 age0 = age_list[0]
                 gender0 = gender_list[0]
@@ -828,7 +821,7 @@ class PlotManager:
                     row[f"race_{lbl}"] = float(race0.get(lbl, 0.0))
                 face_logit_rows.append(row)
 
-            bbox = d.get("bbox") or []
+            bbox: list[dict[str, Any]] = d.get("bbox") or []
             if bbox:
                 b = bbox[0]
                 bbox_rows.append(

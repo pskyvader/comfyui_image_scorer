@@ -6,7 +6,6 @@ performance test for large linear chains that scales via DATASET_SIZE.
 
 import logging
 import time
-import pytest
 import tqdm
 from ..chain_manager import ChainManager
 from ....core.observability.logger import (
@@ -14,6 +13,7 @@ from ....core.observability.logger import (
     configure_package_logging,
     ModuleLogger,
 )
+from ....domain.ports.repository import ComparisonRow
 
 configure_package_logging(logging.DEBUG)
 logger: ModuleLogger = get_logger(__name__)
@@ -24,7 +24,7 @@ DATASET_SIZE = 30000
 
 
 def _build_manager(
-    comparisons: list[dict],
+    comparisons: list[ComparisonRow],
     all_filenames: set[str] | None = None,
 ) -> ChainManager:
     cm = ChainManager()
@@ -32,7 +32,7 @@ def _build_manager(
     return cm
 
 
-def _load_real_data() -> tuple[list[dict], set[str]]:
+def _load_real_data() -> tuple[list[ComparisonRow], set[str]]:
     """Load real comparison data from the database."""
     from comfyui_image_scorer.infrastructure.persistence.images_repository import (
         list_nodes,
@@ -47,12 +47,18 @@ def _load_real_data() -> tuple[list[dict], set[str]]:
     return comparisons, all_filenames
 
 
+def _main_chain(cm: ChainManager, node_id: str) -> list[str]:
+    entry = cm.get_node_main_chain(node_id)
+    assert entry is not None, f"{node_id} is not part of any built chain"
+    return entry[1]
+
+
 def test_bottom_nodes_are_chain_last() -> None:
     """Strictly assert that chains always start at tops and end at bottoms."""
     logger.debug("Starting test_bottom_nodes_are_chain_last...")
 
     images = ["a", "b", "c", "d"]
-    comparisons = [
+    comparisons: list[ComparisonRow] = [
         {"filename_a": "a", "filename_b": "b", "winner": "a"},
         {"filename_a": "b", "filename_b": "c", "winner": "b"},
         {"filename_a": "c", "filename_b": "d", "winner": "c"},
@@ -86,12 +92,12 @@ def test_performance_on_large_chains() -> None:
     logger.debug("Starting test_performance_on_large_chains...")
     cm = ChainManager()
 
-    all_real_comparisons = [
+    all_real_comparisons: list[ComparisonRow] = [
         {"filename_a": f"img_{i}", "filename_b": f"img_{i + 1}", "winner": f"img_{i}"}
         for i in range(DATASET_SIZE)
     ]
 
-    comparisons = []
+    comparisons: list[ComparisonRow] = []
     with tqdm.tqdm(
         all_real_comparisons, desc="TEST: Filtering comparisons", delay=3.0
     ) as pbar:
@@ -119,7 +125,7 @@ def test_cycles_do_not_prevent_bottom_reachability() -> None:
     logger.debug("Starting test_cycles_do_not_prevent_bottom_reachability...")
     cm = ChainManager()
 
-    comparisons = [
+    comparisons: list[ComparisonRow] = [
         {"filename_a": "a", "filename_b": "b", "winner": "a"},
         {"filename_a": "b", "filename_b": "c", "winner": "b"},
         {"filename_a": "c", "filename_b": "a", "winner": "c"},  # cycle a>b>c>a
@@ -133,7 +139,7 @@ def test_cycles_do_not_prevent_bottom_reachability() -> None:
     cm.build(comparisons)
 
     chains = cm.get_chains()
-    for chain_id, chain in chains.items():
+    for _chain_id, chain in chains.items():
         # Every chain built MUST end at 'd', because 'd' is the only absolute bottom!
         assert (
             chain[-1] == "d"
@@ -145,7 +151,7 @@ def test_transitive_reduction_sorting() -> None:
     logger.debug("Starting test_transitive_reduction_sorting...")
     cm = ChainManager()
 
-    comparisons = [
+    comparisons: list[ComparisonRow] = [
         {"filename_a": "a", "filename_b": "b", "winner": "a"},
         {"filename_a": "b", "filename_b": "c", "winner": "b"},
         {"filename_a": "a", "filename_b": "c", "winner": "a"},  # Transitive edge
@@ -165,7 +171,7 @@ def test_uncompared_nodes_are_isolated_top_bottom() -> None:
     logger.debug("Starting test_uncompared_nodes_are_isolated_top_bottom...")
     cm = ChainManager()
 
-    comparisons = [
+    comparisons: list[ComparisonRow] = [
         {"filename_a": "a", "filename_b": "b", "winner": "a"},
     ]
     all_filenames = {"a", "b", "isolated_1", "isolated_2"}
@@ -193,7 +199,7 @@ def test_top_bottom_match_database_exactly() -> None:
     logger.debug("Starting test_top_bottom_match_database_exactly...")
 
     images = ["a", "b", "c", "d"]
-    comparisons = [
+    comparisons: list[ComparisonRow] = [
         {"filename_a": "a", "filename_b": "b", "winner": "a"},
         {"filename_a": "b", "filename_b": "c", "winner": "b"},
         {"filename_a": "c", "filename_b": "d", "winner": "c"},
@@ -210,7 +216,7 @@ def test_top_bottom_match_database_exactly() -> None:
 
 def test_chain_snapshot_matches_known_optimal() -> None:
     """Design a DAG with unambiguous optimal chains and assert exact output."""
-    comparisons = [
+    comparisons: list[ComparisonRow] = [
         # Independent chain of 4: a1 > a2 > a3 > a4
         {"filename_a": "a1", "filename_b": "a2", "winner": "a1"},
         {"filename_a": "a2", "filename_b": "a3", "winner": "a2"},
@@ -225,18 +231,34 @@ def test_chain_snapshot_matches_known_optimal() -> None:
 
     # The current algorithm merges upward and downward chains, so every
     # node on a chain gets the full path from top to bottom.
-    assert cm.get_node_main_chain("a1")[1] == ["a1", "a2", "a3", "a4"]
-    assert cm.get_node_main_chain("a2")[1] == ["a1", "a2", "a3", "a4"]
-    assert cm.get_node_main_chain("a3")[1] == ["a1", "a2", "a3", "a4"]
-    assert cm.get_node_main_chain("a4")[1] == ["a1", "a2", "a3", "a4"]
+    assert _main_chain(cm, "a1") == ["a1", "a2", "a3", "a4"]
+    assert _main_chain(cm, "a2") == ["a1", "a2", "a3", "a4"]
+    assert _main_chain(cm, "a3") == ["a1", "a2", "a3", "a4"]
+    assert _main_chain(cm, "a4") == ["a1", "a2", "a3", "a4"]
 
-    assert cm.get_node_main_chain("b1")[1] == ["b1", "b2", "b3"]
-    assert cm.get_node_main_chain("b2")[1] == ["b1", "b2", "b3"]
-    assert cm.get_node_main_chain("b3")[1] == ["b1", "b2", "b3"]
+    assert _main_chain(cm, "b1") == ["b1", "b2", "b3"]
+    assert _main_chain(cm, "b2") == ["b1", "b2", "b3"]
+    assert _main_chain(cm, "b3") == ["b1", "b2", "b3"]
 
     # Exactly 2 unique chains
     chain_tuples = {tuple(c) for c in cm.get_chains().values()}
     assert chain_tuples == {("a1", "a2", "a3", "a4"), ("b1", "b2", "b3")}
+
+
+def test_apply_comparison_returns_the_record_it_touched() -> None:
+    """Re-applying a pair must return that pair's record, not the newest one."""
+    cm = ChainManager()
+    cm.build([], all_filenames={"a", "b", "c"})
+
+    first = cm.apply_comparison("a", "b")
+    cm.apply_comparison("b", "c")
+    repeat = cm.apply_comparison("a", "b")
+
+    history = cm.get_comparison_history()
+    assert (repeat.winner, repeat.loser) == ("a", "b")
+    assert repeat is history[0]
+    assert first is history[0]
+    assert len(history) == 2
 
 
 def test_real_data_performance() -> None:

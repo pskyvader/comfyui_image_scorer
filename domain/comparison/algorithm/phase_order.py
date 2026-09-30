@@ -24,7 +24,9 @@ from .pair_active import (
 )
 from ....domain.ports.graph import CrystalGraphPort
 
-from .graph_helpers import pair_key, stable_seed_pool
+from ...comparison.algorithm.history_collapse import canonicalize_pair
+
+from .graph_helpers import stable_seed_pool
 from ...graph.node_proxy import NodeProxy
 
 logger: ModuleLogger = get_logger(__name__)
@@ -129,7 +131,7 @@ def select_pair(
     existing_pairs_set: set[tuple[str, str]] = cg.get_existing_pairs()
     if len(existing_pairs_set) == 0:
         existing_pairs_set = {
-            pair_key(link.winner, link.loser) for link in cg.get_all_links()
+            canonicalize_pair(link.winner, link.loser) for link in cg.get_all_links()
         }
         cg.set_existing_pairs(existing_pairs_set)
     logger.debug(f"existing pairs: {len(existing_pairs_set)}", start_timer=_start)
@@ -185,9 +187,9 @@ def select_pair(
         elif name == "collapsible":
             result = fn(candidate_nodes, cg)
         elif name == "single_win_loss":
-            result = fn(candidate_nodes, cg)
+            result = fn(candidate_nodes, existing_pairs_set)
         elif name == "refine":
-            result = fn(candidate_nodes, existing_pairs_set, cg)
+            result = fn(candidate_nodes, seed_pool_set, existing_pairs_set, cg)
         elif name == "chain_merge":
             result = fn(candidate_nodes, cg)
         elif name == "fallback":

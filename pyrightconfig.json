@@ -2,6 +2,10 @@
     "typeCheckingMode": "strict",
     "reportMissingTypeStubs": false,
     "reportPrivateImportUsage": false,
+    // Private *member* access is enforced by `ruff check --select SLF001`
+    // instead, because SLF001 understands `# noqa` and pyright does not. The
+    // only remaining uses are stdlib internals in core/observability/logger.py.
+    "reportPrivateUsage": "none",
     "exclude": [
         "comfyui_image_scorer_old",
         "infrastructure/**/*.pyi"

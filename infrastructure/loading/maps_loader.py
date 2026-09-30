@@ -46,7 +46,7 @@ ANALYSIS_CATEGORIES = [
 
 class MapsLoader:
     def __init__(self):
-        self.mapping: dict[str,list[str]] = {
+        self.mapping: dict[str, list[str]] = {
             "sampler": [],
             "scheduler": [],
             "model": [],
@@ -65,7 +65,9 @@ class MapsLoader:
 
     def get_all_categories(self, name: str) -> list[str]:
         if name not in self.mapping:
-            logger.warning(f"Map '{name}' has no registered categories; returning empty list")
+            logger.warning(
+                f"Map '{name}' has no registered categories; returning empty list"
+            )
             return []
         return list(self.mapping[name])
 
@@ -112,7 +114,7 @@ class MapsLoader:
                 [1]: total length of the map
         """
         current_map = self.mapping[name]
-        
+
         max_slots = 100
         if len(current_map) + 1 > int(max_slots):
             raise OverflowError(f"Map {name} overflowed, max slots {max_slots} reached")
@@ -120,7 +122,7 @@ class MapsLoader:
         key = (value or "").strip()
         current_map.append(key)
         self._save_single_map(name)
-        return CategoryValue(count=len(current_map) - 1, value=len(current_map))
+        return CategoryValue(c=len(current_map) - 1, value=len(current_map))
 
     def get_value(self, name: str, value: str) -> CategoryValue:
         """get a value from the current map
@@ -140,8 +142,12 @@ class MapsLoader:
         current_map = self.mapping[name]
         key = (value).strip()
         if key == "":
-            return 0, len(current_map)
-        return CategoryValue(count=current_map.index(key), value=len(current_map)) if key in current_map else CategoryValue(count=-1, value=len(current_map))
+            return CategoryValue(c=0, value=len(current_map))
+        return (
+            CategoryValue(c=current_map.index(key), value=len(current_map))
+            if key in current_map
+            else CategoryValue(c=-1, value=len(current_map))
+        )
 
     def _save_single_map(self, name: str) -> None:
         current_map = self.mapping[name]
@@ -166,8 +172,8 @@ class MapsLoader:
 
     def load_maps(self) -> dict[str, list[str]]:
         for key in self.mapping.keys():
-            if len(self.mapping[key])==0:
-                self.mapping[key]=self._load_single_map(key)
+            if len(self.mapping[key]) == 0:
+                self.mapping[key] = self._load_single_map(key)
         return self.mapping
 
 

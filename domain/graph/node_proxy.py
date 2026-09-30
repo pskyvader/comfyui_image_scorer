@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from .chain_manager import ChainManager
@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 from . import chain_proxy as _chain_proxy
 from . import component_proxy as _component_proxy
 from ..analysis.trueskill import Rating, trueskill_score_from_rating
+from ..ports.repository import ImageRow
 
 
 class NodeProxy:
@@ -19,11 +20,11 @@ class NodeProxy:
         self,
         chain: ChainManager,
         node_id: str,
-        image_data: dict[str, object] | None = None,
+        image_data: ImageRow | None = None,
     ) -> None:
         self._chain: ChainManager = chain
         self._node_id: str = node_id
-        self._image_data: dict[str, object] = image_data or {}
+        self._image_data: ImageRow = image_data or cast(ImageRow, {})
 
     @property
     def id(self) -> str:
@@ -80,9 +81,9 @@ class NodeProxy:
         return self._image_data.get("last_compared_at")
 
     @property
-    def data(self) -> dict[str, object]:
+    def data(self) -> ImageRow:
         """Return the persisted image fields for adapter serialization."""
-        return dict(self._image_data, filename=self._node_id)
+        return cast(ImageRow, dict(self._image_data, filename=self._node_id))
 
     def is_top(self) -> bool:
         return self._chain.is_top(self._node_id)

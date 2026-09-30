@@ -13,7 +13,7 @@ import hashlib
 import logging
 import os
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -39,46 +39,50 @@ def _md5(path: Path) -> str:
 def _merge_comparison_histories(
     keeper: JsonDict, discard: list[JsonDict], filename: str
 ) -> None:
-    seen_ids: set[int] = set()
+    def entry_key(entry: JsonDict) -> tuple[str, bool, str]:
+        return (
+            str(entry.get("other", "")),
+            bool(entry.get("winner", False)),
+            str(entry.get("timestamp", "")),
+        )
+
+    seen: set[tuple[str, bool, str]] = set()
     merged: list[JsonDict] = []
 
     for entry in keeper.get("comparison_history", []):
-        cid: Any = entry.get("comparison_id")
-        if cid is not None:
-            seen_ids.add(cid)
+        seen.add(entry_key(entry))
         merged.append(entry)
 
     added = 0
     for old in discard:
         for entry in old.get("comparison_history", []):
-            cid = entry.get("comparison_id")
-            if cid is not None and cid not in seen_ids:
-                seen_ids.add(cid)
+            key = entry_key(entry)
+            if key not in seen:
+                seen.add(key)
                 merged.append(entry)
                 added += 1
 
-    merged.sort(
-        key=lambda e: (safe_parse_timestamp(e.get("timestamp"))[1], e.get("comparison_id") or 0)
-    )
+    merged.sort(key=lambda e: safe_parse_timestamp(e.get("timestamp"))[1])
     keeper["comparison_history"] = merged
     keeper["comparison_count"] = len(merged)
     if added:
         logger.info(
-            "Merged %d new comparison(s) from older copies of %s", added, filename
+            f"Merged {added} new comparison(s) from older copies of {filename}"
         )
 
 
 def deduplicate_scored(
     root: Path | None = None,
 ) -> int:
+    _start = time.perf_counter()
     if root is None:
         root = Path(_img_root)
 
     if not root.exists():
-        logger.warning("Scored root does not exist: %s", root)
+        logger.warning(f"Scored root does not exist: {root}")
         return 0
 
-    logger.debug("deduplicating entries...")
+    logger.debug("deduplicating entries...", start_timer=_start)
     file_pairs: list[tuple[str, str]] = list(discover_files(str(root)))
 
     def _scan_worker(
@@ -114,7 +118,10 @@ def deduplicate_scored(
     examples: list[str] = []
 
     if duplicates:
-        logger.info("Found %d duplicate basename(s) to resolve", len(duplicates))
+        logger.info(
+            f"Found {len(duplicates)} duplicate basename(s) to resolve",
+            start_timer=_start,
+        )
 
         for basename, items in tqdm(sorted(duplicates.items()), desc="Resolving duplicates", unit="group", delay=3.0):
             md5_groups: dict[str, list[EntryTriple]] = defaultdict(list)
@@ -169,8 +176,8 @@ def deduplicate_scored(
 
                     if new_jf.exists() or new_img.exists():
                         logger.warning(
-                            "Cannot rename %s -> %s, target already exists",
-                            jf.name, new_jf.name,
+                            f"Cannot rename {jf.name} -> {new_jf.name}, "
+                            "target already exists"
                         )
                         continue
 
@@ -179,20 +186,38 @@ def deduplicate_scored(
 
                     total_renamed += 1
     else:
-        logger.info("No duplicate filenames found under %s", root)
-
-    logger.debug("Building global MD5 index for cross-stem dedup...")
-    survivors_by_md5: dict[str, list[EntryTriple]] = defaultdict(list)
-    for items in tqdm(
-        groups.values(), desc="Building MD5 index", unit="group", leave=False, delay=3.0
-    ):
-        for img, jf, data in items:
-            if img.exists():
-                survivors_by_md5[_md5(img)].append((img, jf, data))
+        logger.info(f"No duplicate filenames found under {root}", start_timer=_start)
 
     logger.debug(
-        "Collected %d unique MD5(s) from %d surviving file(s)",
-        len(survivors_by_md5), sum(len(v) for v in survivors_by_md5.values()),
+        "Building global MD5 index for cross-stem dedup...", start_timer=_start
+    )
+    candidates: list[EntryTriple] = []
+    for items in groups.values():
+        for img, jf, data in items:
+            if img.exists():
+                candidates.append((img, jf, data))
+
+    # Files whose byte size is unique to them cannot share a hash with any other
+    # file, so only same-size groups are worth reading and hashing.
+    size_counts: Counter[int] = Counter()
+    for img, _jf, _data in candidates:
+        size_counts[img.stat().st_size] += 1
+
+    survivors_by_md5: dict[str, list[EntryTriple]] = defaultdict(list)
+    hashed = 0
+    for img, jf, data in tqdm(
+        candidates, desc="Building MD5 index", unit="file", leave=False, delay=3.0
+    ):
+        if size_counts[img.stat().st_size] < 2:
+            continue
+        survivors_by_md5[_md5(img)].append((img, jf, data))
+        hashed += 1
+
+    logger.debug(
+        f"Collected {len(survivors_by_md5)} unique MD5(s) from "
+        f"{sum(len(v) for v in survivors_by_md5.values())} of {len(candidates)} "
+        f"surviving file(s) ({len(candidates) - hashed} skipped: unique byte size)",
+        start_timer=_start,
     )
 
     cross_stem_groups = [
@@ -201,18 +226,18 @@ def deduplicate_scored(
     ]
     if cross_stem_groups:
         logger.info(
-            "Found %d cross-stem MD5 duplicate group(s) to resolve",
-            len(cross_stem_groups),
+            f"Found {len(cross_stem_groups)} cross-stem MD5 duplicate group(s) to resolve",
+            start_timer=_start,
         )
     else:
-        logger.debug("No cross-stem MD5 duplicates found")
+        logger.debug("No cross-stem MD5 duplicates found", start_timer=_start)
 
     for same_images in tqdm(
         cross_stem_groups, desc="Resolving cross-stem", unit="group", leave=False, delay=3.0
     ):
         logger.debug(
-            "Cross-stem match: %s",
-            ", ".join(f"{t[0].name} ({t[0].parent.name})" for t in same_images),
+            "Cross-stem match: "
+            + ", ".join(f"{t[0].name} ({t[0].parent.name})" for t in same_images)
         )
 
         same_images.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
@@ -229,18 +254,18 @@ def deduplicate_scored(
             _merge_comparison_histories(keeper_data, [ddata], keeper_jf.stem)
         atomic_write_json(str(keeper_jf), keeper_data, indent=2)
         for dimg, djf, _ddata in discard_list:
-            logger.debug("Removing cross-stem duplicate %s", dimg.name)
+            logger.debug(f"Removing cross-stem duplicate {dimg.name}")
             dimg.unlink(missing_ok=True)
             djf.unlink(missing_ok=True)
 
         total_removed += len(discard_list)
 
     logger.info(
-        "Removed %d duplicate(s), renamed %d conflict(s)",
-        total_removed, total_renamed,
+        f"Removed {total_removed} duplicate(s), renamed {total_renamed} conflict(s)",
+        start_timer=_start,
     )
     for ex in examples:
-        logger.info("  e.g. %s", ex)
+        logger.info(f"  e.g. {ex}")
 
     return total_removed + total_renamed
 
@@ -261,9 +286,9 @@ def main() -> None:
     )
 
     if count:
-        logger.info("Resolved %d duplicate file(s)", count)
+        logger.info(f"Resolved {count} duplicate file(s)", start_timer=_start)
     else:
-        logger.info("No duplicates to resolve")
+        logger.info("No duplicates to resolve", start_timer=_start)
 
 
 if __name__ == "__main__":

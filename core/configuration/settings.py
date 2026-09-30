@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 from pydantic import BaseModel, ConfigDict
 
@@ -18,6 +18,10 @@ from ..io.serialization import load_json
 PathLike = str | Path
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 CONFIG_FILE: Path = PROJECT_ROOT.joinpath("config", "config.json")
+# Rows per database transaction during bulk writes. Large enough that the
+# per-transaction cost amortizes, small enough to bound memory and show
+# progress on very large rebuilds.
+DB_BULK_CHUNK: int = 5000
 SUB_CONFIG_MAPPING: dict[str, str] = {
     "prepare": "prepare_config",
     "training": "training_config",
@@ -78,6 +82,57 @@ class TrainingSection(SectionModel):
 
 class VectorSection(SectionModel):
     """vector_config.json; the vectors list rides as an extra."""
+
+
+class VectorEntry(TypedDict):
+    """One entry of the vector_config ``vectors`` list."""
+
+    name: str
+    type: str
+    slot_size: int
+    model_key: NotRequired[str]
+    alias: NotRequired[list[str]]
+    max_normalization: NotRequired[float | None]
+    per_unit_size: NotRequired[int]
+
+
+class ImageVectorEntry(TypedDict):
+    """An image-type vector entry, which always names the model producing it."""
+
+    name: str
+    type: str
+    slot_size: int
+    model_key: str
+
+
+class VisionModelConfig(TypedDict):
+    """One entry of the prepare_config ``vision_models`` map."""
+
+    name: str
+    device: str
+    output_dim: int
+    variable_input: bool
+    global_pool: str
+
+
+class EmbeddingModelConfig(TypedDict):
+    """The prepare_config ``prompt_representation`` entry."""
+
+    name: str
+    output_dim: int
+    device: str
+
+
+class AttributeModelConfig(TypedDict):
+    """One entry of the prepare_config ``attribute_models`` map.
+
+    ``url`` marks a direct-download model; Hugging Face entries omit it.
+    """
+
+    name: str
+    device: str
+    output_dim: int
+    url: NotRequired[str]
 
 
 SECTION_MODELS: dict[str, type[SectionModel]] = {

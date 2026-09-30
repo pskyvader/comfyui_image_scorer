@@ -12,11 +12,10 @@ class IntVector:
         self, entries: dict[str, dict[str, object]], alias: list[str] | None
     ) -> dict[str, int]:
         for id, entry in list(entries.items()):
-            # for entry_date in entry.values():
-            current_value: int = get_value_from_entry(entry, self.name, alias)
-            if not current_value:
+            current_value = get_value_from_entry(entry, self.name, alias)
+            if current_value is None:
                 current_value = 0
-            self.value_list[id] = current_value
+            self.value_list[id] = int(current_value)
         return self.value_list
 
     def create_vector_list(self) -> dict[str, list[int]]:
@@ -42,11 +41,10 @@ class FloatVector:
         self, entries: dict[str, dict[str, object]], alias: list[str] | None
     ) -> dict[str, float]:
         for id, entry in list(entries.items()):
-            # for entry_date in entry.values():
-            current_value: float = get_value_from_entry(entry, self.name, alias)
-            if not current_value:
+            current_value = get_value_from_entry(entry, self.name, alias)
+            if current_value is None:
                 current_value = 0.0
-            self.value_list[id] = current_value
+            self.value_list[id] = float(current_value)
         return self.value_list
 
     def create_vector_list(self) -> dict[str, list[float]]:

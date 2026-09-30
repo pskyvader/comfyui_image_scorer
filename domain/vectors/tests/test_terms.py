@@ -153,7 +153,7 @@ def test_clean_term(input_term: str, expected: str):
 def test_deduplicate_terms_logic():
     """Verifies that the highest weight is kept for duplicate terms."""
     input_data = [("apple", 1.0, 0), ("orange", 1.2, 1), ("apple", 1.5, 2)]
-    result, dups = deduplicate_terms(input_data)
+    result, _ = deduplicate_terms(input_data)
     result_dict = {t: w for t, w, _ in result}
     assert result_dict["apple"] == 1.5
     assert result_dict["orange"] == 1.2
@@ -167,7 +167,7 @@ def test_filter_terms_with_connectors():
     splitters = {","}
     input_terms = [("the", 1.0, 0), ("and", 1.0, 1), ("car", 1.0, 2), ("a", 1.0, 3)]
 
-    kept, filtered = filter_terms(input_terms, connectors, splitters)
+    kept, _ = filter_terms(input_terms, connectors, splitters)
     kept_terms = [t[0] for t in kept]
     assert "and" in kept_terms
     assert "car" in kept_terms

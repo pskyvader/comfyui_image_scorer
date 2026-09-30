@@ -63,6 +63,9 @@ def _import_targets(tree: ast.Module):
 def test_no_layer_violations():
     violations = []
     for rel, path in _iter_layer_files():
+        # Skip test files - they may import infrastructure for real-data tests
+        if "/tests/" in rel or rel.endswith("_test.py") or rel.startswith("tests/"):
+            continue
         layer = rel.split("/")[0]
         allowed = ALLOWED[layer]
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))

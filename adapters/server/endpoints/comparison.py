@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +17,7 @@ from ....domain.comparison.algorithm.view import (
 )
 from ....domain.comparison.algorithm.phase_order import get_phases
 from ....domain.comparison.comparison_recorder import ComparisonRecorder
+from ....domain.ports.repository import ImageRow
 from ..deps import ServerDeps, get_server_deps
 
 ranking_bp = Blueprint("ranking_v2", __name__, url_prefix="/api/ranking")
@@ -48,8 +48,8 @@ def _get_processor():
 
 
 def _get_level_progress_stats(
-    all_images: list[dict[str, Any]],
-) -> dict[str, int]:
+    all_images: list[ImageRow],
+) -> dict[str, object]:
     _start = time.perf_counter()
     comp_counts = [int(img["comparison_count"]) for img in all_images]
     base_level = min(comp_counts)

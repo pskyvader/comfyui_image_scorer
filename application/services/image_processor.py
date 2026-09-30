@@ -9,11 +9,12 @@ from functools import partial
 from pathlib import Path
 from threading import Lock
 import time
+from typing import cast
 
 from tqdm import tqdm
 
 from ...core.observability.logger import get_logger, ModuleLogger
-from ...core.configuration.settings import config
+from ...core.configuration.settings import config, DB_BULK_CHUNK
 from ...core.io.serialization import (
     clean_json_metadata,
     collect_valid_files,
@@ -30,6 +31,12 @@ from ...domain.analysis.trueskill import (
 )
 from ...domain.comparison.algorithm.history_collapse import collapse_comparison_history
 from ...domain.ports.files import FilePort
+from ...domain.ports.repository import (
+    ComparisonRow,
+    ImageRow,
+    ImageRowForInsert,
+    RatingStateUpdate,
+)
 from .graph_service import CrystalGraph
 
 logger: ModuleLogger = get_logger(__name__)
@@ -174,14 +181,15 @@ class ImageProcessor:
         )
 
     def sync_processed_images_from_db(self) -> None:
+        _start = time.perf_counter()
         all_imgs = [node.data for node in self._graph.get_all_nodes()]
         with self.processed_lock:
             self.processed_images.clear()
             for img in all_imgs:
                 self.processed_images.add(img["filename"])
         logger.info(
-            "Synchronized %s processed images from database.",
-            len(self.processed_images),
+            f"Synchronized {len(self.processed_images)} processed images from database.",
+            start_timer=_start,
         )
 
     def get_fast_total_count(self, source_dir: str) -> int:
@@ -243,7 +251,10 @@ class ImageProcessor:
 
         batch_files = candidates[self.reserve_count : self.reserve_count + batch_size]
 
-        stats = {"processed": 0, "added": 0, "errors": 0, "failed": []}
+        failed: list[str] = []
+        processed = 0
+        added = 0
+        errors = 0
         current_global = db_count
         system_total = db_count + total_goal
 
@@ -272,7 +283,7 @@ class ImageProcessor:
                         future.result()
                     )
                     if success:
-                        stats["processed"] += 1
+                        processed += 1
                         db_name = dest_name or filename
                         if score is not None and not db_exists:
                             if self._graph.add_image(
@@ -283,19 +294,24 @@ class ImageProcessor:
                                 rating_mu=INITIAL_MEAN,
                                 rating_sigma=INITIAL_UNCERTAINTY,
                             ):
-                                stats["added"] += 1
+                                added += 1
                                 current_global += 1
                                 update_desc()
                             else:
-                                stats["errors"] += 1
+                                errors += 1
                     elif "Already processed" not in message:
-                        stats["errors"] += 1
-                        if len(stats["failed"]) < 5:
-                            stats["failed"].append(f"{filename}: {message}")
+                        errors += 1
+                        if len(failed) < 5:
+                            failed.append(f"{filename}: {message}")
                     pbar.update(1)
-                    pbar.set_postfix(file=filename[:15], added=stats["added"])
+                    pbar.set_postfix(file=filename[:15], added=added)
         self.is_processing = False
-        return stats
+        return {
+            "processed": processed,
+            "added": added,
+            "errors": errors,
+            "failed": failed,
+        }
 
     def rebuild_database_from_ranked(self) -> None:
         """Rebuild or repair the ranking database from ranked files and companion JSON."""
@@ -320,32 +336,40 @@ class ImageProcessor:
             max_workers=int(prepare_conf["max_workers"]),
             scored_only=False,
         )
-        logger.debug(f"collected {len(all_entries)} valid entries from ranked files ")
+        logger.debug(
+            f"collected {len(all_entries)} valid entries from ranked files ",
+            start_timer=_start,
+        )
 
-        with tqdm(
-            total=len(all_entries),
+        image_rows: list[ImageRowForInsert] = []
+        for img_path, entry, _timestamp, _file_id in all_entries:
+            cleaned = clean_json_metadata(
+                entry,
+                default_score=self.default_score,
+                filename=Path(img_path).name,
+                initial_mu=INITIAL_MEAN,
+                initial_sigma=INITIAL_UNCERTAINTY,
+            )
+            image_rows.append(
+                {
+                    "filename": Path(img_path).name,
+                    "score": self.default_score,
+                    "rating_mu": INITIAL_MEAN,
+                    "rating_sigma": INITIAL_UNCERTAINTY,
+                    "comparison_count": 0,
+                    "prompt_tags": cleaned.get("prompt_tags"),
+                }
+            )
+        for chunk_start in tqdm(
+            range(0, len(image_rows), DB_BULK_CHUNK),
             desc="Adding images",
-            unit="img",
+            unit="chunk",
             delay=3.0,
             position=0,
-        ) as pbar:
-            for img_path, entry, _timestamp, _file_id in all_entries:
-                cleaned = clean_json_metadata(
-                    entry,
-                    default_score=self.default_score,
-                    filename=Path(img_path).name,
-                    initial_mu=INITIAL_MEAN,
-                    initial_sigma=INITIAL_UNCERTAINTY,
-                )
-                self._graph.add_image(
-                    filename=Path(img_path).name,
-                    score=self.default_score,
-                    comparison_count=0,
-                    prompt_tags=cleaned.get("prompt_tags"),
-                    rating_mu=INITIAL_MEAN,
-                    rating_sigma=INITIAL_UNCERTAINTY,
-                )
-                pbar.update(1)
+        ):
+            self._graph.add_images_bulk(
+                image_rows[chunk_start : chunk_start + DB_BULK_CHUNK]
+            )
 
         self._graph.rebuild_from_database()
 
@@ -355,7 +379,7 @@ class ImageProcessor:
             start_timer=_start,
         )
 
-        comparison_rows: list[dict[str, object]] = []
+        comparison_rows: list[ComparisonRow] = []
         with tqdm(
             total=len(all_entries),
             desc="Adding histories from image",
@@ -363,7 +387,7 @@ class ImageProcessor:
             delay=3.0,
             position=0,
         ) as pbar:
-            for img_path, entry, _timestamp, file_id in all_entries:
+            for img_path, entry, _timestamp, _file_id in all_entries:
                 filename = Path(img_path).name
 
                 cleaned = clean_json_metadata(
@@ -388,7 +412,7 @@ class ImageProcessor:
                     pbar.update(1)
                     continue
 
-                for comp in history:
+                for comp in cast(list[dict[str, object]], history):
                     other = str(comp.get("other", ""))
                     timestamp = comp.get("timestamp")
                     if not other or not timestamp:
@@ -419,34 +443,39 @@ class ImageProcessor:
             comparison_rows,
             valid_filenames,
         )
-        with tqdm(
-            total=len(survivors),
+        filename_to_comparisons: dict[str, list[ComparisonRow]] = defaultdict(list)
+        for chunk_start in tqdm(
+            range(0, len(survivors), DB_BULK_CHUNK),
             desc="Adding survivors to database",
-            unit="comp",
+            unit="chunk",
             delay=3.0,
-        ) as pbar:
-            for row in survivors:
-                self._graph.add_link(
-                    filename_a=str(row["filename_a"]),
-                    filename_b=str(row["filename_b"]),
-                    winner=str(row["winner"]),
-                    timestamp=str(row.get("timestamp") or ""),
-                )
-                pbar.update(1)
+        ):
+            chunk = survivors[chunk_start : chunk_start + DB_BULK_CHUNK]
+            link_ids = self._graph.add_comparisons_bulk(chunk)
+            for row, link_id in zip(chunk, link_ids):
+                filename_a = str(row["filename_a"])
+                filename_b = str(row["filename_b"])
+                timestamp = str(row.get("timestamp") or "")
+                survivor_row: ComparisonRow = {
+                    "id": link_id,
+                    "filename_a": filename_a,
+                    "filename_b": filename_b,
+                    "winner": str(row["winner"]),
+                    "timestamp": timestamp,
+                }
+                filename_to_comparisons[filename_a].append(survivor_row)
+                filename_to_comparisons[filename_b].append(survivor_row)
 
         logger.debug(
-            "collapsed %s historical comparisons from ranked files into %s survivors",
-            len(comparison_rows),
-            counts.get("kept", len(survivors)),
+            f"collapsed {len(comparison_rows)} historical comparisons from ranked files "
+            f"into {counts.get('kept', len(survivors))} survivors",
             start_timer=_start,
         )
 
-        self._graph.clean_comparisons()
         self._graph.rebuild_from_database()
 
         self._recompute_ratings_from_database_history()
 
-        all_comparisons = [link.data for link in self._graph.get_all_links()]
         all_images = [node.data for node in self._graph.get_all_nodes()]
 
         filename_to_path: dict[str, Path] = {}
@@ -456,12 +485,7 @@ class ImageProcessor:
             filename_to_path[p.name] = p
             filename_to_entry[p.name] = _entry
 
-        filename_to_comparisons: dict[str, list[dict[str, object]]] = defaultdict(list)
-        for comp in all_comparisons:
-            filename_to_comparisons[comp["filename_a"]].append(comp)
-            filename_to_comparisons[comp["filename_b"]].append(comp)
-
-        filename_to_image_data: dict[str, dict[str, object]] = {}
+        filename_to_image_data: dict[str, ImageRow] = {}
         for img in all_images:
             filename_to_image_data[img["filename"]] = img
 
@@ -485,7 +509,7 @@ class ImageProcessor:
             for img in all_images
         ]
         prepare_conf = config["prepare"]
-        logger.debug("sync json data...")
+        logger.debug("sync json data...", start_timer=_start)
         parallel_for(
             sync_worker,
             sync_args,
@@ -495,47 +519,61 @@ class ImageProcessor:
             unit="img",
         )
 
+        written, skipped = self._path_ops.pop_sync_counters()
+        logger.debug(
+            f"sync json wrote {written} file(s), skipped {skipped} unchanged",
+            start_timer=_start,
+        )
         self._path_ops.clear_folder_cache()
         self.sync_processed_images_from_db()
         logger.debug(
-            "Rebuild complete. %s images in database.",
-            len(all_images),
+            f"Rebuild complete. {len(all_images)} images in database.",
             start_timer=_start,
         )
 
     def _recompute_ratings_from_database_history(self) -> int:
         self._graph.reset_all_image_ratings(score=self.default_score)
 
-        replayed = replay_ratings([link.data for link in self._graph.get_all_links()])
+        # "default" replays in stored link order so a rebuild of unchanged files
+        # reproduces the same ratings; a shuffled order makes every run drift.
+        replayed = replay_ratings(
+            [link.data for link in self._graph.get_all_links()], order="default"
+        )
 
+        rating_updates: list[RatingStateUpdate] = [
+            (
+                filename,
+                public_score_from_rating(rating),
+                rating.mu_skill,
+                rating.sigma_uncertainty,
+                count,
+            )
+            for filename, (rating, count) in replayed.items()
+        ]
         updated = 0
-        with tqdm(
-            total=len(replayed),
+        for chunk_start in tqdm(
+            range(0, len(rating_updates), DB_BULK_CHUNK),
             desc="Updating scores",
-            unit="img",
+            unit="chunk",
             leave=False,
             delay=3.0,
-        ) as pbar:
-            for filename, (rating, count) in replayed.items():
-                if self._graph.update_image_rating_state(
-                    filename=filename,
-                    score=public_score_from_rating(rating),
-                    rating_mu=rating.mu_skill,
-                    rating_sigma=rating.sigma_uncertainty,
-                    comparison_count=count,
-                    touch_timestamp=False,
-                ):
-                    updated += 1
-                pbar.update(1)
+        ):
+            updated += self._graph.update_image_rating_states_bulk(
+                rating_updates[chunk_start : chunk_start + DB_BULK_CHUNK]
+            )
 
         return updated
 
     def reorganize_folder_structure(self) -> None:
+        _start = time.perf_counter()
         ranked_root = self._path_ops.ranked_root()
         if not ranked_root.exists():
             return
 
-        logger.info("[SCANNER] Checking folder structure for loose files...")
+        logger.info(
+            "[SCANNER] Checking folder structure for loose files...",
+            start_timer=_start,
+        )
 
         moves: list[tuple[Path, Path]] = []
         for tier_folder in ranked_root.glob("scored_*"):
@@ -559,7 +597,9 @@ class ImageProcessor:
                 score = self.default_score
                 if self._path_ops.file_exists(str(json_path)):
                     meta = self._path_ops.read_json(str(json_path))
-                    score = float(meta["score"])
+                    raw_score = meta.get("score")
+                    if isinstance(raw_score, (int, float)):
+                        score = float(raw_score)
                 target_path = self._path_ops.compute_path(loose_file.name, score)
                 if target_path == loose_file:
                     continue
@@ -586,7 +626,8 @@ class ImageProcessor:
 
         if moved_count:
             logger.info(
-                "[SCANNER] Reorganized %s loose files into subfolders.", moved_count
+                f"[SCANNER] Reorganized {moved_count} loose files into subfolders.",
+                start_timer=_start,
             )
 
     def clear_old_cache(self, force: bool) -> None:

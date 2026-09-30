@@ -1,8 +1,9 @@
 """MediaPipe face/pose inference provider (implements domain MediaPipePort)."""
 
 import os
+from typing import Any
 
-import mediapipe as mp
+import mediapipe
 import numpy as np
 from numpy import typing as npt
 from PIL import Image
@@ -11,16 +12,20 @@ from ...core.configuration.settings import config
 from ...core.filesystem.paths import mediapipe_models_dir
 from ...domain.analysis.mediapipe_analysis import POSE_LANDMARK_NAMES
 
+# mediapipe ships neither a py.typed marker nor stubs, so its binding carries no
+# type information. The port above stays concrete; only this boundary is untyped.
+mp: Any = mediapipe
+
 
 class MediaPipeProvider:
     def __init__(self) -> None:
-        self._face_detector: mp.tasks.vision.FaceDetector | None = None
-        self._pose_landmarker: mp.tasks.vision.PoseLandmarker | None = None
+        self._face_detector: Any = None
+        self._pose_landmarker: Any = None
 
     def _image_to_rgb(self, img: Image.Image) -> npt.NDArray[np.uint8]:
         return np.asarray(img.convert("RGB"))
 
-    def _get_face_detector(self) -> mp.tasks.vision.FaceDetector:
+    def _get_face_detector(self) -> Any:
         if self._face_detector is None:
             model_path = os.path.join(
                 mediapipe_models_dir,
@@ -39,7 +44,7 @@ class MediaPipeProvider:
             self._face_detector = mp.tasks.vision.FaceDetector.create_from_options(options)
         return self._face_detector
 
-    def _get_pose_landmarker(self) -> mp.tasks.vision.PoseLandmarker:
+    def _get_pose_landmarker(self) -> Any:
         if self._pose_landmarker is None:
             model_path = os.path.join(
                 mediapipe_models_dir,

@@ -1,13 +1,15 @@
 import threading
 from collections.abc import Sequence
 
-import torch
 import torch.nn.functional as F
 from PIL import Image
-from torch import nn
 
 from ...core.observability.logger import get_logger, ModuleLogger
-from ...domain.ports.loading import ModelLoader
+from ...domain.ports.loading import (
+    AttributeModel,
+    ImageProcessor,
+    ModelLoader,
+)
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -53,9 +55,9 @@ class FaceAttributeAnalyzer:
 
     def __init__(self, model_loader: ModelLoader) -> None:
         self._model_loader = model_loader
-        self._model: nn.Module | None = None
+        self._model: AttributeModel | None = None
         self._output_dim: int = 0
-        self._processor: object | None = None
+        self._processor: ImageProcessor | None = None
         self._lock = threading.Lock()
 
     def _ensure_loaded(self) -> None:
@@ -64,7 +66,9 @@ class FaceAttributeAnalyzer:
         with self._lock:
             if self._model is not None:
                 return
-            model, output_dim, processor = self._model_loader.load_hf_vision_model(self.MODEL_KEY)
+            model, output_dim, processor = self._model_loader.load_hf_vision_model(
+                self.MODEL_KEY
+            )
             self._model = model
             self._output_dim = output_dim
             self._processor = processor
@@ -76,10 +80,13 @@ class FaceAttributeAnalyzer:
         self, imgs: Sequence[Image.Image]
     ) -> list[dict[str, list[dict[str, float]]]]:
         self._ensure_loaded()
-        device = next(self._model.parameters()).device  # type: ignore[union-attr]
-        inputs = self._processor(images=list(imgs), return_tensors="pt").to(device)  # type: ignore[union-attr]
-        with torch.no_grad():
-            logits = self._model(pixel_values=inputs["pixel_values"])  # type: ignore[union-attr]
+        model = self._model
+        processor = self._processor
+        if model is None or processor is None:
+            raise RuntimeError("Face attribute model is not loaded")
+
+        inputs = processor(images=list(imgs), return_tensors="pt").to(model.device)
+        logits = model(pixel_values=inputs["pixel_values"])
 
         age = logits["age"].cpu().float()
         gender = logits["gender"].cpu().float()
@@ -93,9 +100,12 @@ class FaceAttributeAnalyzer:
         if race.ndim == 2:
             race = race[:, None, :]
 
-        age_p = F.softmax(age, dim=-1).numpy()
-        gender_p = F.softmax(gender, dim=-1).numpy()
-        race_p = F.softmax(race, dim=-1).numpy()
+        # Inference runs outside a no_grad context, so the logits carry a grad
+        # graph. Detach at the tensor-to-array boundary instead of wrapping the
+        # forward pass, which also stops the graph being held for every batch.
+        age_p = F.softmax(age, dim=-1).detach().numpy()
+        gender_p = F.softmax(gender, dim=-1).detach().numpy()
+        race_p = F.softmax(race, dim=-1).detach().numpy()
 
         results: list[dict[str, list[dict[str, float]]]] = []
         for b in range(age_p.shape[0]):
@@ -124,14 +134,16 @@ class NSFWAnalyzer:
 
     def __init__(self, model_loader: ModelLoader) -> None:
         self._model_loader = model_loader
-        self._model: nn.Module | None = None
+        self._model: AttributeModel | None = None
         self._output_dim: int = 0
-        self._processor: Compose | object | None = None
+        self._processor: ImageProcessor | None = None
 
     def _ensure_loaded(self) -> None:
         if self._model is not None:
             return
-        model, output_dim, processor = self._model_loader.load_hf_vision_model(self.MODEL_KEY)
+        model, output_dim, processor = self._model_loader.load_hf_vision_model(
+            self.MODEL_KEY
+        )
         self._model = model
         self._output_dim = output_dim
         self._processor = processor
@@ -141,11 +153,14 @@ class NSFWAnalyzer:
 
     def predict_batch(self, imgs: Sequence[Image.Image]) -> list[float]:
         self._ensure_loaded()
-        device = next(self._model.parameters()).device  # type: ignore[union-attr]
-        inputs = self._processor(images=list(imgs), return_tensors="pt").to(device)  # type: ignore[union-attr]
-        with torch.no_grad():
-            outputs = self._model(**inputs)  # type: ignore[union-attr]
+        model = self._model
+        processor = self._processor
+        if model is None or processor is None:
+            raise RuntimeError("NSFW model is not loaded")
+
+        inputs = processor(images=list(imgs), return_tensors="pt").to(model.device)
+        outputs = model(**inputs)
         logits = outputs.logits
         probs = F.softmax(logits, dim=-1)
         nsfw_idx = 1
-        return probs[:, nsfw_idx].cpu().float().numpy().tolist()
+        return probs[:, nsfw_idx].detach().cpu().float().numpy().tolist()

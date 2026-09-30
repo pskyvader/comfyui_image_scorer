@@ -15,7 +15,7 @@ def _make_row(
     winner: str,
     timestamp: str = "2026-08-31T00:00:00Z",
     comparison_id: int = 1,
-) -> dict:
+) -> dict[str, object]:
     return {
         "filename_a": filename_a,
         "filename_b": filename_b,
@@ -131,7 +131,7 @@ class TestContradictions:
             _make_row("a.png", "b.png", "b.png", comparison_id=2),
             _make_row("a.png", "b.png", "a.png", comparison_id=3),
         ]
-        survivors, counts = collapse_comparisons(rows, valid_filenames)
+        survivors, _ = collapse_comparisons(rows, valid_filenames)
         assert len(survivors) == 1
 
 

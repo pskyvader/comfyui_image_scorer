@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from .node_proxy import NodeProxy
 
 from . import node_proxy as _node_proxy
+from ..ports.repository import ComparisonRow
 
 
 class ComparisonRecord:
@@ -49,7 +50,7 @@ class LinkProxy:
         return self._record.timestamp
 
     @property
-    def data(self) -> dict[str, object]:
+    def data(self) -> ComparisonRow:
         return {
             "id": self.id,
             "filename_a": self.winner,

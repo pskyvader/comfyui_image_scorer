@@ -3,13 +3,45 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import cast
 
 from ...core.observability.logger import ModuleLogger, get_logger
 from ...domain.comparison.algorithm.history_collapse import canonicalize_pair
+from ...domain.ports.repository import ComparisonRow
 
 from .database import get_db_connection
 
 logger: ModuleLogger = get_logger(__name__)
+
+_INSERT_SQL = """
+    INSERT INTO comparisons(filename_a, filename_b, winner, timestamp)
+    VALUES (?, ?, ?, ?)
+"""
+
+_INSERT_RETURNING_ID_SQL = (
+    "INSERT INTO comparisons(filename_a, filename_b, winner, timestamp)"
+    " VALUES (?, ?, ?, ?) RETURNING id"
+)
+
+
+def _prepare_comparison(
+    filename_a: str,
+    filename_b: str,
+    winner: str,
+    timestamp: str | None,
+) -> tuple[str, str, str, str] | None:
+    """Validate one comparison and return its insert tuple, or None if invalid."""
+    filename_a = str(filename_a)
+    filename_b = str(filename_b)
+    winner = str(winner)
+    if winner not in (filename_a, filename_b):
+        logger.error("Winner must be one of the compared images")
+        return None
+    canon_a, canon_b = canonicalize_pair(filename_a, filename_b)
+    timestamp_value = (
+        str(timestamp) if timestamp else datetime.now(timezone.utc).isoformat()
+    )
+    return (canon_a, canon_b, winner, timestamp_value)
 
 
 def add_comparison(
@@ -19,32 +51,56 @@ def add_comparison(
     timestamp: str | None,
 ) -> int:
     """Record a comparison result."""
-    filename_a = str(filename_a)
-    filename_b = str(filename_b)
-    winner = str(winner)
-    if winner not in (filename_a, filename_b):
-        logger.error("Winner must be one of the compared images")
+    prepared = _prepare_comparison(filename_a, filename_b, winner, timestamp)
+    if prepared is None:
         return 0
-    canon_a, canon_b = canonicalize_pair(filename_a, filename_b)
-    timestamp_value = (
-        str(timestamp) if timestamp else datetime.now(timezone.utc).isoformat()
-    )
 
     with get_db_connection() as conn:
-        cur = conn.execute(
-            """
-            INSERT INTO comparisons(filename_a, filename_b, winner, timestamp)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                canon_a,
-                canon_b,
-                winner,
-                timestamp_value,
-            ),
-        )
+        cur = conn.execute(_INSERT_SQL, prepared)
         conn.commit()
         return int(cur.lastrowid or 0)
+
+
+def add_comparisons_bulk(rows: list[ComparisonRow]) -> list[int]:
+    """Record many comparison results in one transaction.
+
+    Returns one id per input row in input order, using 0 for any row whose
+    winner is not one of the compared images, matching add_comparison.
+    """
+    ids = [0] * len(rows)
+    pending: list[tuple[int, tuple[str, str, str, str]]] = []
+    for index, row in enumerate(rows):
+        prepared = _prepare_comparison(
+            str(row["filename_a"]),
+            str(row["filename_b"]),
+            str(row["winner"]),
+            str(row.get("timestamp") or "") or None,
+        )
+        if prepared is not None:
+            pending.append((index, prepared))
+    if not pending:
+        return ids
+
+    with get_db_connection() as conn:
+        for index, prepared in pending:
+            cur = conn.execute(_INSERT_RETURNING_ID_SQL, prepared)
+            ids[index] = int(cur.fetchone()[0])
+        conn.commit()
+    return ids
+
+
+def remove_comparison(filename_a: str, filename_b: str) -> bool:
+    """Remove a comparison result for a given pair of images."""
+    canon_a, canon_b = canonicalize_pair(filename_a, filename_b)
+    if comparison_exists_for_pair(canon_a, canon_b):
+        with get_db_connection() as conn:
+            cur = conn.execute(
+                "DELETE FROM comparisons WHERE filename_a=? AND filename_b=?",
+                (canon_a, canon_b),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+    return False
 
 
 def comparison_exists_for_pair(filename_a: str, filename_b: str) -> bool:
@@ -70,13 +126,13 @@ def get_total_comparisons() -> int:
         return int(row["cnt"]) if row else 0
 
 
-def list_links() -> list[dict[str, object]]:
+def list_links() -> list[ComparisonRow]:
     query = "SELECT * FROM comparisons"
     query += " ORDER BY timestamp ASC, id ASC"
 
     with get_db_connection() as conn:
         rows = conn.execute(query, ()).fetchall()
-        return [dict(row) for row in rows]
+        return cast(list[ComparisonRow], [dict(row) for row in rows])
 
 
 def get_nodes_with_only_wins() -> list[str]:
@@ -110,19 +166,26 @@ def clean_comparisons() -> dict[str, int]:
     with get_db_connection() as conn:
         image_rows = conn.execute("SELECT filename FROM images").fetchall()
         valid_filenames = {str(row["filename"]) for row in image_rows}
-        rows = [
-            dict(row)
-            for row in conn.execute(
-                "SELECT * FROM comparisons ORDER BY timestamp ASC, id ASC"
-            ).fetchall()
-        ]
+        rows = cast(
+            list[ComparisonRow],
+            [
+                dict(row)
+                for row in conn.execute(
+                    "SELECT * FROM comparisons ORDER BY timestamp ASC, id ASC"
+                ).fetchall()
+            ],
+        )
 
     from ...domain.comparison.algorithm.history_collapse import (
         collapse_comparison_history,
     )
 
     survivors, counts = collapse_comparison_history(rows, valid_filenames)
-    kept_ids = {int(row["id"]) for row in survivors if row.get("id") is not None}
+    kept_ids: set[int] = set()
+    for row in survivors:
+        row_id = row.get("id")
+        if row_id is not None:
+            kept_ids.add(row_id)
 
     with get_db_connection() as conn:
         if kept_ids:
@@ -164,10 +227,23 @@ class SQLiteComparisonsRepository:
             timestamp=timestamp,
         )
 
+    def add_comparisons_bulk(self, rows: list[ComparisonRow]) -> list[int]:
+        return add_comparisons_bulk(rows)
+
+    def remove_comparison(
+        self,
+        filename_a: str,
+        filename_b: str,
+    ) -> int:
+        return remove_comparison(
+            filename_a=filename_a,
+            filename_b=filename_b,
+        )
+
     def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool:
         return comparison_exists_for_pair(filename_a, filename_b)
 
-    def list_links(self) -> list[dict[str, object]]:
+    def list_links(self) -> list[ComparisonRow]:
         return list_links()
 
     def get_total_comparisons(self) -> int:

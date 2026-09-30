@@ -7,10 +7,22 @@ HPO loop can import it without depending on each other.
 from __future__ import annotations
 
 import random
+from typing import TypedDict, Union
 from types import MappingProxyType
 
+
+class GridCell(TypedDict):
+    """One hyperparameter cell: kind, bounds, and mutation controls."""
+
+    type: str
+    min: Union[int, float]
+    max: Union[int, float]
+    step: float
+    random: float
+
+
 # step is relative percentage for float/int types
-grid_base: MappingProxyType[str, object] = MappingProxyType({
+grid_base: MappingProxyType[str, GridCell] = MappingProxyType({
     "learning_rate": {
         # Purpose: Shrinks the contribution of each tree by learning_rate. Controls how fast the model learns.
         # Speed: Lower values slow down training significantly as more trees (n_estimators) are needed to reach convergence.
@@ -126,7 +138,7 @@ grid_base: MappingProxyType[str, object] = MappingProxyType({
 })
 
 
-def around(label: str, val: Union[int, float, None]) -> Sequence[Union[int, float]]:
+def around(label: str, val: Union[int, float, None]) -> list[Union[int, float]]:
     cell = grid_base[label]
     if cell["type"] not in ("int", "float"):
         raise ValueError(f"Unsupported type for grid search cell: {cell['type']}")
@@ -154,8 +166,8 @@ def around(label: str, val: Union[int, float, None]) -> Sequence[Union[int, floa
     result: list[Union[int, float]] = []
     candidates: set[Union[int, float]] = set()
     if cell["type"] == "int":
-        higher: int = int(higher)
-        lower: int = int(lower)
+        higher = int(higher)
+        lower = int(lower)
 
         v = int(v)
         if v == lower and v > vmin:

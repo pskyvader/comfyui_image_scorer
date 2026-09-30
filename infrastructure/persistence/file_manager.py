@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ...domain.ports.repository import ComparisonRow, ImageRow
 from .cleanup_orphans import cleanup_orphans
 from .deduplicate_scored import deduplicate_scored
 from .path_handler import (
     clear_folder_cache,
     compute_path_from_filename,
     get_ranked_root,
+    pop_sync_counters,
     prewarm_folder_cache,
     sync_image_metadata_to_json,
 )
@@ -66,8 +68,8 @@ class FileManager:
         rating_sigma: float,
         comparison_count: int,
         filename_to_path: dict[str, Path],
-        filename_to_comparisons: dict[str, list[dict[str, object]]],
-        filename_to_image_data: dict[str, dict[str, object]],
+        filename_to_comparisons: dict[str, list[ComparisonRow]],
+        filename_to_image_data: dict[str, ImageRow],
         filename_to_entry: dict[str, dict[str, object]],
     ) -> bool:
         return sync_image_metadata_to_json(
@@ -81,6 +83,9 @@ class FileManager:
             filename_to_image_data=filename_to_image_data,
             filename_to_entry=filename_to_entry,
         )
+
+    def pop_sync_counters(self) -> tuple[int, int]:
+        return pop_sync_counters()
 
     def clear_folder_cache(self) -> None:
         clear_folder_cache()

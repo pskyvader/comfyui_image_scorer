@@ -23,6 +23,7 @@ from ...domain.analysis.image_analysis import ImageAnalysis
 from ...domain.analysis.trueskill import replay_ratings, public_score_from_rating
 from ...domain.ports.loading import BatchSizerFactory, MapsProvider, ModelLoader
 from ...domain.ports.cache import CacheProvider
+from ...domain.ports.ml_providers import MediaPipePort
 from ...domain.vectors.helpers import get_value_from_entry
 from ...application.services.vector_list import VectorList
 
@@ -30,7 +31,8 @@ logger: ModuleLogger = get_logger(__name__)
 
 
 def register_map_values(
-    processed_data: list, maps_provider: MapsProvider
+    processed_data: list[tuple[str, dict[str, object], str, str]],
+    maps_provider: MapsProvider,
 ) -> None:
     map_configs = [
         v for v in config["vector"]["vectors"] if v["type"] in ("map", "person_map")
@@ -177,7 +179,6 @@ def run_rebuild_scores_only(graph: Any) -> dict[str, Any]:
     comparisons = [
         {
             "id": comp["id"],
-            "comparison_id": comp["id"],
             "filename_a": comp["filename_a"],
             "filename_b": comp["filename_b"],
             "winner": comp["winner"],
@@ -187,7 +188,7 @@ def run_rebuild_scores_only(graph: Any) -> dict[str, Any]:
     ]
     write_single_jsonl(comparisons_file, comparisons, "w")
 
-    replayed = replay_ratings(rows)
+    replayed = replay_ratings(rows, order="default")
     scores = [
         {fid: public_score_from_rating(rating)}
         for fid, (rating, _count) in replayed.items()

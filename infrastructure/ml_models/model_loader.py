@@ -1,5 +1,5 @@
 import os
-import threading
+from typing import NamedTuple, cast
 
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
@@ -21,13 +21,24 @@ def set_hub_offline(enabled: bool) -> None:
     _hub_constants.HF_HUB_OFFLINE = value == "1"
 
 
+import numpy as np
+import numpy.typing as npt
 import torch
 from torch import nn
 from safetensors.torch import load_file as load_safetensors
 from torchvision import transforms
 from torchvision.transforms import Compose
 import timm
-from ...core.configuration.settings import config
+from timm.data import resolve_model_data_config
+import comfy.model_management
+import comfy.system_memory
+from comfy.model_patcher import ModelPatcher
+from ...core.configuration.settings import (
+    AttributeModelConfig,
+    EmbeddingModelConfig,
+    VisionModelConfig,
+    config,
+)
 from ...core.filesystem.paths import mediapipe_models_dir
 from sentence_transformers import SentenceTransformer
 from transformers import (
@@ -41,7 +52,36 @@ from huggingface_hub import snapshot_download
 
 from ...core.observability.logger import get_logger, ModuleLogger
 
+from ...domain.ports.loading import AttributeOutput, ImageProcessor, ModelInfo
+
 logger: ModuleLogger = get_logger(__name__)
+
+
+def _load_device() -> torch.device:
+    return cast("torch.device", comfy.model_management.text_encoder_device())
+
+
+def _processor_input_size(processor: ImageProcessor, model_key: str) -> tuple[int, int]:
+    """Read the resolution an attribute model's processor crops to.
+
+    CLIP-style processors declare `crop_size` while ViT-style processors declare
+    `size`, so both are read. A processor that declares neither is a
+    configuration error rather than something to guess at.
+    """
+    for attribute in ("crop_size", "size"):
+        box = getattr(processor, attribute, None)
+        if isinstance(box, dict) and "height" in box and "width" in box:
+            return int(box["height"]), int(box["width"])
+    raise RuntimeError(
+        f"Image processor for attribute model '{model_key}' declares no input "
+        "size; expected crop_size or size to carry height and width"
+    )
+
+
+def _offload_device() -> torch.device:
+    return cast(
+        "torch.device", comfy.model_management.text_encoder_offload_device()
+    )
 
 
 def _missing_model_error(description: str) -> RuntimeError:
@@ -84,6 +124,93 @@ class MultiTaskClipVisionModel(nn.Module):
         }
 
 
+class ClassificationOutput(NamedTuple):
+    """Classifier logits in the shape `AttributeOutput` callers expect."""
+
+    logits: torch.Tensor
+
+
+class ImageClassificationModel(nn.Module):
+    """Wraps a transformers classifier so ComfyUI's ModelPatcher can manage it.
+
+    transformers models expose `device` as a read-only property, and
+    ModelPatcher assigns to it while partially loading a model under memory
+    pressure. Owning the classifier inside a plain module gives the patcher the
+    settable attribute it expects.
+    """
+
+    def __init__(self, classifier: nn.Module) -> None:
+        super().__init__()
+        self.classifier = classifier
+
+    def forward(self, **kwargs: torch.Tensor) -> ClassificationOutput:
+        logits = self.classifier(**kwargs).logits
+        return ClassificationOutput(logits)
+
+
+class SentenceTransformerModel(nn.Module):
+    """Wraps a SentenceTransformer so ComfyUI's ModelPatcher can manage it.
+
+    SentenceTransformer exposes `device` as a read-only property and
+    ModelPatcher assigns to it while partially loading, so the encoder is owned
+    by a plain module that has the settable attribute the patcher expects.
+    """
+
+    def __init__(self, encoder: SentenceTransformer) -> None:
+        super().__init__()
+        self.encoder = encoder
+
+    def encode(self, sentences: list[str]) -> npt.NDArray[np.float32]:
+        return cast(
+            "npt.NDArray[np.float32]",
+            self.encoder.encode(sentences, convert_to_numpy=True),
+        )
+
+
+class ComfyVisionModel:
+    """`VisionModel` wrapper that lets ComfyUI own device placement and VRAM."""
+
+    def __init__(self, patcher: ModelPatcher) -> None:
+        self.patcher = patcher
+
+    @property
+    def device(self) -> torch.device:
+        return self.patcher.load_device
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        comfy.model_management.load_model_gpu(self.patcher)
+        return self.patcher.model(x)
+
+
+class ComfyEmbeddingModel:
+    """`EmbeddingModel` wrapper that lets ComfyUI own device placement and VRAM."""
+
+    def __init__(self, patcher: ModelPatcher) -> None:
+        self.patcher = patcher
+
+    def encode(self, sentences: list[str]) -> npt.NDArray[np.float32]:
+        comfy.model_management.load_model_gpu(self.patcher)
+        return cast(
+            "npt.NDArray[np.float32]",
+            self.patcher.model.encode(sentences),
+        )
+
+
+class ComfyAttributeModel:
+    """`AttributeModel` wrapper that lets ComfyUI own device placement and VRAM."""
+
+    def __init__(self, patcher: ModelPatcher) -> None:
+        self.patcher = patcher
+
+    @property
+    def device(self) -> torch.device:
+        return self.patcher.load_device
+
+    def __call__(self, **kwargs: torch.Tensor) -> AttributeOutput:
+        comfy.model_management.load_model_gpu(self.patcher)
+        return cast("AttributeOutput", self.patcher.model(**kwargs))
+
+
 class ModelLoader:
     _IMAGENET_NORM = transforms.Compose(
         [
@@ -99,11 +226,14 @@ class ModelLoader:
     )
 
     def __init__(self):
-        self.embedding_model: tuple[SentenceTransformer, int] | None = None
-        self.vision_model_cache: dict[str, tuple[nn.Module, int, int, Compose]] = {}
-        self._model_info_cache: dict[str, dict[str, object]] = {}
-        self._hf_model_cache: dict[str, tuple[nn.Module, int, object]] = {}
-        self._hf_model_lock = threading.Lock()
+        self.embedding_model: tuple[ComfyEmbeddingModel, int] | None = None
+        self.vision_model_cache: dict[
+            str, tuple[ComfyVisionModel, int, int, Compose]
+        ] = {}
+        self._model_info_cache: dict[str, ModelInfo] = {}
+        self._hf_model_cache: dict[
+            str, tuple[ComfyAttributeModel, int, ImageProcessor]
+        ] = {}
         self.cnn_model: object | None = None
         self.download_mode: bool = False
         self.prepare_config = config["prepare"]
@@ -114,12 +244,37 @@ class ModelLoader:
             return ModelLoader._CLIP_NORM
         return ModelLoader._IMAGENET_NORM
 
-    def load_vision_model(self, model_key: str) -> tuple[nn.Module, int, int, Compose]:
+    def is_model_loaded(self, model_key: str, section: str = "vision_models") -> bool:
+        """Whether a model for this key is already loaded and cached."""
+        if section == "attribute_models":
+            return model_key in self._hf_model_cache
+        return model_key in self.vision_model_cache
+
+    def load_vision_model_patcher(self, model_key: str) -> ModelPatcher:
+        """Return the patcher behind a cached vision model for batch profiling."""
+        return self.load_vision_model(model_key)[0].patcher
+
+    def load_attribute_model_patcher(
+        self, model_key: str
+    ) -> tuple[ModelPatcher, int, int]:
+        """Return the patcher and processor input size for an attribute model.
+
+        Attribute models have a different memory profile from vision models, so
+        batch profiling needs their own patcher and resolution rather than a
+        borrowed one.
+        """
+        model, _output_dim, processor = self.load_hf_vision_model(model_key)
+        height, width = _processor_input_size(processor, model_key)
+        return model.patcher, height, width
+
+    def load_vision_model(
+        self, model_key: str
+    ) -> tuple[ComfyVisionModel, int, int, Compose]:
         cached = self.vision_model_cache.get(model_key)
         if cached is not None:
             return cached
 
-        vision_models: dict[str, dict[str, object]] = self.prepare_config[
+        vision_models: dict[str, VisionModelConfig] = self.prepare_config[
             "vision_models"
         ]
         if model_key not in vision_models:
@@ -129,14 +284,10 @@ class ModelLoader:
             )
 
         model_config = vision_models[model_key]
-        device: str = model_config["device"]
         name: str = model_config["name"]
         output_dim: int = model_config["output_dim"]
         variable_input: bool = model_config["variable_input"]
         global_pool: str = model_config["global_pool"]
-
-        if device != "cuda":
-            raise RuntimeError("device not set to 'cuda'")
 
         logger.info("Loading Vision Model (%s): %s...", model_key, name)
 
@@ -151,15 +302,19 @@ class ModelLoader:
             raise _missing_model_error(f"Vision model '{name}'") from e
 
         model = model.eval()
-        model.to(device)
 
-        logger.info("Vision model '%s' loaded on device: %s", model_key, device)
+        load_device = _load_device()
+        offload_device = _offload_device()
+        patcher = ModelPatcher(model, load_device, offload_device)
 
-        props = torch.cuda.get_device_properties(device)
-        total_memory = int(props.total_memory)
+        logger.info("Vision model '%s' targets device: %s", model_key, load_device)
 
-        data_config = timm.data.resolve_model_data_config(model)
-        input_size = data_config["input_size"]
+        total_memory = self._device_total_memory(load_device)
+
+        data_config = cast(
+            "dict[str, object]", resolve_model_data_config(model)
+        )
+        input_size = cast("tuple[int, int, int]", data_config["input_size"])
         model_input_size = (input_size[2], input_size[1])
 
         transform = self._select_transform(name)
@@ -171,59 +326,66 @@ class ModelLoader:
                 ]
             )
 
-        result = (model, output_dim, total_memory, transform)
+        result = (ComfyVisionModel(patcher), output_dim, total_memory, transform)
         self.vision_model_cache[model_key] = result
-        self._model_info_cache[model_key] = {
-            "variable_input": variable_input,
-            "input_size": model_input_size,
-        }
+        self._model_info_cache[model_key] = ModelInfo(
+            variable_input=variable_input, input_size=model_input_size
+        )
         return result
 
-    def get_model_info(self, model_key: str) -> dict[str, object]:
+    @staticmethod
+    def _device_total_memory(device: torch.device) -> int:
+        if device.type == "cuda":
+            props = torch.cuda.get_device_properties(device)
+            return int(props.total_memory)
+        return int(comfy.system_memory.virtual_memory_total())
+
+    def get_model_info(self, model_key: str) -> ModelInfo:
         if model_key not in self.vision_model_cache:
             self.load_vision_model(model_key)
-        return self._model_info_cache.get(model_key, {})
+        return self._model_info_cache[model_key]
 
-    def load_embedding_model(self) -> tuple[SentenceTransformer, int]:
+    def load_embedding_model(self) -> tuple[ComfyEmbeddingModel, int]:
         if self.embedding_model is not None:
             return self.embedding_model
 
-        embedding_config = self.prepare_config["prompt_representation"]
+        embedding_config: EmbeddingModelConfig = self.prepare_config[
+            "prompt_representation"
+        ]
         name: str = embedding_config["name"]
         output_dim: int = embedding_config["output_dim"]
-        device: str = embedding_config["device"]
-
-        if device != "cuda":
-            raise RuntimeError("`clip_device` not set to 'cuda'")
 
         try:
-            model = SentenceTransformer(
-                name, device=device, local_files_only=not self.download_mode
+            st_model = SentenceTransformer(
+                name, device="cpu", local_files_only=not self.download_mode
             )
         except OSError as e:
             raise _missing_model_error(f"Embedding model '{name}'") from e
 
-        self.embedding_model = (model, output_dim)
+        load_device = _load_device()
+        offload_device = _offload_device()
+        patcher = ModelPatcher(
+            SentenceTransformerModel(st_model), load_device, offload_device
+        )
+
+        self.embedding_model = (ComfyEmbeddingModel(patcher), output_dim)
         return self.embedding_model
 
-    def load_hf_vision_model(self, model_key: str) -> tuple[nn.Module, int, object]:
+    def load_hf_vision_model(
+        self, model_key: str
+    ) -> tuple[ComfyAttributeModel, int, ImageProcessor]:
         cached = self._hf_model_cache.get(model_key)
         if cached is not None:
             return cached
 
-        with self._hf_model_lock:
-            cached = self._hf_model_cache.get(model_key)
-            if cached is not None:
-                return cached
-            result = self._load_hf_vision_model_impl(model_key)
-
+        result = self._load_hf_vision_model_impl(model_key)
         self._hf_model_cache[model_key] = result
         return result
 
     def _load_hf_vision_model_impl(
         self, model_key: str
-    ) -> tuple[nn.Module, int, object]:
-        attribute_models: dict[str, dict[str, object]] = self.prepare_config[
+    ) -> tuple[ComfyAttributeModel, int, ImageProcessor]:
+        attribute_models: dict[str, AttributeModelConfig] = self.prepare_config[
             "attribute_models"
         ]
         if model_key not in attribute_models:
@@ -235,15 +397,19 @@ class ModelLoader:
         model_config = attribute_models[model_key]
         name: str = model_config["name"]
         output_dim: int = model_config["output_dim"]
-        device: str = model_config["device"]
+        load_device = _load_device()
+        offload_device = _offload_device()
 
         logger.info("Loading Attribute Model (%s): %s...", model_key, name)
 
         try:
+            result: tuple[ComfyAttributeModel, int, ImageProcessor]
             if model_key == "face_attributes":
-                processor = CLIPImageProcessor.from_pretrained(name)
+                processor = cast(
+                    "ImageProcessor", CLIPImageProcessor.from_pretrained(name)
+                )
                 num_labels = {"age": 9, "gender": 2, "race": 7}
-                model = MultiTaskClipVisionModel(num_labels=num_labels)
+                model: nn.Module = MultiTaskClipVisionModel(num_labels=num_labels)
                 cache_path = _face_attributes_checkpoint_path(name)
                 if not os.path.exists(cache_path):
                     if not self.download_mode:
@@ -255,18 +421,30 @@ class ModelLoader:
                 state_dict = load_safetensors(cache_path)
                 model.load_state_dict(state_dict, strict=False)
                 model = model.eval()
-                model.to(device)
                 logger.info(
-                    "Attribute model '%s' loaded on device: %s", model_key, device
+                    "Attribute model '%s' targets device: %s", model_key, load_device
                 )
-                result = (model, output_dim, processor)
+                result = (
+                    ComfyAttributeModel(ModelPatcher(model, load_device, offload_device)),
+                    output_dim,
+                    processor,
+                )
             elif model_key == "nsfw":
-                processor = AutoImageProcessor.from_pretrained(name)
-                model = AutoModelForImageClassification.from_pretrained(name)
-                model = model.eval()
-                model.to(device)
-                logger.info("NSFW model '%s' loaded on device: %s", model_key, device)
-                result = (model, output_dim, processor)
+                processor = cast(
+                    "ImageProcessor", AutoImageProcessor.from_pretrained(name)
+                )
+                classifier = cast(
+                    "nn.Module", AutoModelForImageClassification.from_pretrained(name)
+                )
+                model = ImageClassificationModel(classifier.eval())
+                logger.info(
+                    "NSFW model '%s' targets device: %s", model_key, load_device
+                )
+                result = (
+                    ComfyAttributeModel(ModelPatcher(model, load_device, offload_device)),
+                    output_dim,
+                    processor,
+                )
             else:
                 raise KeyError(f"Unknown attribute model key: {model_key}")
         except OSError as e:
@@ -276,18 +454,23 @@ class ModelLoader:
 
 
 def verify_models_present() -> None:
-    prepare: dict = config["prepare"]
+    prepare = config["prepare"]
     missing: list[str] = []
 
-    for key, model_config in prepare["vision_models"].items():
-        name: str = model_config["name"]
+    vision_models: dict[str, VisionModelConfig] = prepare["vision_models"]
+    for key, model_config in vision_models.items():
+        name = model_config["name"]
         try:
-            repo_id = timm.get_pretrained_cfg(name).hf_hub_id
+            repo_cfg = timm.get_pretrained_cfg(name)
+            repo_id = repo_cfg.hf_hub_id if repo_cfg is not None else None
+            if repo_id is None:
+                raise KeyError(name)
             snapshot_download(repo_id, local_files_only=True)
         except (OSError, KeyError):
             missing.append(f"Vision model '{name}' ({key})")
 
-    embedding_name: str = prepare["prompt_representation"]["name"]
+    embedding_config: EmbeddingModelConfig = prepare["prompt_representation"]
+    embedding_name = embedding_config["name"]
     embedding_repo = (
         embedding_name
         if "/" in embedding_name
@@ -298,7 +481,8 @@ def verify_models_present() -> None:
     except (OSError, KeyError):
         missing.append(f"Embedding model '{embedding_name}'")
 
-    for key, model_config in prepare["attribute_models"].items():
+    attribute_models: dict[str, AttributeModelConfig] = prepare["attribute_models"]
+    for key, model_config in attribute_models.items():
         name = model_config["name"]
         if "url" in model_config:
             model_path = os.path.join(mediapipe_models_dir, name)

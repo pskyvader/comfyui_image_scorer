@@ -3,37 +3,21 @@
 Each helper takes the graph as a parameter and avoids duplicating the same
 node-grouping / filtering patterns that appear across multiple pair-selection
 strategies.
+
+Pair canonicalization and timestamp ordering are owned by
+``domain.comparison.algorithm.history_collapse`` to ensure a single source of
+truth (P-02).
 """
 
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
 
 from ....core.configuration.settings import config
 from ...graph.node_proxy import NodeProxy
+from ...comparison.algorithm.history_collapse import canonicalize_pair, safe_parse_timestamp
 
 from ....domain.ports.graph import CrystalGraphPort
-
-
-def pair_key(filename_a: str, filename_b: str) -> tuple[str, str]:
-    first = str(filename_a)
-    second = str(filename_b)
-    return (
-        (first, second)
-        if first <= second
-        else (second, first)
-    )
-
-
-def safe_parse_timestamp(timestamp: str | None) -> tuple[int, datetime]:
-    if not timestamp:
-        return 1, datetime.min.replace(tzinfo=timezone.utc)
-    ts = str(timestamp).replace("Z", "+00:00")
-    parsed = datetime.fromisoformat(ts)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return 0, parsed
 
 
 def stable_seed_pool(images: list[NodeProxy]) -> list[NodeProxy]:
@@ -134,7 +118,7 @@ def collapse_comparisons(
         if filename_a == filename_b:
             self_links_removed += 1
             continue
-        canon_a, canon_b = pair_key(filename_a, filename_b)
+        canon_a, canon_b = canonicalize_pair(filename_a, filename_b)
         row["filename_a"] = canon_a
         row["filename_b"] = canon_b
         key = (canon_a, canon_b)

@@ -7,6 +7,7 @@ import random
 from tqdm import tqdm
 
 from ...core.configuration.settings import config
+from ..ports.repository import ComparisonRow, ImageRow
 
 INITIAL_MEAN = 25.0
 INITIAL_UNCERTAINTY = INITIAL_MEAN / 3.0
@@ -110,9 +111,9 @@ def update_ratings(winner: Rating, loser: Rating) -> tuple[Rating, Rating]:
 
 
 def replay_ratings(
-    rows: list[dict[str, object]], order: str = "random"
+    rows: list[ComparisonRow], order: str = "random"
 ) -> dict[str, tuple[Rating, int]]:
-    ordered: list[dict[str, object]]
+    ordered: list[ComparisonRow]
     if order == "default":
         ordered = sorted(rows, key=lambda r: int(r.get("id", 0) or 0))
     elif order == "reverse":
@@ -154,8 +155,8 @@ def replay_ratings(
     return {fid: (rating, counts.get(fid, 0)) for fid, rating in ratings.items()}
 
 
-def rating_from_row(row: dict[str, object]) -> Rating:
+def rating_from_row(row: ImageRow) -> Rating:
     return Rating(
-        mu_skill=float(row["rating_mu"]),
-        sigma_uncertainty=float(row["rating_sigma"]),
+        mu_skill=float(row.get("rating_mu", 0.0)),
+        sigma_uncertainty=float(row.get("rating_sigma", 0.0)),
     )

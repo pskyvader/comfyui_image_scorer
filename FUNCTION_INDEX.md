@@ -1,6 +1,6 @@
 # Current Structure Index
 
-This is the current file and symbol inventory for `comfyui_image_scorer`. Paths are relative to this directory. Descriptions state present ownership and behavior only; planned work is not represented as current structure.
+This is the live file and symbol inventory for `comfyui_image_scorer`. Paths are relative to this directory.
 
 ## Root files
 
@@ -10,7 +10,7 @@ This is the current file and symbol inventory for `comfyui_image_scorer`. Paths 
 | `pyproject.toml` | Package metadata, dependencies, scripts, and pytest configuration. |
 | `uv.lock` | Locked Python dependency resolution. |
 | `.gitignore` | Git exclusions for runtime and generated data. |
-| `__init__.py` | Lazy ComfyUI node exports. |
+| `__init__.py` | ComfyUI node exports; adds the host ComfyUI root to `sys.path` before importing the node registry. |
 | `scorer.py` | Command-line launcher. |
 | `pyrightconfig.json` | Strict type-checker configuration. |
 | `requirements.txt` | Generated dependency requirements. |
@@ -34,11 +34,11 @@ are implementation details.
 | `core/configuration/settings.py` | `config` | Process configuration object. |
 | `core/observability/logger.py` | `get_logger` | Create a package module logger. |
 | `core/observability/logger.py` | `capture_log_output` | Capture package logs and writes during a command. |
-| `core/io/serialization.py` | `discover_files` | Discover image and metadata pairs. |
-| `core/io/serialization.py` | `collect_valid_files` | Collect valid files, optionally in parallel. |
+| `core/io/serialization.py` | `discover_files` | Discover image and metadata pairs in sorted, reproducible traversal order. |
+| `core/io/serialization.py` | `collect_valid_files` | Collect valid files in parallel, returning results in input order. |
 | `core/utilities/concurrency.py` | `parallel_batch` | Run a batch function sequentially. |
-| `core/utilities/concurrency.py` | `parallel_for` | Run argument tuples through a worker pool. |
-| `domain/graph/chain_manager.py` | `ChainManager` | Own in-memory graph topology, chains, components, and comparison history. |
+| `core/utilities/concurrency.py` | `parallel_for` | Run argument tuples through a worker pool, returning results in input order. |
+| `domain/graph/chain_manager.py` | `ChainManager` | Own in-memory graph topology, chains, components, and comparison history. History entries are indexed by `(winner, loser)` so applying a comparison stays constant-time as the history grows. |
 | `domain/graph/node_proxy.py` | `NodeProxy` | Expose graph node data and navigation. |
 | `domain/graph/link_proxy.py` | `ComparisonRecord` | Public comparison edge record carrying the winner/loser link payload. |
 | `domain/graph/link_proxy.py` | `LinkProxy` | Expose one comparison link record. |
@@ -56,10 +56,15 @@ are implementation details.
 | `domain/ports/graph.py` | `CrystalGraphPort` | Protocol graph/database boundary; `add_link` replaces `add_comparison`. |
 | `domain/ports/repository.py` | `ImageRepository` | Image persistence protocol. |
 | `domain/ports/repository.py` | `ComparisonRepository` | Comparison persistence protocol. |
-| `domain/ports/files.py` | `FilePort` | Filesystem operations protocol. |
-| `domain/ports/loading.py` | `ModelLoader` | Vision and embedding model loader protocol. |
+| `domain/ports/files.py` | `FilePort` | Filesystem operations protocol: `read_json`, `write_json`, `file_exists`, `list_directory`, `make_directory`, `move_file`, `remove_file`, `ranked_root`, `compute_path`, `sync_metadata`, `clear_folder_cache`, `prewarm_folder_cache`, `deduplicate_scored`, and `cleanup_orphans`. |
+| `domain/ports/loading.py` | `ModelLoader` | Vision, embedding, and attribute model loader protocol. |
 | `application/services/graph_service.py` | `CrystalGraph` | Application graph facade and proxy factory. |
 | `application/services/image_processor.py` | `ImageProcessor` | Ranked-file processing, rebuild, metadata sync, and rating replay service. |
+| `application/services/image_processor.py` | `ImageProcessor.get_fast_total_count` | Counts candidate images with an application-owned `os.walk`/`Path.resolve` scan of the source tree; no port call. |
+| `application/services/image_processor.py` | `ImageProcessor.process_next_batch` | Selects one candidate batch with an application-owned `os.walk` and `os.path.getmtime` ordering; candidate reads, writes, moves, and deletes are delegated to `FilePort`. |
+| `application/services/image_processor.py` | `ImageProcessor.process_image_file` | Moves one image and its JSON into the ranked tree; every read, write, move, and delete is delegated to `FilePort`, with only the duplicate size check read locally. |
+| `application/services/image_processor.py` | `ImageProcessor.reorganize_folder_structure` | Detects loose tier files with an application-owned `Path.glob`/`os.listdir`/`Path.is_dir` scan; JSON reads, tier-path computation, directory creation, and the moves are delegated to `FilePort`. |
+| `application/services/image_processor.py` | `ImageProcessor.rebuild_database_from_ranked` | Rebuild flow; deduplication, orphan cleanup, metadata sync, and folder-cache control are delegated to `FilePort`. |
 | `application/services/scoring_service.py` | `ScoringService` | Image scoring orchestration service. |
 | `application/services/vector_list.py` | `VectorList` | Vector collection and derived-data service. |
 | `application/hyperparameters/hyperparameter_optimizer.py` | `HpoRunner` | Hyperparameter search runner. |
@@ -108,8 +113,16 @@ are implementation details.
 | `infrastructure/persistence/database.py` | `get_db_connection` | Open a configured SQLite connection. |
 | `infrastructure/persistence/images_repository.py` | `list_nodes` | Read image rows from SQLite. |
 | `infrastructure/persistence/comparisons_repository.py` | `add_comparison` | Insert a comparison row into SQLite. |
+| `infrastructure/persistence/comparisons_repository.py` | `add_comparisons_bulk` | Insert many comparison rows in one transaction, returning one id per input row. |
+| `infrastructure/persistence/images_repository.py` | `add_images_bulk` | Insert many image rows in one transaction. |
+| `infrastructure/persistence/images_repository.py` | `update_image_rating_states_bulk` | Apply many rating updates in one transaction. |
+| `infrastructure/persistence/path_handler.py` | `pop_sync_counters` | Return and reset the metadata-sync written/skipped counters. |
 | `infrastructure/persistence/file_manager.py` | `FileManager` | Concrete filesystem-port implementation. |
 | `infrastructure/ml_models/model_loader.py` | `ModelLoader` | Concrete ML model loading implementation. |
+| `infrastructure/ml_models/model_loader.py` | `ComfyVisionModel` | Vision-model wrapper that loads through ComfyUI memory management on every call. |
+| `infrastructure/ml_models/model_loader.py` | `ComfyEmbeddingModel` | Embedding-model wrapper that loads through ComfyUI memory management on every call. |
+| `infrastructure/ml_models/model_loader.py` | `ComfyAttributeModel` | Attribute-model wrapper that loads through ComfyUI memory management on every call. |
+| `infrastructure/ml_models/model_loader.py` | `MultiTaskClipVisionModel` | Multi-head face attribute network (age, gender, race). |
 | `infrastructure/cache/memory_cache.py` | `InMemoryCache` | In-memory TTL cache implementation. |
 
 ## Configuration and documentation
@@ -132,7 +145,7 @@ are implementation details.
 |---|---|
 | `core/__init__.py` | Core package marker and overview. |
 | `core/configuration/__init__.py` | Configuration package exports. |
-| `core/configuration/settings.py` | JSON configuration loading, validation, persistence, and mapping wrappers. |
+| `core/configuration/settings.py` | JSON configuration loading, validation, persistence, and mapping wrappers, plus the typed config payload shapes it validates against. |
 | `core/filesystem/__init__.py` | Filesystem path package exports. |
 | `core/filesystem/paths.py` | Runtime path constants for config, output, vectors, models, and caches. |
 | `core/observability/__init__.py` | Logging package exports. |
@@ -149,16 +162,7 @@ are implementation details.
 | Path | Description |
 |---|---|
 | `domain/__init__.py` | Domain package marker and overview. |
-| `domain/database/__init__.py` | Legacy database package marker retained in the current tree. |
 | `domain/graph/__init__.py` | Graph package exports. |
-| `domain/graph/chain_manager.py` | In-memory directed comparison graph, chains, components, and history; `apply_comparison` returns the updated comparison record. |
-| `domain/graph/link_proxy.py` | Link record proxy. |
-| `domain/graph/node_proxy.py` | Node data and graph-navigation proxy. |
-| `domain/graph/chain_proxy.py` | Chain navigation proxy. |
-| `domain/graph/component_proxy.py` | Connected-component proxy. |
-| `domain/graph/_init__.py` | Compatibility graph initializer module. |
-| `domain/graph/_/_init__.py` | Underscore-named graph compatibility initializer. |
-| `domain/graph/tests/__init__.py` | Graph test package marker. |
 | `domain/graph/tests/test_chain_manager.py` | Chain-manager behavior tests. |
 | `domain/vectors/__init__.py` | Vector package exports. |
 | `domain/vectors/terms.py` | Prompt and term extraction structures. |
@@ -169,11 +173,11 @@ are implementation details.
 | `domain/vectors/map_vector.py` | Map-backed vector implementation. |
 | `domain/vectors/person_map_vector.py` | Person-map vector implementation. |
 | `domain/vectors/embedding_vector.py` | Embedding vector implementation. |
-| `domain/vectors/image_vector.py` | Image vector base and processing behavior. |
+| `domain/vectors/image_vector.py` | Image vector base and processing behavior; calls the loaded vision model directly and reads its device from the model. |
 | `domain/vectors/tests/__init__.py` | Vector test package marker. |
 | `domain/vectors/tests/test_terms.py` | Term extraction tests. |
 | `domain/analysis/mediapipe_analysis.py` | Face and pose analysis through MediaPipe. |
-| `domain/analysis/attribute_analysis.py` | Age, gender, race, and NSFW model analysis. |
+| `domain/analysis/attribute_analysis.py` | Age, gender, race, and NSFW model analysis; calls the loaded attribute models directly and reads their device from the model. |
 | `domain/analysis/__init__.py` | Analysis package marker. |
 | `domain/analysis/trueskill.py` | Rating update, replay, and public-score calculations. |
 | `domain/analysis/image_analysis.py` | Image metrics, metadata, and batch analysis orchestration. |
@@ -198,7 +202,10 @@ are implementation details.
 | `domain/ports/ml_providers.py` | ML provider protocols. |
 | `domain/ports/repository.py` | Image and comparison repository protocols. |
 | `domain/ports/files.py` | Filesystem service protocol. |
-| `domain/ports/loading.py` | Model, map, batch, and training loader protocols. |
+| `domain/ports/loading.py` | Model, map, batch, and training loader protocols, plus the callable vision, embedding, attribute, transform, and processor surfaces those loaders return. |
+| `domain/ports/loading.py` | `TrainingLoader` | Training-vector, model-artifact, and cached-rule loader protocol. |
+| `domain/ports/loading.py` | `ModelTrainingService` | Trainer surface used to build and fit the feature-importance model. |
+| `domain/ports/loading.py` | `ScoringModel` | Loaded training model surface used for scoring and plotting. |
 | `domain/ports/graph.py` | CrystalGraph application port (Protocol). |
 
 ## Application
@@ -208,7 +215,7 @@ are implementation details.
 | `application/__init__.py` | Application package marker. |
 | `application/services/__init__.py` | Application service exports. |
 | `application/services/vector_list.py` | Vector collection and derived-data service. |
-| `application/services/image_processor.py` | Ranked-image discovery, database rebuild, metadata sync, and rating replay. |
+| `application/services/image_processor.py` | Ranked-image discovery, database rebuild, metadata sync, and rating replay. Ratings replay in stored link order so repeated rebuilds of unchanged files reproduce identical values. |
 | `application/services/scoring_service.py` | ComfyUI-facing scoring orchestration. |
 | `application/services/graph_service.py` | CrystalGraph facade over graph state and repositories. |
 | `application/data_transform/__init__.py` | Application transformation package marker. |
@@ -257,15 +264,6 @@ are implementation details.
 | `adapters/cli/commands/training.py` | Training and HPO commands. |
 | `adapters/cli/commands/vectors.py` | Vector-generation commands. |
 | `adapters/cli/commands/database.py` | Database maintenance commands. |
-| `adapters/comparison/__init__.py` | Comparison frontend compatibility adapter. |
-| `adapters/gallery/__init__.py` | Gallery frontend compatibility adapter. |
-| `adapters/maps/__init__.py` | Maps frontend compatibility adapter. |
-| `adapters/maps2/__init__.py` | Maps v2 compatibility adapter. |
-| `adapters/maps3/__init__.py` | Maps v3 compatibility adapter. |
-| `adapters/build/__init__.py` | Build frontend compatibility adapter. |
-| `adapters/analyze/__init__.py` | Analyze frontend compatibility adapter. |
-| `adapters/database/__init__.py` | Database frontend compatibility adapter. |
-| `adapters/training/__init__.py` | Training frontend compatibility adapter. |
 
 ## Frontend assets
 
@@ -293,43 +291,26 @@ are implementation details.
 | `adapters/frontend/gallery/gallery.html` | Gallery page markup. |
 | `adapters/frontend/gallery/gallery.js` | Gallery page behavior. |
 | `adapters/frontend/gallery/__init__.py` | Gallery frontend package marker. |
-| `adapters/frontend/maps/chains.css` | Chain-map styles. |
-| `adapters/frontend/maps/chains.html` | Chain-map markup. |
 | `adapters/frontend/maps/maps.css` | Map page styles. |
 | `adapters/frontend/maps/maps.html` | Map page markup. |
 | `adapters/frontend/maps/__init__.py` | Maps frontend package marker. |
+| `adapters/frontend/maps/graph_map/actions.js` | Graph-map actions. |
 | `adapters/frontend/maps/graph_map/backend.js` | Graph-map data access. |
 | `adapters/frontend/maps/graph_map/constants.js` | Graph-map constants. |
-| `adapters/frontend/maps/graph_map/controls.js` | Graph-map controls. |
+| `adapters/frontend/maps/graph_map/details_panel.js` | Graph-map details panel. |
+| `adapters/frontend/maps/graph_map/dom_cache.js` | Graph-map DOM cache. |
+| `adapters/frontend/maps/graph_map/events.js` | Graph-map event handling. |
+| `adapters/frontend/maps/graph_map/filters.js` | Graph-map filters. |
+| `adapters/frontend/maps/graph_map/hud.js` | Graph-map heads-up display. |
 | `adapters/frontend/maps/graph_map/interactions.js` | Graph-map interaction handling. |
 | `adapters/frontend/maps/graph_map/main.js` | Graph-map entry point. |
-| `adapters/frontend/maps/graph_map/overlay.js` | Graph-map overlay rendering. |
-| `adapters/frontend/maps/graph_map/renderer.js` | Graph-map renderer. |
+| `adapters/frontend/maps/graph_map/persistence.js` | Graph-map view persistence. |
+| `adapters/frontend/maps/graph_map/physics.js` | Graph-map physics. |
 | `adapters/frontend/maps/graph_map/three_renderer.js` | Three.js graph renderer. |
+| `adapters/frontend/maps/graph_map/tooltip.js` | Graph-map tooltip rendering. |
+| `adapters/frontend/maps/graph_map/utils.js` | Graph-map utilities. |
+| `adapters/frontend/maps/graph_map/webgl_physics.js` | WebGL graph physics. |
 | `adapters/frontend/maps/graph_map/__init__.py` | Graph-map package marker. |
-| `adapters/frontend/maps2/maps.css` | Maps v2 styles. |
-| `adapters/frontend/maps2/maps.html` | Maps v2 markup. |
-| `adapters/frontend/maps2/__init__.py` | Maps v2 package marker. |
-| `adapters/frontend/maps2/graph_map/actions.js` | Maps v2 graph actions. |
-| `adapters/frontend/maps2/graph_map/backend.js` | Maps v2 graph data access. |
-| `adapters/frontend/maps2/graph_map/constants.js` | Maps v2 graph constants. |
-| `adapters/frontend/maps2/graph_map/details_panel.js` | Maps v2 details panel. |
-| `adapters/frontend/maps2/graph_map/dom_cache.js` | Maps v2 DOM cache. |
-| `adapters/frontend/maps2/graph_map/events.js` | Maps v2 event handling. |
-| `adapters/frontend/maps2/graph_map/filters.js` | Maps v2 graph filters. |
-| `adapters/frontend/maps2/graph_map/hud.js` | Maps v2 heads-up display. |
-| `adapters/frontend/maps2/graph_map/interactions.js` | Maps v2 interaction handling. |
-| `adapters/frontend/maps2/graph_map/main.js` | Maps v2 graph entry point. |
-| `adapters/frontend/maps2/graph_map/persistence.js` | Maps v2 view persistence. |
-| `adapters/frontend/maps2/graph_map/physics.js` | Maps v2 graph physics. |
-| `adapters/frontend/maps2/graph_map/three_renderer.js` | Maps v2 Three.js renderer. |
-| `adapters/frontend/maps2/graph_map/tooltip.js` | Maps v2 tooltip rendering. |
-| `adapters/frontend/maps2/graph_map/utils.js` | Maps v2 graph utilities. |
-| `adapters/frontend/maps2/graph_map/webgl_physics.js` | Maps v2 WebGL physics. |
-| `adapters/frontend/maps2/graph_map/__init__.py` | Maps v2 graph package marker. |
-| `adapters/frontend/maps3/__init__.py` | Maps v3 package marker. |
-| `adapters/frontend/maps3/maps.html` | Maps v3 markup. |
-| `adapters/frontend/maps3/main.js` | Maps v3 entry point. |
 | `adapters/frontend/training/training.css` | Training page styles. |
 | `adapters/frontend/training/training.html` | Training page markup. |
 | `adapters/frontend/training/training.js` | Training page behavior. |
@@ -351,15 +332,18 @@ are implementation details.
 | `infrastructure/persistence/database.py` | SQLite connection and schema lifecycle. |
 | `infrastructure/persistence/comparisons_repository.py` | Comparison table operations and history cleanup; uses domain comparison helpers for canonicalization and timestamp parsing. |
 | `infrastructure/persistence/cleanup_orphans.py` | Orphaned-file cleanup. |
-| `infrastructure/persistence/deduplicate_scored.py` | Duplicate scored-file cleanup; uses domain comparison helper for timestamp sorting. |
+| `infrastructure/persistence/deduplicate_scored.py` | Duplicate scored-file cleanup; uses domain comparison helper for timestamp sorting. Cross-stem matching hashes only files whose byte size is shared, since a unique size cannot be a duplicate. |
 | `infrastructure/persistence/folder_organizer.py` | Ranked-folder organization. |
 | `infrastructure/persistence/images_repository.py` | Image table operations. |
 | `infrastructure/persistence/path_handler.py` | Runtime path, image-file handling, and history sorting using domain comparison helper. |
 | `infrastructure/persistence/file_manager.py` | Concrete filesystem-port implementation. |
 | `infrastructure/external_services/__init__.py` | External-service package marker. |
 | `infrastructure/external_services/mediapipe_models.py` | Explicit MediaPipe model download and location handling. |
-| `infrastructure/ml_models/batch_sizer.py` | Model batch-size estimation. |
-| `infrastructure/ml_models/model_loader.py` | Vision, embedding, and training model loading. |
+| `infrastructure/ml_models/batch_sizer.py` | Model batch-size estimation; profiles CUDA memory through the model's ComfyUI patcher and returns a conservative size on non-CUDA devices. |
+| `infrastructure/ml_models/model_loader.py` | Vision, embedding, and attribute model loading; wraps each model in a ComfyUI `ModelPatcher` and resolves its device through ComfyUI memory management. |
+| `infrastructure/ml_models/model_loader.py` | `set_hub_offline` | Flips Hugging Face hub offline mode after import-time constants were mirrored. |
+| `infrastructure/ml_models/model_loader.py` | `verify_models_present` | Raises when configured models are not downloaded locally. |
+| `infrastructure/ml_models/model_loader.py` | `download_configured_models` | Downloads every configured model in download mode. |
 | `infrastructure/ml_models/__init__.py` | ML-model package marker. |
 | `infrastructure/ml_models/image_export.py` | Image export implementation. |
 | `infrastructure/ml_models/plot.py` | Training and analysis plotting. |
@@ -378,9 +362,9 @@ are implementation details.
 | Path | Description |
 |---|---|
 | `tests/test_architecture.py` | Layer-import, database-boundary, and proxy-construction architecture gates. |
+| `tests/test_deduplicate_scored.py` | Scored-tree deduplication over temporary directories: same-stem copies, filename conflicts, and cross-stem byte-identical detection across differing sizes. |
 | `tests/test_general.py` | General command, endpoint, and integration contract tests. |
 | `tests/test_graph_facade.py` | CrystalGraph facade behavior tests. |
+| `tests/test_graph_helpers.py` | History-collapse and graph-helper algorithm tests. |
+| `tests/test_image_processor.py` | `ImageProcessor` behavior: retained-versus-delegated filesystem operations, plus rebuild-from-ranked coverage (image rebuild, history replay and collapse, prompt tags, JSON sync, and run-to-run determinism). |
 
-## Inventory notes
-
-No planned path or removed API is presented as current structure.

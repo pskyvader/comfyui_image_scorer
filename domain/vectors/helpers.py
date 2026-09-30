@@ -11,7 +11,7 @@ import numpy.typing as npt
 def l2_normalize_batch(vectors: npt.NDArray[np.float32]) -> npt.NDArray[np.float32]:
     _start = time.perf_counter()
     eps: float = 1e-12
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True).astype(np.float32)
     norms = np.maximum(norms, eps)
     result = vectors / norms
 

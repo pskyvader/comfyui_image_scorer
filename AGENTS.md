@@ -40,7 +40,9 @@ The dependency direction is `core -> domain -> application -> adapters`. Infrast
 ## Code rules
 
 - Use relative imports at module scope. The CLI parser may lazily import heavy command modules when required for startup performance.
-- Use strict typing. Do not add `Any` to protocols or domain interfaces; use concrete row, payload, proxy, and result types.
+- Use strict typing and human readable names. Do not add `Any` to protocols or domain interfaces; use concrete row, payload, proxy, and result types.
+- Do not silence diagnostics with a blanket `# type: ignore` or `# pyright: ignore`. Fix the cause instead. A targeted suppression is allowed only when the code must reach an API that has no public equivalent, and the line must carry an in-line comment saying which API and why. Private member access is otherwise enforced by `ruff check --select SLF001`; do not suppress it.
+- Do not call another module's or another class's private functions or attributes. If a private name must be reached from outside its owner, promote it to a real public API and say why in the change description. `_`-prefixed names are module and class implementation details.
 - Avoid default arguments and optional sentinels for required configuration or behavior. Preserve an existing public default only when removing it would break a documented compatibility contract.
 - Do not swallow errors. Allowed exception handling is cleanup in `finally`, translation followed by `raise ... from`, and existing CUDA OOM retry behavior where adaptive batching is the function purpose.
 - Keep mutable state out of `core`, `domain`, and `application`; put state in the owning adapter or infrastructure service.
@@ -74,7 +76,7 @@ production behavior.
 For a code change, use this order:
 
 1. Focused pytest suite.
-2. `ruff check --select ARG,F401 --target-version py313 .`.
+2. `ruff check --select ARG,F401,SLF001 --target-version py313 .`.
 3. `pyright` using the package configuration.
 4. Architecture and database/proxy boundary tests.
 5. ComfyUI node registration smoke check.

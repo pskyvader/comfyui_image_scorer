@@ -12,6 +12,7 @@ from ...domain.graph.component_proxy import ComponentProxy
 from ...domain.graph.link_proxy import LinkProxy
 from ...domain.graph.chain_proxy import ChainProxy
 from ...domain.graph.node_proxy import NodeProxy
+from .repository import ComparisonRow, ImageRow
 
 
 class CrystalGraphPort(Protocol):
@@ -28,8 +29,8 @@ class CrystalGraphPort(Protocol):
 
     def rebuild_from_database(
         self,
-        images: list[dict[str, object]] | None = None,
-        comparisons: list[dict[str, object]] | None = None,
+        images: list[ImageRow] | None = None,
+        comparisons: list[ComparisonRow] | None = None,
     ) -> None: ...
 
     def read_json_file(self, path: str) -> dict[str, object]: ...
@@ -109,9 +110,9 @@ class CrystalGraphPort(Protocol):
 
     # -- Image snapshot cache                                             #
 
-    def get_images_snapshot(self) -> list[dict[str, object]] | None: ...
+    def get_images_snapshot(self) -> list[ImageRow] | None: ...
 
-    def set_images_snapshot(self, images: list[dict[str, object]]) -> None: ...
+    def set_images_snapshot(self, images: list[ImageRow]) -> None: ...
 
     def invalidate_images_snapshot(self) -> None: ...
 

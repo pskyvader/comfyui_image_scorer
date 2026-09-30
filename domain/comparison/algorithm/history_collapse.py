@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timezone
 
+from ...ports.repository import ComparisonRow
+
 
 def canonicalize_pair(filename_a: str, filename_b: str) -> tuple[str, str]:
     first = str(filename_a)
@@ -28,7 +30,7 @@ def safe_parse_timestamp(timestamp: str | None) -> tuple[int, datetime]:
     return 0, parsed
 
 
-def _sort_key(row: dict[str, object]) -> tuple[datetime, int]:
+def _sort_key(row: ComparisonRow) -> tuple[datetime, int]:
     return (
         safe_parse_timestamp(str(row.get("timestamp") or ""))[1],
         int(row.get("id", 0)),
@@ -36,9 +38,9 @@ def _sort_key(row: dict[str, object]) -> tuple[datetime, int]:
 
 
 def collapse_comparison_history(
-    rows: list[dict[str, object]],
+    rows: list[ComparisonRow],
     valid_filenames: set[str],
-) -> tuple[list[dict[str, object]], dict[str, int]]:
+) -> tuple[list[ComparisonRow], dict[str, int]]:
     """Collapse comparison rows to their canonical survivor set.
 
     Returns the kept rows in deterministic order, along with the same
@@ -50,7 +52,7 @@ def collapse_comparison_history(
     same_direction_duplicates_removed = 0
     contradictions_removed = 0
 
-    grouped: dict[tuple[str, str], list[dict[str, object]]] = defaultdict(list)
+    grouped: dict[tuple[str, str], list[ComparisonRow]] = defaultdict(list)
     for row in rows:
         filename_a = str(row.get("filename_a", ""))
         filename_b = str(row.get("filename_b", ""))
@@ -65,13 +67,13 @@ def collapse_comparison_history(
         row["filename_b"] = canon_b
         grouped[(canon_a, canon_b)].append(row)
 
-    kept_rows: list[dict[str, object]] = []
+    kept_rows: list[ComparisonRow] = []
     for pair_rows in grouped.values():
-        by_winner: dict[str, list[dict[str, object]]] = defaultdict(list)
+        by_winner: dict[str, list[ComparisonRow]] = defaultdict(list)
         for row in pair_rows:
             by_winner[str(row["winner"])].append(row)
 
-        survivors_by_winner: list[dict[str, object]] = []
+        survivors_by_winner: list[ComparisonRow] = []
         for same_winner_rows in by_winner.values():
             ordered = sorted(same_winner_rows, key=_sort_key)
             if len(ordered) > 1:

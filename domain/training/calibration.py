@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...domain.ports.loading import TrainingDiagnostics
+
 
 import numpy as np
 
@@ -49,11 +51,11 @@ def build_score_calibration(
     }
 
 
-def extract_score_calibration(data: dict[str, object] | None) -> dict[str, object] | None:
-    if not data or "score_calibration" not in data:
+def extract_score_calibration(data: TrainingDiagnostics | None) -> dict[str, object] | None:
+    if not data or data.score_calibration is None:
         return None
 
-    calibration = data["score_calibration"]
+    calibration = data.score_calibration
     if isinstance(calibration, np.ndarray) and calibration.shape == ():
         calibration = calibration.item()
 

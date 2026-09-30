@@ -1,4 +1,5 @@
 """Vector listing helpers over the split/full vector files."""
+
 from typing import Iterator, Any, Union, TypedDict, cast
 import numpy as np
 import numpy.typing as npt
@@ -34,6 +35,7 @@ VectorType = Union[
     KeypointVector,
     PersonMapVector,
 ]
+
 
 class VectorConfig(TypedDict):
     vector: VectorType
@@ -149,7 +151,9 @@ class VectorList:
                 model_key=current_type.get("model_key", ""),
             )
 
-    def _exclude_present_entry(self, current_vector: VectorType) -> dict[str, dict[str, Any]]:
+    def _exclude_present_entry(
+        self, current_vector: VectorType
+    ) -> dict[str, dict[str, Any]]:
 
         new_entries: dict[str, dict[str, Any]] = {}
         current_list = set(current_vector.vector_list.keys())
@@ -212,7 +216,12 @@ class VectorList:
                 new_image_paths: dict[str, str] = self._exclude_present_image_path(
                     image_vector
                 )
-                image_vector.create_vector_list_from_paths(new_image_paths)
+                # logger.info(
+                #     f"Image paths: {image_vector.path_list}, images list: {image_vector.image_list}"
+                # )
+                # logger.info(f"New image paths: {new_image_paths}")
+                if new_image_paths:
+                    image_vector.create_vector_list_from_paths(new_image_paths)
                 self.sorted_vectors[v]["vector"] = image_vector
             elif c["type"] == self._POSITION:
                 position_vector = cast(PositionVector, c["vector"])
@@ -242,6 +251,11 @@ class VectorList:
     def validate_and_convert(
         self, data: list[list[float]], name: str, target_size: int
     ) -> npt.NDArray[np.float32]:
+        # np.array([]) is one-dimensional, so the width check below would raise
+        # IndexError instead of reporting the real problem. A category with no
+        # usable rows is legitimately empty and is filtered out downstream.
+        if not data:
+            return np.zeros((0, target_size), dtype=np.float32)
         arr = np.array(data, dtype=np.float32)
         if arr.shape[1] != target_size:
             raise ValueError(

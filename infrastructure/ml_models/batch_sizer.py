@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any, cast
 import time
 
 import torch
 from torch import nn
 
+import comfy.model_management
+from comfy.model_patcher import ModelPatcher
+
 from ...core.io.serialization import atomic_write_json, load_json
 from ...core.observability.logger import get_logger
 
-from ...core.configuration.settings import config
+from ...core.configuration.settings import (
+    AttributeModelConfig,
+    VisionModelConfig,
+    config,
+)
 from .model_loader import model_loader
 from ...core.filesystem.paths import vectors_size_file
 
@@ -33,14 +41,38 @@ class ProfileData:
     fixed_overhead: int | None = None
     pixel_cost: float | None = None
     r_squared: float | None = None
-    history: dict[str, list[HistoryEntry]] = field(default_factory=dict)
+    history: dict[str, list[HistoryEntry]] = field(default_factory=lambda: {})
 
 
 class BatchSizer:
-    def __init__(self, model_key: str) -> None:
+    """Calibrates a batch size for one model by measuring real peak VRAM.
+
+    Vision and attribute models are calibrated separately. They have different
+    parameters and different call signatures, so sharing one number between
+    them is what caused a face pass to run 764 images in a single forward.
+    """
+
+    def __init__(self, model_key: str, section: str = "vision_models") -> None:
         self._model_key = model_key
+        self._section = section
         self._active: ProfileData | None = None
         self._ready: bool = False
+
+    def _probe(self) -> tuple[ModelPatcher, int, int]:
+        """Return the patcher to calibrate, plus the processor input size.
+
+        Vision models are calibrated at whatever resolution the caller asks for,
+        so their size comes back as zero.
+        """
+        if self._section == "attribute_models":
+            return model_loader.load_attribute_model_patcher(self._model_key)
+        return model_loader.load_vision_model_patcher(self._model_key), 0, 0
+
+    def _run_probe(self, model: nn.Module, batch: torch.Tensor) -> None:
+        if self._section == "attribute_models":
+            model(pixel_values=batch)
+        else:
+            model(batch)
 
     def _ensure_session_profiled(self) -> None:
         _start = time.perf_counter()
@@ -48,28 +80,47 @@ class BatchSizer:
             return
 
         data, _ = load_json(vectors_size_file, expect=dict)
-        profiles_data = (
-            data["profiles"] if isinstance(data, dict) and "profiles" in data else []
+        profiles_data: list[dict[str, Any]] = (
+            data["profiles"] if data is not None and "profiles" in data else []
         )
 
         profiles: list[ProfileData] = []
         for profile_data in profiles_data:
-            history_data = profile_data["history"] if "history" in profile_data else {}
+            history_data: dict[str, list[dict[str, Any]]] = (
+                profile_data["history"] if "history" in profile_data else {}
+            )
             history = {
                 key: [HistoryEntry(**entry) for entry in entries]
                 for key, entries in history_data.items()
             }
-            profile_fields = {
+            profile_fields: dict[str, Any] = {
                 key: value
                 for key, value in profile_data.items()
                 if key not in ("history", "caps")
             }
             profiles.append(ProfileData(**profile_fields, history=history))
 
-        vision_models = config["prepare"]["vision_models"]
-        model_cfg = vision_models[self._model_key]
-        if not model_cfg:
-            model_cfg = next(iter(vision_models.values()), {})
+        vision_models: dict[str, VisionModelConfig] = config["prepare"][
+            "vision_models"
+        ]
+        attribute_models: dict[str, AttributeModelConfig] = config["prepare"][
+            "attribute_models"
+        ]
+        model_cfg: VisionModelConfig | AttributeModelConfig
+        if self._section == "attribute_models":
+            if self._model_key not in attribute_models:
+                raise KeyError(
+                    f"Attribute model key '{self._model_key}' not found in "
+                    f"prepare_config. Available: {list(attribute_models)}"
+                )
+            model_cfg = attribute_models[self._model_key]
+        else:
+            if self._model_key not in vision_models:
+                raise KeyError(
+                    f"Vision model key '{self._model_key}' not found in "
+                    f"prepare_config. Available: {list(vision_models)}"
+                )
+            model_cfg = vision_models[self._model_key]
         model_name: str = model_cfg["name"]
         device_id: str = model_cfg["device"]
         device_name = torch.cuda.get_device_name(device_id)
@@ -90,7 +141,10 @@ class BatchSizer:
                 model_memory_bytes=0,
             )
 
-        if model_loader.vision_model_cache:
+        # Re-measure only when this sizer's model is already resident; otherwise
+        # keep what the profile recorded and let the first profiling pass
+        # refresh it.
+        if model_loader.is_model_loaded(self._model_key, self._section):
             self._active.model_memory_bytes = int(
                 torch.cuda.memory_allocated(self._active.device_id)
             )
@@ -105,6 +159,17 @@ class BatchSizer:
 
         return result
 
+    def _calibration_resolution(self, width: int, height: int) -> tuple[int, int]:
+        """The resolution this sizer actually calibrates at.
+
+        Attribute models are profiled at the resolution their own processor
+        crops to, not at whatever the caller asked for.
+        """
+        if self._section == "attribute_models":
+            _patcher, probe_height, probe_width = self._probe()
+            return probe_width, probe_height
+        return width, height
+
     def get(
         self,
         width: int,
@@ -117,11 +182,23 @@ class BatchSizer:
         profile = self._active
         assert profile is not None
 
+        width, height = self._calibration_resolution(width, height)
         key = self._resolution_key(width, height)
         if key in profile.history and not rebuild:
             result = max(entry.batch_size for entry in profile.history[key])
             if bound is not None:
                 result = min(result, bound)
+            # A recorded batch was measured against whatever else was resident
+            # at the time. Re-check it against current headroom so a stale
+            # profile cannot hand back a size that no longer fits.
+            if not self._fits_now(key, result, profile):
+                logger.info(
+                    f"Recorded batch size {result} for {key} no longer fits "
+                    f"({self._model_key}); re-profiling"
+                )
+                result = self._profile_new_resolution(width, height, True, bound)
+                if bound is not None:
+                    result = min(result, bound)
 
             return result
 
@@ -146,8 +223,28 @@ class BatchSizer:
         if key not in profile.history:
             profile.history[key] = []
 
-        model, _, _, _ = model_loader.load_vision_model(model_key=self._model_key)
-        profile.model_memory_bytes = int(torch.cuda.memory_allocated(profile.device_id))
+        if self._section == "attribute_models":
+            patcher, _probe_height, _probe_width = self._probe()
+        else:
+            patcher = model_loader.load_vision_model_patcher(self._model_key)
+        if patcher.load_device.type != "cuda":
+            return min(1, bound if bound is not None else 1)
+
+        comfy.model_management.load_model_gpu(patcher)
+        model = patcher.model
+        if not self._fully_resident(model):
+            # Probing a split model cannot work: some weights sit on the
+            # offload device while the probe tensor is on the GPU, and a
+            # forward through it faults rather than raising. Report it instead
+            # of letting every candidate "fail" and implying a size problem.
+            logger.warning(
+                f"Model '{self._model_key}' is split across devices after "
+                "loading, so it cannot be batch profiled; using a batch of 1"
+            )
+            return min(1, bound if bound is not None else 1)
+        profile.model_memory_bytes = int(
+            torch.cuda.memory_allocated(patcher.load_device)
+        )
 
         device_id = profile.device_id
         available = int(profile.total_memory) - profile.model_memory_bytes
@@ -246,17 +343,25 @@ class BatchSizer:
         )
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats(device_id)
-        batch_tensor = torch.zeros((candidate, 3, height, width), device=device_id)
+        # Probe on the device and in the dtype the model actually holds.
+        # ComfyUI partially offloads a model when memory is tight, so building
+        # the probe from config alone puts it on a different device than some of
+        # the weights, and the failure looks like a size problem rather than a
+        # placement one.
+        first_parameter = next(model.parameters())
+        batch_tensor = torch.zeros(
+            (candidate, 3, height, width),
+            device=first_parameter.device,
+            dtype=first_parameter.dtype,
+        )
         try:
-            with torch.inference_mode():
-                model.eval()
-                model(batch_tensor)
-                torch.cuda.synchronize(device_id)
+            model.eval()
+            self._run_probe(model, batch_tensor)
+            torch.cuda.synchronize(device_id)
 
             peak = int(torch.cuda.max_memory_allocated(device_id))
             delta = peak - profile.model_memory_bytes
-            threshold = int(profile.total_memory)
-            if peak < threshold:
+            if peak < self._available_for(profile):
                 profile.history[key].append(
                     HistoryEntry(
                         batch_size=candidate,
@@ -273,6 +378,42 @@ class BatchSizer:
             del batch_tensor
             torch.cuda.empty_cache()
         return result
+
+    @staticmethod
+    def _fully_resident(model: nn.Module) -> bool:
+        """True when every parameter sits on the same device."""
+        devices = {parameter.device for parameter in model.parameters()}
+        return len(devices) == 1
+
+    def _available_for(self, profile: ProfileData) -> int:
+        """Memory a probe may claim, given what is already resident.
+
+        Measuring against total device memory is how a batch gets recorded that
+        fits in isolation but not once the rest of the pipeline is loaded, so
+        the threshold is what ComfyUI reports as free right now.
+        """
+        free = cast("int", comfy.model_management.get_free_memory(profile.device_id))
+        return min(profile.total_memory, free)
+
+    def _fits_now(self, key: str, candidate: int, profile: ProfileData) -> bool:
+        """True when a recorded batch still fits in current headroom.
+
+        Uses the delta measured for that exact batch size, so this is an
+        estimate rather than a fresh probe. When it says no, the caller
+        re-profiles for real rather than guessing.
+        """
+        if candidate <= 1:
+            return True
+        recorded = [
+            entry
+            for entry in profile.history.get(key, [])
+            if entry.batch_size == candidate
+        ]
+        if not recorded:
+            return False
+        entry = max(recorded, key=lambda e: e.batch_size)
+        model_memory = int(torch.cuda.memory_allocated(profile.device_id))
+        return (model_memory + entry.delta_memory) < self._available_for(profile)
 
     def _fit_model(self) -> None:
         _start = time.perf_counter()
@@ -330,9 +471,8 @@ class BatchSizer:
 
             return
 
-        data, _ = load_json(vectors_size_file, expect=dict)
-        if not isinstance(data, dict):
-            data = {}
+        loaded, _ = load_json(vectors_size_file, expect=dict)
+        data: dict[str, Any] = loaded if loaded is not None else {}
         if "profiles" not in data:
             data["profiles"] = []
 
@@ -359,7 +499,7 @@ class BatchSizer:
             "history": history_payload,
         }
 
-        existing_profiles = data["profiles"]
+        existing_profiles: list[dict[str, Any]] = data["profiles"]
         for index, existing in enumerate(existing_profiles):
             if (
                 existing["model_name"] == profile.model_name
