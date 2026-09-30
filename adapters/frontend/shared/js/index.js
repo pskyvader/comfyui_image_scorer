@@ -11,12 +11,8 @@ const router = {
             section: "gallery",
         },
         chains: {
-            template: "/static/maps2/maps.html",
+            template: "/static/maps/maps.html",
             section: "chains",
-        },
-        maps3: {
-            template: "/static/maps3/maps.html",
-            section: "maps3",
         },
         database: {
             template: "/static/database/database.html",

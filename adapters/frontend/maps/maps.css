@@ -1,5 +1,3 @@
-/* Chain Map Styles */
-
 #graph-container {
     width: 100%;
     height: 65dvh;
@@ -26,7 +24,6 @@
     max-width: 170px;
 }
 
-/* Range Sliders */
 input[type=range] {
     -webkit-appearance: none;
     background: transparent;
@@ -55,25 +52,6 @@ input[type=range]::-webkit-slider-thumb {
     box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
 }
 
-/* Node Highlight */
-.highlight {
-    stroke: #f472b6 !important;
-    stroke-width: 3px !important;
-}
-
-@media (max-width: 768px) {
-    #graph-container {
-        height: 50dvh;
-    }
-}
-
-/* Accordion (details/summary) Styling */
-.physics-summary::-webkit-details-marker,
-.filter-summary::-webkit-details-marker {
-    display: none;
-}
-
-/* Range Slider with cyan accent for physics */
 input[type=range].accent-cyan-500::-webkit-slider-thumb {
     background: #06b6d4 !important;
     box-shadow: 0 0 10px rgba(6, 182, 212, 0.5) !important;
@@ -89,7 +67,6 @@ input[type=range].accent-cyan-500::-ms-thumb {
     box-shadow: 0 0 10px rgba(6, 182, 212, 0.5) !important;
 }
 
-/* Dual Slider Styling */
 .dual-slider-container {
     position: relative;
     height: 24px;
@@ -110,4 +87,30 @@ input[type=range].accent-cyan-500::-ms-thumb {
     pointer-events: auto;
     position: relative;
     z-index: 5;
+}
+
+@media (max-width: 768px) {
+    #graph-container {
+        height: 50dvh;
+    }
+}
+
+.physics-summary::-webkit-details-marker,
+.layout-summary::-webkit-details-marker,
+.filter-summary::-webkit-details-marker {
+    display: none;
+}
+
+.webgl-error {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.8);
+    color: #ef4444;
+    font-size: 14px;
+    text-align: center;
+    padding: 20px;
+    z-index: 40;
 }

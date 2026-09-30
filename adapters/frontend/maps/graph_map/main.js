@@ -1,662 +1,590 @@
-class ChainMapUI {
+const mapsMainLogger = FrontendLogger.create("maps.graph_map.main");
+
+globalThis.ChainMapUI = class {
     constructor() {
         this.rawData = null;
         this.renderer = null;
         this.selectedNodes = [];
-        this.labelsOverridden = false;
-        this._showMainChains = true;
-        this._showRegularLinks = true;
-        this.width = 800;
-        this.height = 600;
-        this._simLinks = [];
+        this._showMain = true;
+        this._showSecondary = true;
+        this._showRegular = false;
+        this._showLabels = true;
+        this._mainLinkPhysics = true;
+        this._secondaryChainPhysics = true;
+        this._buoyancyEnabled = true;
+        this._repulsionEnabled = true;
+        this._dampingEnabled = true;
+        this._collisionsEnabled = true;
+        this._activeForces = [];
+        this._forceIndex = 0;
+        this._tickSkipAccum = 0;
+        this._forcesPerTick = 5;
+        this._tickFrequency = 1.0;
+        this._useWebGLPhysics = false;
+        this._webglToastShown = false;
+        this._webglPhysics = null;
+        this._webglNeedsReinit = false;
         this._simNodes = [];
-
-        // Layout config, updated by sliders
-        this._layoutConfig = {
-            compSpacing: 900,
-            scoreScale: 1500,
-            jitter: 120,
-            spread: 1.5,
+        this._simLinks = [];
+        this._paused = true;
+        this._simAlpha = 1;
+        this._tickCount = 0;
+        this._forceStats = {};
+        this._statsCursor = 0;
+        this._maxNodes = 0;
+        this._nodePower = 0.5;
+        this._physicsCfg = {
+            baseLinkLength: globalThis.RENDER.physics.defaultBaseLinkLength,
+            linkScoreMultiplier: 2,
+            linkStrength: globalThis.RENDER.physics.defaultLinkStrength,
+            secondaryLinkStrength: globalThis.RENDER.physics.defaultLinkStrength,
+            buoyancyStrength: globalThis.RENDER.physics.defaultBuoyancyStrength,
+            repulsionStrength: globalThis.RENDER.physics.defaultRepulsionStrength,
+            repulsionRange: globalThis.RENDER.physics.defaultRepulsionRange,
+            velocityDecay: globalThis.RENDER.physics.defaultVelocityDecay,
+            nodeBaseSize: globalThis.RENDER.physics.defaultNodeBaseSize,
+            alphaDecay: 0.0005,
+            alphaMin: 0.02,
+            minAreaPerNode: 40000,
+            maxVelocity: 100,
         };
-    }
-
-    cacheElements() {
-        this.container = document.getElementById("graph-container");
-        this.loader = document.getElementById("loader");
-        this.tooltip = document.getElementById("tooltip");
-        this.refreshBtn = document.getElementById("refresh-btn");
-        this.resetViewBtn = document.getElementById("reset-view-btn");
-
-        this.minCompFilter = document.getElementById("min-comp-filter");
-        this.minCompVal = document.getElementById("min-comp-val");
-        this.maxCompFilter = document.getElementById("max-comp-filter");
-        this.maxCompVal = document.getElementById("max-comp-val");
-
-        this.minChainFilter = document.getElementById("min-chain-filter");
-        this.minChainVal = document.getElementById("min-chain-val");
-        this.maxChainFilter = document.getElementById("max-chain-filter");
-        this.maxChainVal = document.getElementById("max-chain-val");
-
-        this.minCompCountFilter = document.getElementById("min-comp-count-filter");
-        this.minCompCountVal = document.getElementById("min-comp-count-val");
-        this.maxCompCountFilter = document.getElementById("max-comp-count-filter");
-        this.maxCompCountVal = document.getElementById("max-comp-count-val");
-
-        this.linkLengthFilter = document.getElementById("link-length-filter");
-        this.linkLengthVal = document.getElementById("link-length-val");
-
-        this.collapsibleFilter = document.getElementById("collapsible-filter");
-        this.nodeTypeFilter = document.getElementById("node-type-filter");
-
-        this.statNodes = document.getElementById("stat-nodes");
-        this.statComponents = document.getElementById("stat-components");
-        this.statComparisons = document.getElementById("stat-comparisons");
-        this.statChains = document.getElementById("stat-chains");
-
-        this.nodeDetails = document.getElementById("node-details");
-        this.compareSelectedBtn = document.getElementById("compare-selected-btn");
-
-        this._layoutCompSpacing = document.getElementById("layout-comp-spacing");
-        this._layoutCompSpacingVal = document.getElementById("layout-comp-spacing-val");
-        this._layoutScoreScale = document.getElementById("layout-score-scale");
-        this._layoutScoreScaleVal = document.getElementById("layout-score-scale-val");
-        this._layoutJitter = document.getElementById("layout-jitter");
-        this._layoutJitterVal = document.getElementById("layout-jitter-val");
-        this._layoutSpread = document.getElementById("layout-spread");
-        this._layoutSpreadVal = document.getElementById("layout-spread-val");
-        this.selectedCountEl = document.getElementById("selected-count");
-        this.zoomScaleEl = document.getElementById("zoom-scale");
-        this.viewCoordsEl = document.getElementById("view-coords");
-
-        if (this.container.clientWidth > 0) {
-            this.width = this.container.clientWidth;
-            this.height = this.container.clientHeight;
-        }
-    }
-
-    _adjustContainerHeight() {
-        if (!this.container) return;
-        const newH = `${Math.round(window.innerHeight * 0.65)}px`;
-        if (this.container.style.height !== newH) {
-            this.container.style.height = newH;
-        }
     }
 
     async init() {
-        console.log("Initializing ChainMapUI...");
-        this.cacheElements();
-        if (!this.container) return;
-        this._adjustContainerHeight();
-
+        this.ce();
+        if (!this.container) {
+            return;
+        }
         this.loadFiltersFromStorage();
-        this.setupThreeRenderer();
+        this._initActiveForces();
+        this.setupRenderer();
+        if (!this.renderer || !this.renderer.canvas) {
+            globalThis.showError("WebGL unavailable");
+            if (this.loader) {
+                this.loader.classList.add("hidden");
+            }
+            return;
+        }
         this.renderer.resize();
-        const self = this;
         window.addEventListener("resize", () => {
-            self._adjustContainerHeight();
-            // ResizeObserver on container handles the actual renderer resize
+            if (this.renderer) {
+                this.renderer.resize();
+            }
         });
-        this.attachEventListeners();
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden) {
+                this._stopSim();
+            } else if (!this._paused && this._simNodes.length && this._simAlpha > 0.001) {
+                this._startSim();
+            }
+        });
+        this._listen();
         await this.loadData();
-        requestAnimationFrame(() => {
-            if (this.renderer) this.renderer.resize();
-        });
     }
 
-    attachEventListeners() {
-        if (this.refreshBtn) this.refreshBtn.onclick = () => this.loadData();
-        if (this.resetViewBtn) this.resetViewBtn.onclick = () => this.resetView();
-
-        const handleFilterInput = (minEl, maxEl, minValEl, maxValEl, cfg, isMin) => {
-            let minPos = parseInt(minEl.value);
-            let maxPos = parseInt(maxEl.value);
-
-            if (minPos > maxPos) {
-                if (isMin) maxEl.value = minPos;
-                else minEl.value = maxPos;
-                minPos = parseInt(minEl.value);
-                maxPos = parseInt(maxEl.value);
+    _startSim() {
+        if (!this._simNodes.length) {
+            return;
+        }
+        this._simAlpha = 1;
+        this.renderer.onSimulationEnd = () => {
+            const pauseIcon = document.getElementById("pause-icon");
+            const playIcon = document.getElementById("play-icon");
+            if (pauseIcon) {
+                pauseIcon.classList.add("hidden");
             }
-
-            const minVal = sliderToValue(minPos, cfg);
-            const maxVal = sliderToValue(maxPos, cfg);
-
-            if (minValEl) minValEl.textContent = minVal;
-            if (maxValEl) maxValEl.textContent = maxPos >= cfg.steps ? "Max" : maxVal;
-
-            this.saveFilters();
-
-            if (this.filterTimer) {
-                clearTimeout(this.filterTimer);
-                this.filterTimer = null;
-                const container = document.getElementById("filter-delay-container");
-                if (container) container.classList.add("hidden");
-                if (this.loader) this.loader.classList.add("hidden");
+            if (playIcon) {
+                playIcon.classList.remove("hidden");
             }
+            this._paused = true;
         };
+        this.renderer.startLoop(() => this._tick());
+    }
 
-        if (this.minCompFilter) {
-            this.minCompFilter.oninput = () => handleFilterInput(this.minCompFilter, this.maxCompFilter, this.minCompVal, this.maxCompVal, SLIDER.comp, true);
-            this.minCompFilter.onchange = () => { this.saveFilters(); this.debouncedApplyFilters(); };
-        }
-        if (this.maxCompFilter) {
-            this.maxCompFilter.oninput = () => handleFilterInput(this.minCompFilter, this.maxCompFilter, this.minCompVal, this.maxCompVal, SLIDER.comp, false);
-            this.maxCompFilter.onchange = () => { this.saveFilters(); this.debouncedApplyFilters(); };
-        }
-        if (this.minChainFilter) {
-            this.minChainFilter.oninput = () => handleFilterInput(this.minChainFilter, this.maxChainFilter, this.minChainVal, this.maxChainVal, SLIDER.chain, true);
-            this.minChainFilter.onchange = () => { this.saveFilters(); this.debouncedApplyFilters(); };
-        }
-        if (this.maxChainFilter) {
-            this.maxChainFilter.oninput = () => handleFilterInput(this.minChainFilter, this.maxChainFilter, this.minChainVal, this.maxChainVal, SLIDER.chain, false);
-            this.maxChainFilter.onchange = () => { this.saveFilters(); this.debouncedApplyFilters(); };
-        }
+    _stopSim() {
+        this.renderer.stopLoop();
+    }
 
-        if (this.minCompCountFilter) {
-            this.minCompCountFilter.oninput = () => handleFilterInput(this.minCompCountFilter, this.maxCompCountFilter, this.minCompCountVal, this.maxCompCountVal, SLIDER.compCount, true);
-            this.minCompCountFilter.onchange = () => { this.saveFilters(); this.debouncedApplyFilters(); };
+    _restartSim() {
+        const wasPaused = this._paused;
+        this._stopSim();
+        this.applyFilters();
+        if (!wasPaused && this._simNodes.length) {
+            this._startSim();
         }
-        if (this.maxCompCountFilter) {
-            this.maxCompCountFilter.oninput = () => handleFilterInput(this.minCompCountFilter, this.maxCompCountFilter, this.minCompCountVal, this.maxCompCountVal, SLIDER.compCount, false);
-            this.maxCompCountFilter.onchange = () => { this.saveFilters(); this.debouncedApplyFilters(); };
-        }
-        if (this.linkLengthFilter) {
-            this.linkLengthFilter.oninput = () => {
-                const val = sliderToValue(parseInt(this.linkLengthFilter.value), SLIDER.linkLength);
-                if (this.linkLengthVal) this.linkLengthVal.textContent = val;
-                this.saveFilters();
-            };
-        }
-        if (this.collapsibleFilter) {
-            this.collapsibleFilter.onchange = () => { this.saveFilters(); this.debouncedApplyFilters(); };
-        }
-        if (this.nodeTypeFilter) {
-            this.nodeTypeFilter.onchange = () => { this.saveFilters(); this.debouncedApplyFilters(); };
-        }
+    }
 
-        if (this.compareSelectedBtn) {
-            this.compareSelectedBtn.onclick = () => this.compareSelected();
-        }
+    _tick() {
+        const tickStartTime = performance.now();
+        try {
+            const simulationNodes = this._simNodes;
+            if (this._useWebGLPhysics) {
+                return this._tickWebGL(simulationNodes, tickStartTime);
+            }
+            if (!simulationNodes.length) {
+                this._recordStat("_tick", performance.now() - tickStartTime);
+                return false;
+            }
 
-        const toggleLabelsBtn = document.getElementById("toggle-labels-btn");
-        if (toggleLabelsBtn) {
-            toggleLabelsBtn.onclick = () => {
-                this.labelsOverridden = true;
-                const current = this.renderer.detailLevel.showLabels;
-                const newState = !current;
-                this.renderer.setDetailLevel({ ...this.renderer.detailLevel, showLabels: newState, labelCap: newState ? RENDER.label.labelCap : 0 });
-                this.syncButtonStates();
-            };
-        }
+            const totalForces = this._activeForces.length;
 
-        const toggleMainChainsBtn = document.getElementById("toggle-main-chains-btn");
-        if (toggleMainChainsBtn) {
-            toggleMainChainsBtn.onclick = () => {
-                this._showMainChains = !this._showMainChains;
-                this._applyChainVisibility();
-                this.syncButtonStates();
-            };
-        }
+            let forcesToRun = 0;
+            let shouldSkipTick = false;
 
-        const toggleRegularLinksBtn = document.getElementById("toggle-regular-links-btn");
-        if (toggleRegularLinksBtn) {
-            toggleRegularLinksBtn.onclick = () => {
-                this._showRegularLinks = !this._showRegularLinks;
-                this._applyChainVisibility();
-                this.syncButtonStates();
-            };
-        }
-
-        const zoomInBtn = document.getElementById("zoom-in-btn");
-        if (zoomInBtn) {
-            zoomInBtn.onclick = () => {
-                const sub = this.renderer && this.renderer.subRenderer;
-                if (!sub) return;
-                if (sub._fallback) {
-                    sub._zoomLevel = Math.min(sub._zoomLevel * 1.5, 50);
-                    sub._renderFallback();
-                } else if (sub.camera && sub.controls) {
-                    sub.camera.zoom = Math.min(sub.camera.zoom * 1.5, 50);
-                    sub.camera.updateProjectionMatrix();
-                    sub.controls.update();
+            if (totalForces > 0) {
+                forcesToRun = Math.min(this._forcesPerTick, totalForces);
+                if (this._tickFrequency < 1) {
+                    this._tickSkipAccum += (1 - this._tickFrequency);
+                    if (this._tickSkipAccum >= 1) {
+                        this._tickSkipAccum -= 1;
+                        shouldSkipTick = true;
+                    }
                 }
-            };
-        }
+            }
 
-        const zoomOutBtn = document.getElementById("zoom-out-btn");
-        if (zoomOutBtn) {
-            zoomOutBtn.onclick = () => {
-                const sub = this.renderer && this.renderer.subRenderer;
-                if (!sub) return;
-                if (sub._fallback) {
-                    sub._zoomLevel = Math.max(sub._zoomLevel / 1.5, 0.05);
-                    sub._renderFallback();
-                } else if (sub.camera && sub.controls) {
-                    sub.camera.zoom = Math.max(sub.camera.zoom / 1.5, 0.01);
-                    sub.camera.updateProjectionMatrix();
-                    sub.controls.update();
+            this._tickCount++;
+            if (this.statPhysics) {
+                this.statPhysics.textContent = this._tickCount;
+            }
+
+            if (shouldSkipTick || forcesToRun === 0) {
+                this._recordStat("_tick", performance.now() - tickStartTime);
+                for (const forceName of this._activeForces) {
+                    const chartHistory = this._chartHistory[forceName];
+                    if (chartHistory) {
+                        chartHistory.push(0);
+                        if (chartHistory.length > 100) {
+                            chartHistory.splice(0, chartHistory.length - 100);
+                        }
+                    }
                 }
-            };
-        }
-
-        // --- Layout sliders ---
-        const applyLayoutChange = () => {
-            if (!this._simNodes.length) return;
-            const pos = (el) => parseInt(el.value);
-            this._layoutConfig.compSpacing = pos(this._layoutCompSpacing) * 40;
-            this._layoutConfig.scoreScale = pos(this._layoutScoreScale) * 60;
-            this._layoutConfig.jitter = pos(this._layoutJitter) * 8;
-            this._layoutConfig.spread = 0.5 + pos(this._layoutSpread) * 0.04;
-            if (this._layoutCompSpacingVal) this._layoutCompSpacingVal.textContent = this._layoutConfig.compSpacing;
-            if (this._layoutScoreScaleVal) this._layoutScoreScaleVal.textContent = this._layoutConfig.scoreScale;
-            if (this._layoutJitterVal) this._layoutJitterVal.textContent = this._layoutConfig.jitter;
-            if (this._layoutSpreadVal) this._layoutSpreadVal.textContent = this._layoutConfig.spread.toFixed(1);
-            // Re-layout existing nodes with new config
-            const comps = new Set(this._simNodes.map(n => String(n.component)));
-            this._applyLayout(this._simNodes, comps);
-            // Recompute world bounds
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            for (const n of this._simNodes) {
-                if (n.x < minX) minX = n.x;
-                if (n.x > maxX) maxX = n.x;
-                if (n.y < minY) minY = n.y;
-                if (n.y > maxY) maxY = n.y;
+                return true;
             }
-            const padding = 150;
-            const world = {
-                x: minX - padding, y: minY - padding,
-                width: (maxX - minX) + padding * 2,
-                height: (maxY - minY) + padding * 2,
-            };
-            // Re-render
-            this.renderer.render({
-                nodes: this._simNodes,
-                links: this._simLinks,
-                profile: { drawLinks: true },
-                selectedIds: this.selectedNodes,
-                world,
-            });
-        };
 
-        if (this._layoutCompSpacing) this._layoutCompSpacing.onchange = applyLayoutChange;
-        if (this._layoutScoreScale) this._layoutScoreScale.onchange = applyLayoutChange;
-        if (this._layoutJitter) this._layoutJitter.onchange = applyLayoutChange;
-        if (this._layoutSpread) this._layoutSpread.onchange = applyLayoutChange;
-
-        // --- Pause button ---
-        const pauseBtn = document.getElementById("play-pause-btn");
-        if (pauseBtn) {
-            pauseBtn.onclick = () => {
-                const pauseIcon = document.getElementById("pause-icon");
-                const playIcon = document.getElementById("play-icon");
-                if (!pauseIcon || !playIcon) return;
-                const isPaused = pauseIcon.classList.contains("hidden");
-                pauseIcon.classList.toggle("hidden");
-                playIcon.classList.toggle("hidden");
-            };
-        }
-    }
-
-    updateDetailsPosition() {
-        if (!this._activeDetailsNode || !this.nodeDetails || this.nodeDetails.classList.contains("hidden")) return;
-        if (!this.renderer) return;
-
-        const { x: screenX, y: screenY } = this.renderer.worldToScreen(
-            this._activeDetailsNode.x, this._activeDetailsNode.y
-        );
-
-        // Use visual node size (typically 2-6px at initial zoom) instead of legacy _radius
-        let visualSize = 20;
-        if (this.renderer && this.renderer.subRenderer) {
-            const sub = this.renderer.subRenderer;
-            const diag = sub.worldBounds ? Math.sqrt(
-                sub.worldBounds.width * sub.worldBounds.width +
-                sub.worldBounds.height * sub.worldBounds.height
-            ) : 1;
-            visualSize = Math.max(2, diag * 0.004) * Math.min(1, (sub._zoomLevel || 1));
-        }
-        const offset = visualSize + 10;
-
-        this.nodeDetails.style.left = `${Math.round(screenX + offset)}px`;
-        this.nodeDetails.style.top = `${Math.round(screenY + offset)}px`;
-        this.nodeDetails.classList.remove('top-4', 'left-4');
-    }
-
-    _applyChainVisibility() {
-        if (!this.renderer) return;
-        this.renderer.setLinkVisibility(this._showMainChains, this._showRegularLinks);
-    }
-
-    _applyLayout(simNodes, distinctComponents) {
-        const componentIds = [...distinctComponents].sort();
-        const cfg = this._layoutConfig;
-        const spreadMul = cfg.spread * 2;
-
-        // Simple seeded hash for deterministic jitter
-        const seedHash = (id) => {
-            let h = 0;
-            const s = String(id);
-            for (let i = 0; i < s.length; i++) {
-                h = ((h << 5) - h) + s.charCodeAt(i);
-                h |= 0;
+            for (const node of simulationNodes) {
+                node.fx = 0;
+                node.fy = 0;
             }
-            return (h & 0x7fffffff) / 0x7fffffff;
-        };
 
-        for (const n of simNodes) {
-            const compIdx = componentIds.indexOf(String(n.component));
-            const compX = (compIdx - (componentIds.length - 1) / 2) * cfg.compSpacing * spreadMul;
-            const scoreY = (parseFloat(n.score) - 0.5) * cfg.scoreScale * spreadMul;
-            n.x = compX + (seedHash(n.id + 'x') - 0.5) * cfg.jitter;
-            n.y = scoreY + (seedHash(n.id + 'y') - 0.5) * cfg.jitter;
+            for (let forceIndex = 0; forceIndex < forcesToRun; forceIndex++) {
+                const forceName = this._activeForces[this._forceIndex % totalForces];
+                this._forceIndex++;
+                if (forceName && typeof this[forceName] === "function") {
+                    const forceStartTime = performance.now();
+                    this[forceName]();
+                    this._recordStat(forceName, performance.now() - forceStartTime);
+                }
+            }
+            this._updateStats();
+
+            const physicsConfig = this._physicsCfg;
+            const mapHalfSize = this._mapHalf || 0;
+            const velocityDecayFactor = this._dampingEnabled ? (1 - physicsConfig.velocityDecay) : 1;
+            const maxVelocity = this._dampingEnabled ? physicsConfig.maxVelocity : Infinity;
+            for (const node of simulationNodes) {
+                node.vx = (node.vx || 0) * velocityDecayFactor + node.fx;
+                node.vy = (node.vy || 0) * velocityDecayFactor + node.fy;
+                if (this._dampingEnabled) {
+                    if (node.vx > maxVelocity) {
+                        node.vx = maxVelocity;
+                    } else if (node.vx < -maxVelocity) {
+                        node.vx = -maxVelocity;
+                    }
+                    if (node.vy > maxVelocity) {
+                        node.vy = maxVelocity;
+                    } else if (node.vy < -maxVelocity) {
+                        node.vy = -maxVelocity;
+                    }
+                }
+                node.x += node.vx;
+                node.y += node.vy;
+                if (mapHalfSize > 0) {
+                    if (node.x > mapHalfSize) {
+                        node.x = mapHalfSize;
+                        if (node.vx > 0) {
+                            node.vx = 0;
+                        }
+                    } else if (node.x < -mapHalfSize) {
+                        node.x = -mapHalfSize;
+                        if (node.vx < 0) {
+                            node.vx = 0;
+                        }
+                    }
+                    if (node.y > mapHalfSize) {
+                        node.y = mapHalfSize;
+                        if (node.vy > 0) {
+                            node.vy = 0;
+                        }
+                    } else if (node.y < -mapHalfSize) {
+                        node.y = -mapHalfSize;
+                        if (node.vy < 0) {
+                            node.vy = 0;
+                        }
+                    }
+                }
+            }
+
+            this._simAlpha *= (1 - this._physicsCfg.alphaDecay);
+            if (this._simAlpha < this._physicsCfg.alphaMin) {
+                this._simAlpha = this._physicsCfg.alphaMin;
+            }
+
+            this._recordStat("_tick", performance.now() - tickStartTime);
+            return true;
+        } catch (error) {
+            mapsMainLogger.error("Physics tick error", error);
+            return true;
         }
     }
 
-    render(nodes, links, stats) {
-        if (this._renderTimeout) {
-            clearTimeout(this._renderTimeout);
-            this._renderTimeout = null;
+    _sync() {
+        const toggleIconVisibility = (onIconId, offIconId, show) => {
+            const onIcon = document.getElementById(onIconId);
+            const offIcon = document.getElementById(offIconId);
+            if (onIcon) {
+                onIcon.classList.toggle("hidden", !show);
+            }
+            if (offIcon) {
+                offIcon.classList.toggle("hidden", show);
+            }
+        };
+        toggleIconVisibility("tag-icon-on", "tag-icon-off", this._showLabels);
+        if (this.renderer) {
+            this.renderer.labelsVisible = this._showLabels;
         }
+        toggleIconVisibility("main-chains-icon-on", "main-chains-icon-off", this._showMain);
+        toggleIconVisibility("secondary-chains-icon-on", "secondary-chains-icon-off", this._showSecondary);
+        toggleIconVisibility("regular-links-icon-on", "regular-links-icon-off", this._showRegular);
+    }
 
-        if (nodes.length === 0) {
-            if (this.statNodes) this.statNodes.textContent = "0";
-            if (this.statComparisons) this.statComparisons.textContent = "0";
-            if (this.statComponents) this.statComponents.textContent = "0";
-            if (this.statChains) this.statChains.textContent = "0";
-            this.renderer.render({ nodes: [], links: [], profile: {}, selectedIds: [], world: { x: 0, y: 0, width: 800, height: 600 } });
-            if (this.loader) this.loader.classList.add("hidden");
+    render(filteredNodes, filteredEdges, stats) {
+        this._webglNeedsReinit = true;
+        if (!filteredNodes.length) {
+            this._setStats(0, 0, 0, 0);
+            if (this.renderer) {
+                this.renderer.render({
+                    nodes: [],
+                    links: [],
+                    selectedIds: [],
+                    world: { x: 0, y: 0, width: 800, height: 600 },
+                    nodeBaseSize: this._physicsCfg.nodeBaseSize,
+                });
+            }
+            if (this.loader) {
+                this.loader.classList.add("hidden");
+            }
             return;
         }
 
-        for (let i = 0; i < nodes.length; i++) {
-            const n = nodes[i];
-            if (n.comparison_count === undefined) {
-                throw new Error("node[" + i + "] (" + n.id + ") is missing comparison_count");
-            }
-            if (n.score === undefined) {
-                throw new Error("node[" + i + "] (" + n.id + ") is missing score");
-            }
-        }
+        const uniqueComponents = new Set(filteredNodes.map(node => String(node.component)));
+        this._setStats(filteredNodes.length, filteredEdges.length, uniqueComponents.size, stats.total_chains || 0);
 
-        const distinctComponents = new Set(nodes.map(n => String(n.component)));
-        const totalChains = stats.total_chains;
-
-        if (this.statNodes) this.statNodes.textContent = nodes.length.toLocaleString();
-        if (this.statComparisons) this.statComparisons.textContent = links.length.toLocaleString();
-        if (this.statComponents) this.statComponents.textContent = distinctComponents.size.toLocaleString();
-        if (this.statChains) this.statChains.textContent = totalChains.toLocaleString();
-
-        const componentSizeMap = {};
+        const colorScale = globalThis.d3.scaleLinear()
+            .domain(globalThis.RENDER.node.colorDomain)
+            .range(globalThis.RENDER.node.colorRange);
+        const componentSizes = {};
         if (this.rawData.components) {
-            for (const [compId, members] of Object.entries(this.rawData.components)) {
-                componentSizeMap[compId] = members.length;
+            for (const [componentId, members] of Object.entries(this.rawData.components)) {
+                componentSizes[componentId] = members.length;
             }
         }
 
-        const colorScale = d3.scaleLinear()
-            .domain(RENDER.node.colorDomain)
-            .range(RENDER.node.colorRange);
-
-        const simNodes = nodes.map(d => ({
-            ...d,
-            _radius: 0,
-            _fill: colorScale(d.score),
-            _label: d.id.split('/').pop(),
-            _shortLabel: d.id.split('/').pop().substring(0, RENDER.node.labelTruncateLength) + "...",
-            _component_size: componentSizeMap[String(d.component)]
+        const simulationNodes = filteredNodes.map(nodeData => ({
+            ...nodeData,
+            _fill: colorScale(nodeData.score),
+            _compSize: componentSizes[String(nodeData.component)],
+            _chainPrev: null,
+            _chainNext: null,
+            _chainId: null,
+            _allChains: null,
+            vx: 0,
+            vy: 0,
+            fx: 0,
+            fy: 0,
         }));
 
-        const nodeMap = new Map(simNodes.map(n => [n.id, n]));
-
+        const nodeMap = new Map(simulationNodes.map(node => [node.id, node]));
         const mainChainEdges = new Set();
-        const chainNodeIds = new Set();
-        const chainInfo = new Map();
+        const chainInfoMap = new Map();
 
         if (this.rawData.chains) {
             for (const chain of this.rawData.chains) {
-                const chainNodes = chain.nodes;
-                for (let i = 0; i < chainNodes.length; i++) {
-                    const id = chainNodes[i];
-                    chainNodeIds.add(id);
+                for (let nodeIndex = 0; nodeIndex < chain.nodes.length; nodeIndex++) {
+                    const nodeId = chain.nodes[nodeIndex][0];
+                    const isMain = chain.nodes[nodeIndex][1];
 
-                    const existingInfo = chainInfo.get(id);
+                    const existingInfo = chainInfoMap.get(nodeId);
                     if (!existingInfo) {
-                        chainInfo.set(id, {
+                        chainInfoMap.set(nodeId, {
                             chainId: chain.id,
-                            prev: i > 0 ? chainNodes[i - 1] : null,
-                            next: i < chainNodes.length - 1 ? chainNodes[i + 1] : null,
-                            chainIndex: i,
-                            chainLength: chainNodes.length,
-                            allChains: [chain.id]
+                            prev: nodeIndex > 0 ? chain.nodes[nodeIndex - 1][0] : null,
+                            next: nodeIndex < chain.nodes.length - 1 ? chain.nodes[nodeIndex + 1][0] : null,
+                            chainLen: chain.nodes.length,
+                            allChains: [chain.id],
                         });
                     } else {
                         existingInfo.allChains.push(chain.id);
-                        if (existingInfo.chainLength < chainNodes.length) {
+                        if (existingInfo.chainLen < chain.nodes.length) {
                             existingInfo.chainId = chain.id;
-                            existingInfo.prev = i > 0 ? chainNodes[i - 1] : null;
-                            existingInfo.next = i < chainNodes.length - 1 ? chainNodes[i + 1] : null;
-                            existingInfo.chainIndex = i;
-                            existingInfo.chainLength = chainNodes.length;
+                            existingInfo.prev = nodeIndex > 0 ? chain.nodes[nodeIndex - 1][0] : null;
+                            existingInfo.next = nodeIndex < chain.nodes.length - 1 ? chain.nodes[nodeIndex + 1][0] : null;
+                            existingInfo.chainLen = chain.nodes.length;
                         }
                     }
-
-                    if (i < chainNodes.length - 1) {
-                        const a = chainNodes[i];
-                        const b = chainNodes[i + 1];
-                        mainChainEdges.add(`${a}|${b}`);
-                        mainChainEdges.add(`${b}|${a}`);
+                    if (nodeIndex < chain.nodes.length - 1) {
+                        const nextNode = chain.nodes[nodeIndex + 1];
+                        if (isMain && nextNode[1]) {
+                            mainChainEdges.add(nodeId + "|" + nextNode[0]);
+                            mainChainEdges.add(nextNode[0] + "|" + nodeId);
+                        }
                     }
                 }
             }
         }
-
-        for (const n of simNodes) {
-            const info = chainInfo.get(n.id);
-            if (info) {
-                n._chainPrev = info.prev;
-                n._chainNext = info.next;
-                n._chainId = info.chainId;
-                n._chainIndex = info.chainIndex;
-                n._chainLength = info.chainLength;
-                n._allChains = info.allChains;
+        // console.log(mainChainEdges);
+        for (const node of simulationNodes) {
+            const chainInfo = chainInfoMap.get(node.id);
+            if (chainInfo) {
+                node._chainPrev = chainInfo.prev;
+                node._chainNext = chainInfo.next;
+                node._chainId = chainInfo.chainId;
+                node._allChains = chainInfo.allChains;
             }
         }
 
-        const simLinks = [];
+        const simulationLinks = [];
         const existingLinks = new Set();
-
-        for (const d of links) {
-            const source = nodeMap.get(d.source);
-            const target = nodeMap.get(d.target);
-            if (source && target) {
-                const isMainChain = mainChainEdges.has(`${d.source}|${d.target}`);
-                simLinks.push({
-                    source: source,
-                    target: target,
-                    _opacity: RENDER.node.defaultOpacity,
-                    isMainChain: isMainChain
-                });
-                existingLinks.add(`${d.source}|${d.target}`);
-                existingLinks.add(`${d.target}|${d.source}`);
+        for (const edge of filteredEdges) {
+            const sourceNode = nodeMap.get(edge.source);
+            const targetNode = nodeMap.get(edge.target);
+            if (sourceNode && targetNode) {
+                const isMainChain = mainChainEdges.has(edge.source + "|" + edge.target);
+                simulationLinks.push({ source: sourceNode, target: targetNode, isMainChain });
+                existingLinks.add(edge.source + "|" + edge.target);
+                existingLinks.add(edge.target + "|" + edge.source);
             }
         }
-
         if (this.rawData.chains) {
             for (const chain of this.rawData.chains) {
-                const chainNodes = chain.nodes;
-                for (let i = 0; i < chainNodes.length - 1; i++) {
-                    const a = chainNodes[i];
-                    const b = chainNodes[i + 1];
-                    const source = nodeMap.get(a);
-                    const target = nodeMap.get(b);
-
-                    if (source && target && !existingLinks.has(`${a}|${b}`)) {
-                        simLinks.push({
-                            source: source,
-                            target: target,
-                            _opacity: RENDER.node.defaultOpacity,
-                            isMainChain: true,
-                            isSynthetic: true
-                        });
-                        existingLinks.add(`${a}|${b}`);
-                        existingLinks.add(`${b}|${a}`);
+                for (let nodeIndex = 0; nodeIndex < chain.nodes.length - 1; nodeIndex++) {
+                    const sourceId = chain.nodes[nodeIndex][0];
+                    const targetId = chain.nodes[nodeIndex + 1][0];
+                    const isMain = chain.nodes[nodeIndex][1] && chain.nodes[nodeIndex + 1][1];
+                    const sourceNode = nodeMap.get(sourceId);
+                    const targetNode = nodeMap.get(targetId);
+                    if (sourceNode && targetNode && !existingLinks.has(sourceId + "|" + targetId)) {
+                        simulationLinks.push({ source: sourceNode, target: targetNode, isMainChain: isMain });
+                        existingLinks.add(sourceId + "|" + targetId);
+                        existingLinks.add(targetId + "|" + sourceId);
                     }
                 }
             }
         }
 
-        this._simNodes = simNodes;
-        this._simLinks = simLinks;
-
-        // --- Chain diagnostics ---
-        const nodesWithMainChain = new Set();
-        const allNodeIds = new Set();
-        for (const l of simLinks) {
-            allNodeIds.add(l.source.id);
-            allNodeIds.add(l.target.id);
-            if (l.isMainChain) {
-                nodesWithMainChain.add(l.source.id);
-                nodesWithMainChain.add(l.target.id);
-            }
+        const nodeDegrees = new Map();
+        for (const link of simulationLinks) {
+            nodeDegrees.set(link.source.id, (nodeDegrees.get(link.source.id) || 0) + 1);
+            nodeDegrees.set(link.target.id, (nodeDegrees.get(link.target.id) || 0) + 1);
         }
-        const mainChainCount = simLinks.filter(l => l.isMainChain).length;
-        const pct = simLinks.length > 0 ? (mainChainCount / simLinks.length * 100).toFixed(1) : "0";
-        const noChainNodes = [...allNodeIds].filter(id => !nodesWithMainChain.has(id));
-        console.log(`[chain] ${mainChainCount}/${simLinks.length} links are main chain (${pct}%). ` +
-            `${nodesWithMainChain.size}/${allNodeIds.size} nodes have ≥1 main chain link.`);
-        const rawEdgeNodes = new Set();
-        if (this.rawData && this.rawData.edges) {
-            for (const e of this.rawData.edges) {
-                rawEdgeNodes.add(e.source);
-                rawEdgeNodes.add(e.target);
-            }
-        }
-        const chainMissing = [...rawEdgeNodes].filter(id => !chainNodeIds.has(id));
-        if (chainMissing.length > 0) {
-            console.error(`[chain] BACKEND BUG: ${chainMissing.length}/${rawEdgeNodes.size} nodes from raw edges are MISSING from all chains.`);
-            const samples = chainMissing.slice(0, 10);
-            for (const nid of samples) {
-                console.error(`  ${nid} has comparisons but is in NO chain`);
-            }
-        } else if (rawEdgeNodes.size > 0) {
-            console.log(`[chain] Backend OK: all ${rawEdgeNodes.size} nodes with comparisons belong to a chain.`);
-        }
-        if (noChainNodes.length > 0) {
-            const sample = noChainNodes.slice(0, 20);
-            console.warn(`[chain] ${noChainNodes.length} filtered nodes have ZERO main chain links. Sample:`);
-            for (const nid of sample) {
-                const info = chainInfo.get(nid);
-                if (info) {
-                    console.warn(`  ${nid}: chain=${info.chainId}, prev=${info.prev}, next=${info.next}, len=${info.chainLength}`);
-                } else {
-                    console.warn(`  ${nid}: NOT IN ANY CHAIN`);
-                }
-            }
-            if (noChainNodes.length > 20) {
-                console.warn(`  ... and ${noChainNodes.length - 20} more`);
-            }
+        const nodePower = this._nodePower;
+        for (const node of simulationNodes) {
+            const degree = nodeDegrees.get(node.id) || 0;
+            node._deg = degree;
+            node._radius = this._physicsCfg.nodeBaseSize + (nodePower === 0 ? 0 : Math.pow(degree, nodePower));
         }
 
-        // --- Node sizing ---
-        const degreeMap = new Map();
-        for (const link of simLinks) {
-            degreeMap.set(link.source.id, (degreeMap.get(link.source.id) || 0) + 1);
-            degreeMap.set(link.target.id, (degreeMap.get(link.target.id) || 0) + 1);
-        }
-        const baseRadius = RENDER.node.baseRadius;
-        const maxRadius = baseRadius * 10;
-        for (const n of simNodes) {
-            const degree = degreeMap.get(n.id) || 0;
-            n._radius = Math.min(maxRadius, baseRadius + Math.pow(degree, 1.5) * RENDER.node.radiusMultiplier);
-        }
+        const oldPositionMap = new Map((this._simNodes || []).map(node => [node.id, node]));
+        this._simNodes = simulationNodes;
+        this._simLinks = simulationLinks;
 
-        // --- Deterministic layout: arrange by component (X) and score (Y) ---
-        this._applyLayout(simNodes, distinctComponents);
-
-        // --- World bounds ---
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const n of simNodes) {
-            if (n.x < minX) minX = n.x;
-            if (n.x > maxX) maxX = n.x;
-            if (n.y < minY) minY = n.y;
-            if (n.y > maxY) maxY = n.y;
+        const mapSize = Math.sqrt(simulationNodes.length * this._physicsCfg.minAreaPerNode);
+        for (const node of simulationNodes) {
+            const oldNode = oldPositionMap.get(node.id);
+            if (oldNode) {
+                node.x = oldNode.x;
+                node.y = oldNode.y;
+                node.vx = oldNode.vx || 0;
+                node.vy = oldNode.vy || 0;
+            } else {
+                node.x = (Math.random() - 0.5) * mapSize;
+                node.y = (Math.random() - 0.5) * mapSize;
+                node.vx = 0;
+                node.vy = 0;
+            }
         }
-        const padding = RENDER.bounds.padding;
-        const world = {
-            x: minX - padding,
-            y: minY - padding,
-            width: (maxX - minX) + padding * 2,
-            height: (maxY - minY) + padding * 2,
+        this._mapHalf = mapSize / 2;
+
+        const worldBounds = {
+            x: -this._mapHalf - globalThis.RENDER.border.padding,
+            y: -this._mapHalf - globalThis.RENDER.border.padding,
+            width: mapSize + globalThis.RENDER.border.padding * 2,
+            height: mapSize + globalThis.RENDER.border.padding * 2,
         };
 
-        // --- Render (async — chunked for 2D fallback) ---
+        if (this.renderer) {
+            this.renderer._showMainLinks = this._showMain;
+            this.renderer._showRegularLinks = this._showRegular;
+        }
+
         this.renderer.render({
-            nodes: simNodes,
-            links: simLinks,
-            profile: { drawLinks: true },
+            nodes: simulationNodes,
+            links: simulationLinks,
             selectedIds: this.selectedNodes,
-            world,
-        }, () => {
-            if (this.loader) this.loader.classList.add("hidden");
-            this._applyChainVisibility();
-            this.syncButtonStates();
+            world: worldBounds,
+            nodeBaseSize: this._physicsCfg.nodeBaseSize,
         });
+        if (this.loader) {
+            this.loader.classList.add("hidden");
+        }
+
+        this._paused = true;
+        this._simAlpha = 1;
+        this._tickCount = 0;
+        this._forceIndex = 0;
+        this._tickSkipAccum = 0;
+        this._sync();
+
+        const pauseIcon = document.getElementById("pause-icon");
+        const playIcon = document.getElementById("play-icon");
+        if (pauseIcon) {
+            pauseIcon.classList.add("hidden");
+        }
+        if (playIcon) {
+            playIcon.classList.remove("hidden");
+        }
     }
 
-    calculateWorldBounds(nodes) {
-        if (!nodes || !nodes.length) return { x: -2500, y: -2500, width: 5000, height: 5000, padding: 0 };
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        nodes.forEach(n => {
-            minX = Math.min(minX, n.x);
-            maxX = Math.max(maxX, n.x);
-            minY = Math.min(minY, n.y);
-            maxY = Math.max(maxY, n.y);
-        });
-        return {
-            x: minX - RENDER.bounds.padding,
-            y: minY - RENDER.bounds.padding,
-            width: (maxX - minX) + RENDER.bounds.padding * 2,
-            height: (maxY - minY) + RENDER.bounds.padding * 2,
-            padding: RENDER.bounds.padding
-        };
+    _tickWebGL(simulationNodes, tickStartTime) {
+        if (!simulationNodes.length) {
+            this._recordStat("_tick", performance.now() - tickStartTime);
+            return false;
+        }
+
+        const totalForces = this._activeForces.length;
+        let shouldSkipTick = false;
+        let forcesToUse = 0;
+
+        if (totalForces > 0) {
+            forcesToUse = Math.min(this._forcesPerTick, totalForces);
+            if (this._tickFrequency < 1) {
+                this._tickSkipAccum += (1 - this._tickFrequency);
+                if (this._tickSkipAccum >= 1) {
+                    this._tickSkipAccum -= 1;
+                    shouldSkipTick = true;
+                }
+            }
+        }
+
+        this._tickCount++;
+        if (this.statPhysics) {
+            this.statPhysics.textContent = this._tickCount;
+        }
+
+        if (shouldSkipTick || forcesToUse === 0) {
+            this._recordStat("_tick", performance.now() - tickStartTime);
+            for (const forceName of this._activeForces) {
+                const chartHistory = this._chartHistory[forceName];
+                if (chartHistory) {
+                    chartHistory.push(0);
+                    if (chartHistory.length > 100) {
+                        chartHistory.splice(0, chartHistory.length - 100);
+                    }
+                }
+            }
+            this._updateStats();
+            return true;
+        }
+
+        if (!this._webglPhysics || this._webglNeedsReinit) {
+            if (this._webglPhysics) {
+                this._webglPhysics.destroy();
+                this._webglPhysics = null;
+            }
+            const canvas = document.createElement("canvas");
+            canvas.width = 1;
+            canvas.height = 1;
+            const glContext = canvas.getContext("webgl2", { alpha: false, antialias: false, premultipliedAlpha: false });
+            if (!glContext) {
+                if (!this._webglToastShown) {
+                    this._webglToastShown = true;
+                    globalThis.showError("WebGL 2.0 not available");
+                }
+                this._useWebGLPhysics = false;
+                if (this._updateWebglBtn) {
+                    this._updateWebglBtn(false);
+                }
+                this._tickSkipAccum = 0;
+                return false;
+            }
+            this._webglPhysics = new globalThis.WebGLPhysics();
+            if (!this._webglPhysics.init(glContext, simulationNodes, this._simLinks)) {
+                if (!this._webglToastShown) {
+                    this._webglToastShown = true;
+                    globalThis.showError("WebGL: " + (this._webglPhysics._lastError || "init failed"));
+                }
+                this._webglPhysics = null;
+                this._useWebGLPhysics = false;
+                if (this._updateWebglBtn) {
+                    this._updateWebglBtn(false);
+                }
+                this._tickSkipAccum = 0;
+                return false;
+            }
+            this._webglNeedsReinit = false;
+        }
+
+        const enabledForces = this._activeForces.slice(0, forcesToUse);
+        const forceTickStartTime = performance.now();
+        this._webglPhysics.tick(this._simAlpha, this._physicsCfg, enabledForces, this._mapHalf, this._dampingEnabled);
+        const forceTickDuration = performance.now() - forceTickStartTime;
+
+        this._simAlpha *= (1 - this._physicsCfg.alphaDecay);
+        if (this._simAlpha < this._physicsCfg.alphaMin) {
+            this._simAlpha = this._physicsCfg.alphaMin;
+        }
+
+        this._webglPhysics.readback(simulationNodes);
+
+        this._recordStat("_tick", performance.now() - tickStartTime);
+        for (const forceName of enabledForces) {
+            this._recordStat(forceName, forceTickDuration / enabledForces.length);
+        }
+        this._updateStats();
+        return true;
+    }
+
+    _setStats(nodeCount, edgeCount, componentCount, chainCount) {
+        if (this.statNodes) {
+            this.statNodes.textContent = nodeCount.toLocaleString();
+        }
+        if (this.statComparisons) {
+            this.statComparisons.textContent = edgeCount.toLocaleString();
+        }
+        if (this.statComponents) {
+            this.statComponents.textContent = componentCount.toLocaleString();
+        }
+        if (this.statChains) {
+            this.statChains.textContent = chainCount.toLocaleString();
+        }
     }
 
     cleanup() {
-        if (this._renderTimeout) {
-            clearTimeout(this._renderTimeout);
-            this._renderTimeout = null;
-        }
         if (this.renderer) {
+            this._stopSim();
             this.renderer.destroy();
             this.renderer = null;
+        }
+        if (this._webglPhysics) {
+            this._webglPhysics.destroy();
+            this._webglPhysics = null;
         }
         this.rawData = null;
         this.selectedNodes = [];
         this._simNodes = [];
         this._simLinks = [];
     }
+};
 
-    syncButtonStates() {
-        if (this.renderer) {
-            const showLabels = this.renderer.detailLevel.showLabels;
-            const iconOn = document.getElementById("tag-icon-on");
-            const iconOff = document.getElementById("tag-icon-off");
-            if (iconOn) iconOn.classList.toggle("hidden", !showLabels);
-            if (iconOff) iconOff.classList.toggle("hidden", showLabels);
-
-            const mainChainsIconOn = document.getElementById("main-chains-icon-on");
-            const mainChainsIconOff = document.getElementById("main-chains-icon-off");
-            if (mainChainsIconOn) mainChainsIconOn.classList.toggle("hidden", !this._showMainChains);
-            if (mainChainsIconOff) mainChainsIconOff.classList.toggle("hidden", this._showMainChains);
-
-            const regularLinksIconOn = document.getElementById("regular-links-icon-on");
-            const regularLinksIconOff = document.getElementById("regular-links-icon-off");
-            if (regularLinksIconOn) regularLinksIconOn.classList.toggle("hidden", !this._showRegularLinks);
-            if (regularLinksIconOff) regularLinksIconOff.classList.toggle("hidden", this._showRegularLinks);
-        }
-    }
-}
-
-window.chainMapUI = new ChainMapUI();
+window.chainMapUI = new globalThis.ChainMapUI();
 window.Sections = window.Sections || {};
-window.Sections.chains = ChainMapUI;
+window.Sections.chains = globalThis.ChainMapUI;

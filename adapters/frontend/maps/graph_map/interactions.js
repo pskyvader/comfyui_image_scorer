@@ -1,43 +1,31 @@
-ChainMapUI.prototype.setupThreeRenderer = function() {
-    this.renderer = new ChainMapRenderer({
-        container: this.container,
-    });
-
+globalThis.ChainMapUI.prototype.setupRenderer = function () {
+    this.renderer = new globalThis.ThreeGraphRenderer({ container: this.container });
     const canvas = this.renderer.canvas;
-    if (!canvas) return;
-
+    if (!canvas) {
+        return;
+    }
     const self = this;
-    let lastZoomTime = 0;
-    const sub = this.renderer.subRenderer;
+    const sub = this.renderer;
+    let lastZoom = 0;
 
     if (sub.controls) {
-        sub.controls.addEventListener('change', () => {
-            const cam = sub.camera;
-            const zoom = cam.zoom;
-            lastZoomTime = Date.now();
-
-            self.updateHUD({ k: zoom });
-
-            self.renderer.setDetailLevel({
-                showLabels: self.labelsOverridden ? self.renderer.detailLevel.showLabels : zoom > CAMERA.labelThreshold,
-                showArrows: zoom > CAMERA.arrowThreshold,
-                showNodeBorders: zoom > CAMERA.borderThreshold,
-                showLinks: true,
-                labelCap: RENDER.label.labelCap,
-                arrowCap: RENDER.arrow.arrowCap,
-                zoom: zoom,
-            });
+        sub.controls.addEventListener("change", () => {
+            lastZoom = Date.now();
+            self.updateHUD({ k: sub.camera.zoom });
         });
     }
 
-    canvas.addEventListener("mousemove", (event) => {
-        const node = self.renderer.hitTest({ x: event.clientX, y: event.clientY });
-        if (node) {
-            self.showTooltip(event, node);
+    canvas.addEventListener("pointerdown", (e) => {
+        sub._pointerDown = { x: e.clientX, y: e.clientY, t: Date.now() };
+    });
+    canvas.addEventListener("pointermove", (event) => {
+        const hitNode = self.renderer.hitTest(event);
+        if (hitNode) {
+            self.showTooltip(event, hitNode);
             canvas.style.cursor = "pointer";
         } else {
-            const link = self.renderer.hitTestLink({ x: event.clientX, y: event.clientY });
-            if (link) {
+            const hitLink = self.renderer.hitTestLink(event);
+            if (hitLink) {
                 self.hideTooltip();
                 canvas.style.cursor = "pointer";
             } else {
@@ -46,73 +34,33 @@ ChainMapUI.prototype.setupThreeRenderer = function() {
             }
         }
     });
-
-    canvas.addEventListener("click", (event) => {
-        if (self.renderer.subRenderer.didDrag) return;
-        const timeSinceZoom = Date.now() - lastZoomTime;
-        if (timeSinceZoom < 300) return;
-        if (self.nodeDetails && (self.nodeDetails === event.target || self.nodeDetails.contains(event.target))) return;
-
-        const node = self.renderer.hitTest({ x: event.clientX, y: event.clientY });
-        if (node) {
-            console.log("[click] hit node:", node.id);
-            self.showNodeDetails(node);
+    canvas.addEventListener("pointerup", (event) => {
+        const pd = sub._pointerDown;
+        if (!pd) {
             return;
         }
-        const link = self.renderer.hitTestLink({ x: event.clientX, y: event.clientY });
-        if (link) {
-            console.log("[click] hit link:", link.source.id, "->", link.target.id);
-            self.showLinkDetails(link);
+        const dt = Date.now() - pd.t;
+        const dx = event.clientX - pd.x;
+        const dy = event.clientY - pd.y;
+        if (dt > 500 || Math.sqrt(dx * dx + dy * dy) > 10) {
+            return;
+        }
+        if (Date.now() - lastZoom < 300) {
+            return;
+        }
+        if (self.nodeDetails && (self.nodeDetails === event.target || self.nodeDetails.contains(event.target))) {
+            return;
+        }
+        const hitNode = self.renderer.hitTest(event);
+        if (hitNode) {
+            self.showNodeDetails(hitNode);
+            return;
+        }
+        const hitLink = self.renderer.hitTestLink(event);
+        if (hitLink) {
+            self.showLinkDetails(hitLink);
             return;
         }
         self.hideNodeDetails();
     });
-
-    this._zoomEnabled = true;
-};
-
-ChainMapUI.prototype.focusNode = function(id) {
-    const node = this._simNodes.find(n => n.id === id);
-    if (!node) return;
-
-    const controls = this.renderer.subRenderer.controls;
-    if (!controls) return;
-
-    const targetX = node.x;
-    const targetY = node.y;
-
-    const cx = controls.target.x;
-    const cy = controls.target.y;
-
-    const steps = 30;
-    let step = 0;
-    const animate = () => {
-        step++;
-        const t = step / steps;
-        const ease = 1 - Math.pow(1 - t, 3);
-        controls.target.set(
-            cx + (targetX - cx) * ease,
-            cy + (targetY - cy) * ease,
-            0
-        );
-        controls.update();
-        if (step < steps) requestAnimationFrame(animate);
-    };
-    animate();
-};
-
-ChainMapUI.prototype.toggleSelection = function(id) {
-    const idx = this.selectedNodes.indexOf(id);
-    if (idx > -1) this.selectedNodes.splice(idx, 1);
-    else {
-        if (this.selectedNodes.length >= 2) this.selectedNodes.shift();
-        this.selectedNodes.push(id);
-    }
-    this.updateSelectionUI();
-    this.renderer.updateSelection(this.selectedNodes);
-};
-
-ChainMapUI.prototype.compareSelected = function() {
-    const [left, right] = this.selectedNodes;
-    window.location.hash = `#compare?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`;
 };
