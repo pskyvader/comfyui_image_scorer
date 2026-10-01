@@ -7,6 +7,7 @@ from tqdm import tqdm
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Callable
+from typing import cast
 from skimage.feature import local_binary_pattern
 
 from .mediapipe_analysis import MediaPipeAnalyzer, POSE_LANDMARK_NAMES
@@ -462,6 +463,15 @@ class ImageAnalysis(ImageVector):
         entry.pop("lora_weight", None)
         return entry
 
+    def _cached_entry(self, id: str) -> ImageEntry | None:
+        entry = self._cache.get(f"analysis:{id}")
+        if entry is None:
+            return None
+        # The build cache is shared with the graph and split caches, so it is
+        # typed as object. Only this class writes the "analysis:" namespace,
+        # always from a list[ImageEntry], so the value is known here.
+        return cast("ImageEntry", entry)
+
     def analyze_images_from_paths(
         self, batch_size: int, max_workers: int
     ) -> list[ImageEntry]:
@@ -469,15 +479,13 @@ class ImageAnalysis(ImageVector):
         new_raw: list[ImageEntry] = []
         result: list[ImageEntry] = []
 
-        for raw in self.raw_data:
-            path, entry, cat, extra = raw
+        for _, entry, _, _ in self.raw_data:
             self._normalize_lora(entry)
-            raw = (path, entry, cat, extra)
 
         for id, path in self.path_list.items():
             current_raw: ImageEntry = next((d for d in self.raw_data if d[3] == id))
 
-            cached_entry: ImageEntry | None = self._cache.get(f"analysis:{id}")
+            cached_entry = self._cached_entry(id)
             if cached_entry is not None:
                 result.append(cached_entry)
                 continue
@@ -524,7 +532,7 @@ class ImageAnalysis(ImageVector):
         self.processed_data = [
             entry
             for id in self.path_list.keys()
-            if (entry := self._cache.get(f"analysis:{id}")) is not None
+            if (entry := self._cached_entry(id)) is not None
         ]
 
         return result
