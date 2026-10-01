@@ -179,8 +179,8 @@ def build_full_files(
     vector_list.join_text_data()
     vector_list.update_lists()
 
-    write_single_jsonl(vectors_file, vector_list.vectors_list, mode="w")
-    write_single_jsonl(text_data_file, vector_list.text_list, mode="w")
+    write_single_jsonl(vectors_file, vector_list.vectors_list)
+    write_single_jsonl(text_data_file, vector_list.text_list)
 
     return {
         "vectors": len(vector_list.vectors_list),
@@ -203,13 +203,13 @@ def run_rebuild_scores_only(graph: Any) -> dict[str, Any]:
         }
         for comp in rows
     ]
-    write_single_jsonl(comparisons_file, comparisons, "w")
+    write_single_jsonl(comparisons_file, comparisons)
 
     replayed = replay_ratings(rows, order="default")
     scores = [
         {fid: public_score_from_rating(rating)}
         for fid, (rating, _count) in replayed.items()
     ]
-    write_single_jsonl(scores_file, scores, "w")
+    write_single_jsonl(scores_file, scores)
 
     return {"scores": len(scores)}

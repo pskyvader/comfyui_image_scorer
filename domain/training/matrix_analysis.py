@@ -237,7 +237,7 @@ class MatrixAnalyzer:
                 p2_param = self.param_list[p2_id] if p2_id < len(self.param_list) else str(p2_id)
                 export_data_list.append({"parameters": f"{p1_param}|{p2_param}", **stats})
                 pbar.update(1)
-        write_single_jsonl(output_path, export_data_list, "w")
+        write_single_jsonl(output_path, export_data_list)
         logger.info("Exported %d cell statistics to %s", len(export_data_list), output_path)
 
     def print_top_correlations(self, top_n: int = 20) -> None:

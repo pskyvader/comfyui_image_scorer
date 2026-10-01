@@ -553,5 +553,5 @@ class VectorList:
                     split_data.append({"id": uid, "raw": raw_val, "vector": vec_val})
 
                 self._cache.set(f"split:{name}", split_data)
-                write_single_jsonl(out_file, split_data, mode="w")
+                write_single_jsonl(out_file, split_data)
                 pbar.update(1)

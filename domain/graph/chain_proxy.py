@@ -55,25 +55,6 @@ class ChainProxy:
             return None
         return _node_proxy.NodeProxy(self._chain, self._nodes[-1])
 
-    def get_nodes(
-        self, only_top: bool = False, only_bottom: bool = False
-    ) -> list[NodeProxy]:
-        if only_top and only_bottom:
-            raise ValueError("only_top and only_bottom cannot both be True")
-        if not only_top and not only_bottom:
-            return [_node_proxy.NodeProxy(self._chain, n) for n in self._nodes]
-        result: list[NodeProxy] = []
-        for n in self._nodes:
-            proxy: NodeProxy = _node_proxy.NodeProxy(self._chain, n)
-            if only_top and proxy.is_top():
-                result.append(proxy)
-            elif only_bottom and proxy.is_bottom():
-                result.append(proxy)
-        return result
-
-    def node_position(self, node_id: str) -> int:
-        return self._nodes.index(node_id)
-
     def get_component(self) -> ComponentProxy | None:
         if not self._nodes:
             return None
@@ -86,8 +67,8 @@ class ChainProxy:
         return f"ChainProxy(id={self._id}, length={self.length})"
 
 
-  # Protocol alias
-
-  # Protocol alias
-
-  # Protocol alias
+# Removed as unreferenced anywhere in the module; restore from these descriptions:
+#   get_nodes(only_top, only_bottom) -> list of NodeProxy for this chain's nodes,
+#     raising ValueError when both flags are True. The unfiltered case duplicates
+#     the `nodes` property; the filters select on NodeProxy.is_top/is_bottom.
+#   node_position(node_id) -> self._nodes.index(node_id)

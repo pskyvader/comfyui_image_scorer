@@ -27,16 +27,15 @@ def load_single_jsonl(filename: str, skip_invalid: bool = True) -> Iterator[Any]
                 yield json.loads(stripped)
 
 
-def write_single_jsonl(filename: str, data: list[Any], mode: str) -> None:
+def write_single_jsonl(filename: str, data: list[Any]) -> None:
     file_path = Path(filename)
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if not mode.startswith("r"):
-        with tqdm(total=len(data), delay=3.0) as pbar:
-            with jsonlines.open(file_path, mode="w") as writer:
-                for item in data:
-                    writer.write(item)
-                    pbar.update(1)
+    with tqdm(total=len(data), delay=3.0) as pbar:
+        with jsonlines.open(file_path, mode="w") as writer:
+            for item in data:
+                writer.write(item)
+                pbar.update(1)
 
 
 def discover_files(root: str) -> Iterator[tuple[str, str]]:

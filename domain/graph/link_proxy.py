@@ -4,9 +4,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .chain_manager import ChainManager
-    from .node_proxy import NodeProxy
 
-from . import node_proxy as _node_proxy
 from ..ports.repository import ComparisonRow
 
 
@@ -59,24 +57,11 @@ class LinkProxy:
             "timestamp": self.timestamp,
         }
 
-    @property
-    def winner_node(self) -> NodeProxy | None:
-        return _node_proxy.NodeProxy(self._chain, self._record.winner)
-
-    @property
-    def loser_node(self) -> NodeProxy | None:
-        return _node_proxy.NodeProxy(self._chain, self._record.loser)
-
     def __repr__(self) -> str:
         return f"LinkProxy(id={self._record.id}, winner={self._record.winner}, loser={self._record.loser})"
 
 
-# Protocol alias
-# Protocol alias
-
-# Protocol alias
-# Protocol alias
-
-# Protocol alias
-
-# Protocol alias
+# Removed as unreferenced anywhere in the module; restore from these descriptions:
+#   winner_node / loser_node -> NodeProxy for self._record.winner / .loser.
+#     The `winner` and `loser` properties return the raw ids, which is what
+#     callers used, so wrapping them in a proxy bought nothing.

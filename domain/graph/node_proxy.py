@@ -57,22 +57,6 @@ class NodeProxy:
         return self._image_data.get("comparison_count", 0)
 
     @property
-    def chain_count(self) -> int:
-        return len(self._chain.get_node_chains(self._node_id))
-
-    @property
-    def main_chain_in_chains(self) -> bool:
-        main: tuple[int, list[str]] | None = self._chain.get_node_main_chain(
-            self._node_id
-        )
-        if main is None:
-            return False
-        all_chains: list[tuple[int, list[str]]] = self._chain.get_node_chains(
-            self._node_id
-        )
-        return any(c[0] == main[0] for c in all_chains)
-
-    @property
     def prompt_tags(self) -> str | None:
         return self._image_data.get("prompt_tags")
 
@@ -130,15 +114,6 @@ class NodeProxy:
             )
             return [_chain_proxy.ChainProxy(self._chain, i, c) for i, c in chains]
 
-    def get_position_in_chain(self) -> int:
-        main: tuple[int, list[str]] | None = self._chain.get_node_main_chain(
-            self._node_id
-        )
-        if main is None:
-            raise ValueError(f"Node {self._node_id} is not in any chain")
-        _, chain = main
-        return chain.index(self._node_id)
-
     def get_component(self) -> ComponentProxy | None:
         comp_id: int | None = self._chain.get_component_id(self._node_id)
         if comp_id is None:
@@ -149,6 +124,9 @@ class NodeProxy:
         return f"NodeProxy({self._node_id})"
 
 
-# Protocol alias
-
-# Protocol alias
+# Removed as unreferenced anywhere in the module; restore from these descriptions:
+#   chain_count -> len(self._chain.get_node_chains(self._node_id))
+#   main_chain_in_chains -> True when the node's main chain id appears among
+#     get_node_chains(self._node_id); False when the node has no main chain.
+#   get_position_in_chain -> index of the node inside its main chain's node
+#     list, raising ValueError when the node is in no main chain.
