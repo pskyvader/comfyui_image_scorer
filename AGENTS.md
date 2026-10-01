@@ -49,7 +49,7 @@ The dependency direction is `core -> domain -> application -> adapters`. Infrast
 - Configuration enters through the configuration service. Do not read environment variables or resolve runtime paths ad hoc in domain or application code.
 - Remove unused arguments and repair every caller. Framework-required positional slots may use an underscore-prefixed name.
 - Keep tensor metadata and control-flow values as Python values. Avoid unnecessary casts, transfers, persistent tensor caches, and model-owned memory management.
-- Do not use `torch.no_grad`, `torch.inference_mode`, `einops`, or explicit model freeze/unfreeze toggles in inference code. Use native tensor operations and existing model-management behavior.
+- Do not use `einops` or explicit model freeze/unfreeze toggles in inference code. Use native tensor operations and existing model-management behavior.
 - Initialize checkpoint-owned `nn.Parameter` placeholders with `torch.empty`; do not fabricate meaningful checkpoint contents in model constructors.
 - Treat dtype, device placement, VRAM use, offloading, and cleanup as correctness concerns across CPU, CUDA, ROCm, MPS, DirectML, XPU, and NPU paths. Use existing cast, offload, and memory-management helpers at the owning boundary.
 - Use existing ComfyUI optimized operations and model-management helpers before writing local kernels. Do not inspect backend implementation identity.
