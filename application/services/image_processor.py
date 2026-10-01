@@ -213,7 +213,7 @@ class ImageProcessor:
 
     def process_next_batch(self, source_dir: str, batch_size: int) -> dict[str, object]:
         if self.is_processing:
-            return {"status": "skipped", "message": "Already processing"}
+            return {"status": "skipped", "message": "Already processing", "added": 0}
 
         self.is_processing = True
         db_count = self._graph.get_node_count()
