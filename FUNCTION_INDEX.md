@@ -36,6 +36,13 @@ are implementation details.
 | `core/observability/logger.py` | `capture_log_output` | Capture package logs and writes during a command. |
 | `core/io/serialization.py` | `discover_files` | Discover image and metadata pairs in sorted, reproducible traversal order. |
 | `core/io/serialization.py` | `collect_valid_files` | Collect valid files in parallel, returning results in input order. A positive `limit` stops after that many collected entries and cancels the queued work. |
+| `core/io/serialization.py` | `load_single_jsonl` | Yield records from a JSONL file, skipping blank and optionally invalid lines. |
+| `core/io/serialization.py` | `write_single_jsonl` | Write records to a JSONL file, replacing any existing contents. |
+| `core/io/serialization.py` | `collect_single_file` | Parse one image and companion JSON pair into an entry tuple, or return None when it is not usable. |
+| `core/io/serialization.py` | `load_json` | Load a JSON file with optional expected-type validation, returning the data and an error code. |
+| `core/io/serialization.py` | `atomic_write_json` | Write JSON through a temporary file and replace, so readers never see a partial file. |
+| `core/io/serialization.py` | `extract_prompt_tags` | Find the first non-empty positive prompt in a metadata structure, searching nested dicts. |
+| `core/io/serialization.py` | `clean_json_metadata` | Normalize a companion JSON entry into the canonical ranked-metadata shape, stripping database-only fields. |
 | `core/utilities/concurrency.py` | `parallel_batch` | Run a batch function sequentially. |
 | `core/utilities/concurrency.py` | `parallel_for` | Run argument tuples through a worker pool, returning results in input order. |
 | `domain/graph/chain_manager.py` | `ChainManager` | Own in-memory graph topology, chains, components, and comparison history. History entries are indexed by `(winner, loser)` so applying a comparison stays constant-time as the history grows. |
@@ -86,9 +93,10 @@ are implementation details.
 | `domain/comparison/constants.py` | `IMAGES_CACHE_TTL` | Image cache time-to-live constant. |
 | `domain/comparison/constants.py` | `MAX_PAIR_CANDIDATES` | Maximum pair candidates for ranking. |
 | `domain/comparison/constants.py` | `MIN_CHAIN_THRESHOLD` | Minimum chain threshold for pair selection. |
-| `domain/analysis/image_analysis.py` | `ImageEntry` | Tuple type for image analysis entries. |
+| `domain/analysis/image_analysis.py` | `ImageEntry` | Tuple type for image analysis entries, shaped `(image_path, metadata, category, file_id)`. The key is the image path/id. |
 | `domain/analysis/image_analysis.py` | `ImageAnalysis` | Image metrics, metadata, and batch analysis orchestration class. |
 | `domain/analysis/image_analysis.py` | `process_single_batch` | Process one batch of images through prepare, analyze, and save. |
+| `domain/analysis/image_analysis.py` | `analyze_images_from_paths` | Analyze discovered image paths through the vision, face, and NSFW passes. Returns entries keyed by image path/id; list order is batch-completion order and must not be relied on. |
 | `domain/analysis/attribute_analysis.py` | `FaceAttributeAnalyzer` | Predicts perceived age, gender, and race from face images. |
 | `domain/analysis/attribute_analysis.py` | `NSFWAnalyzer` | Predicts NSFW score from images. |
 | `domain/analysis/attribute_analysis.py` | `AGE_LABELS` | Age category label set. |
