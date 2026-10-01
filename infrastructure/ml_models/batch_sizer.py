@@ -69,10 +69,15 @@ class BatchSizer:
         return model_loader.load_vision_model_patcher(self._model_key), 0, 0
 
     def _run_probe(self, model: nn.Module, batch: torch.Tensor) -> None:
-        if self._section == "attribute_models":
-            model(pixel_values=batch)
-        else:
-            model(batch)
+        # This probe reaches patcher.model directly, so it does not pass through
+        # the wrappers that suppress autograd. It has to be suppressed here as
+        # well: a retained graph is what makes the measured peak several times
+        # the forward's real activation cost, and the result decides the batch.
+        with torch.no_grad():
+            if self._section == "attribute_models":
+                model(pixel_values=batch)
+            else:
+                model(batch)
 
     def _ensure_session_profiled(self) -> None:
         _start = time.perf_counter()

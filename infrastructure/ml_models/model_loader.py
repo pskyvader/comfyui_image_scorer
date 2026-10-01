@@ -179,7 +179,11 @@ class ComfyVisionModel:
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
         comfy.model_management.load_model_gpu(self.patcher)
-        return self.patcher.model(x)
+        # ComfyUI applies no_grad per function and enables nothing process-wide,
+        # so an unwrapped forward retains every intermediate for backward. The
+        # retained graph is several times the activation peak and is never used.
+        with torch.no_grad():
+            return self.patcher.model(x)
 
 
 class ComfyEmbeddingModel:
@@ -190,10 +194,13 @@ class ComfyEmbeddingModel:
 
     def encode(self, sentences: list[str]) -> npt.NDArray[np.float32]:
         comfy.model_management.load_model_gpu(self.patcher)
-        return cast(
-            "npt.NDArray[np.float32]",
-            self.patcher.model.encode(sentences),
-        )
+        # See ComfyVisionModel.__call__: an unwrapped forward retains the whole
+        # graph for backward, which nothing here uses.
+        with torch.no_grad():
+            return cast(
+                "npt.NDArray[np.float32]",
+                self.patcher.model.encode(sentences),
+            )
 
 
 class ComfyAttributeModel:
@@ -208,7 +215,10 @@ class ComfyAttributeModel:
 
     def __call__(self, **kwargs: torch.Tensor) -> AttributeOutput:
         comfy.model_management.load_model_gpu(self.patcher)
-        return cast("AttributeOutput", self.patcher.model(**kwargs))
+        # See ComfyVisionModel.__call__: an unwrapped forward retains the whole
+        # graph for backward, which nothing here uses.
+        with torch.no_grad():
+            return cast("AttributeOutput", self.patcher.model(**kwargs))
 
 
 class ModelLoader:
