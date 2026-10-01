@@ -162,7 +162,7 @@ class MatrixAnalyzer:
             for p1_id in range(size):
                 for p2_id in range(p1_id, size):
                     scores = self.matrix[p1_id][p2_id]
-                    if isinstance(scores, list) and len(scores) >= min_count:
+                    if len(scores) >= min_count:
                         for s in scores:
                             flattened_data.append((p1_id, p2_id, float(s)))
                         kept_cells += 1

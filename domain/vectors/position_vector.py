@@ -15,7 +15,7 @@ class PositionVector:
 
     def __init__(self, name: str) -> None:
         self.name: str = name
-        self.value_list: dict[str, list[dict[str, float]]] = {}
+        self.value_list: dict[str, list[object]] = {}
         self.vector_list: dict[str, list[float]] = {}
         self.vector_config = config["vector"]["vectors"]
 
@@ -35,7 +35,7 @@ class PositionVector:
         entries: dict[str, dict[str, object]],
         add_new_values: bool,
         alias: list[str] | None,
-    ) -> dict[str, list[dict[str, float]]]:
+    ) -> dict[str, list[object]]:
         max_instances = 0
         for id, entry in list(entries.items()):
             raw = get_value_from_entry(entry, self.name, alias)

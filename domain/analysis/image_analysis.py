@@ -136,8 +136,9 @@ class ImageAnalysis(ImageVector):
     @staticmethod
     def _entry_has_required_fields(entry: dict[str, object]) -> bool:
         keys = set(entry.keys())
-        if isinstance(entry.get("custom_text"), dict):
-            keys.update(entry["custom_text"].keys())
+        custom_text = entry.get("custom_text")
+        if isinstance(custom_text, dict):
+            keys.update(custom_text.keys())
         return REQUIRED_ANALYSIS_FIELDS.issubset(keys)
 
     @staticmethod

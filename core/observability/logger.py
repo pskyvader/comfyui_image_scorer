@@ -8,7 +8,7 @@ import logging
 import time
 import traceback
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from collections.abc import Iterator
+from collections.abc import Generator
 from typing import ClassVar, Literal, overload
 
 # ── Global tqdm tuning ────────────────────────────────────────────────
@@ -59,7 +59,10 @@ def _custom_find_caller(
     return co.co_filename, f.f_lineno, co.co_name, sinfo
 
 
-logging.Logger.findCaller = _custom_find_caller
+# typeshed declares Logger.findCaller as a method, but CPython calls it
+# unbound through the class, so overriding it with our own function is the only
+# way to stop it walking out of this module. There is no public equivalent.
+logging.Logger.findCaller = _custom_find_caller  # pyright: ignore[reportAttributeAccessIssue]
 
 
 # ── Synchronous log capture (for server command endpoints) ───────────
@@ -78,7 +81,7 @@ class _CaptureHandler(logging.Handler):
 
 
 @contextmanager
-def capture_log_output() -> Iterator[list[str]]:
+def capture_log_output() -> Generator[list[str]]:
     """Collect log output (package log records + stdout/stderr writes) during
     an endpoint's synchronous command execution into the yielded line list."""
     lines: list[str] = []

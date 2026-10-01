@@ -235,7 +235,7 @@ def serve_ranked_image(filepath: str):
 
 
 @app.route("/images/<path:filename>")
-def serve_image_by_name(filename: str):
+def serve_image_by_name(filename: str) -> Response | tuple[dict[str, str], int]:
     _start = time.perf_counter()
     fname = Path(unquote(filename)).name
 
@@ -250,7 +250,7 @@ def serve_image_by_name(filename: str):
             return send_file(str(dest))
 
     db_entry = get_db_node(fname)
-    if db_entry and db_entry["score"] is not None:
+    if db_entry:
         dest = compute_path_from_filename(fname, db_entry["score"])
         if dest.exists() and dest.is_file():
             # logger.debug(f"Serving image by db score path", start_timer=_start)
@@ -271,7 +271,7 @@ def serve_image_by_name(filename: str):
 
 
 @app.route("/image/<path:filename>")
-def serve_image_alias(filename: str) -> Response:
+def serve_image_alias(filename: str) -> Response | tuple[dict[str, str], int]:
     return serve_image_by_name(filename)
 
 
@@ -310,7 +310,7 @@ def scanner_task(img_root: str) -> None:
     while True:
         stats = image_processor.process_next_batch(img_root, batch_size=100)
         added = stats["added"]
-        if added > 0:
+        if isinstance(added, int) and added > 0:
             sleep_time = 30
         else:
             sleep_time *= 2

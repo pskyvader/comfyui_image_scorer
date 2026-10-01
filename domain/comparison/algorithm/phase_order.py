@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Callable
+from typing import cast
 
 from ....core.observability.logger import get_logger, ModuleLogger
 from ....core.configuration.settings import config
@@ -23,6 +25,7 @@ from .pair_active import (
     phase_fallback,
 )
 from ....domain.ports.graph import CrystalGraphPort
+from ....domain.ports.repository import ImageRow
 
 from ...comparison.algorithm.history_collapse import canonicalize_pair
 
@@ -30,6 +33,12 @@ from .graph_helpers import stable_seed_pool
 from ...graph.node_proxy import NodeProxy
 
 logger: ModuleLogger = get_logger(__name__)
+
+
+# Each phase function takes a different subset of the ranking inputs, so the
+# call shape is dispatched per phase below rather than through a fixed
+# signature. Every one of them returns the same selected pair or None.
+PhaseFn = Callable[..., "tuple[NodeProxy, NodeProxy] | None"]
 
 
 # Each entry is a dict whose first key is the phase name (mapping to its
@@ -116,8 +125,8 @@ def get_phases() -> list[dict[str, object]]:
 
 
 def select_pair(
-    all_images: list[dict[str, object]],
-    candidate_images: list[dict[str, object]],
+    all_images: list[ImageRow],
+    candidate_images: list[ImageRow],
     cg: CrystalGraphPort,
 ) -> tuple[tuple[str, str] | None, int | None]:
     _start = time.perf_counter()
@@ -170,7 +179,7 @@ def select_pair(
 
     for idx, phase in enumerate(PHASES):
         name = next(k for k, v in phase.items() if callable(v))
-        fn = phase[name]
+        fn = cast("PhaseFn", phase[name])
 
         if skip_before > idx:
             continue

@@ -15,7 +15,7 @@ class PersonMapVector:
 
     def __init__(self, name: str, maps_provider: MapsProvider) -> None:
         self.name: str = name
-        self.value_list: dict[str, list[dict[str, float]]] = {}
+        self.value_list: dict[str, list[object]] = {}
         self.vector_list: dict[str, list[float]] = {}
         self.vector_config = config["vector"]["vectors"]
         self.maps_provider = maps_provider
@@ -39,7 +39,7 @@ class PersonMapVector:
         entries: dict[str, dict[str, object]],
         add_new_values: bool,
         alias: list[str] | None,
-    ) -> dict[str, list[dict[str, float]]]:
+    ) -> dict[str, list[object]]:
         per_unit = self._per_unit()
         max_instances = 0
         for id, entry in list(entries.items()):

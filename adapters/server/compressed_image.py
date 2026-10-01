@@ -26,7 +26,8 @@ def compressed_image_response(src: Path, fname: str, cache: CacheProvider) -> Re
     st: stat_result = src.stat()
     key: str = f"{fname}:{st.st_mtime_ns}:{st.st_size}"
 
-    data: bytes | None = cache.get(key)
+    cached = cache.get(key)
+    data: bytes | None = cached if isinstance(cached, bytes) else None
     if data is None:
         with Image.open(src) as im:
             buf = io.BytesIO()

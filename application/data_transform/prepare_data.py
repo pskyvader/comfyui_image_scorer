@@ -39,8 +39,6 @@ def register_map_values(
     if not map_configs:
         return
     for _path, entry, _cat, _extra in processed_data:
-        if not isinstance(entry, dict):
-            continue
         for v in map_configs:
             name = v["name"]
             alias = v.get("alias")

@@ -13,9 +13,7 @@ def l2_normalize_batch(vectors: npt.NDArray[np.float32]) -> npt.NDArray[np.float
     eps: float = 1e-12
     norms = np.linalg.norm(vectors, axis=1, keepdims=True).astype(np.float32)
     norms = np.maximum(norms, eps)
-    result = vectors / norms
-
-    return result
+    return (vectors / norms).astype(np.float32)
 
 
 def get_value_from_entry(

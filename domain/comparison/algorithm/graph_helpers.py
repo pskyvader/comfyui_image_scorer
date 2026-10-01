@@ -18,6 +18,7 @@ from ...graph.node_proxy import NodeProxy
 from ...comparison.algorithm.history_collapse import canonicalize_pair, safe_parse_timestamp
 
 from ....domain.ports.graph import CrystalGraphPort
+from ....domain.ports.repository import ImageRow
 
 
 def stable_seed_pool(images: list[NodeProxy]) -> list[NodeProxy]:
@@ -76,15 +77,15 @@ def is_collapsable_pair(filename_a: str, filename_b: str, cg: CrystalGraphPort) 
 
 
 def filter_excluded_images(
-    images: list[dict[str, object]],
+    images: list[ImageRow],
     exclude_set: set[str],
-) -> list[dict[str, object]]:
+) -> list[ImageRow]:
     """Remove images whose filename is in exclude_set."""
     _start = time.perf_counter()
     if not exclude_set:
         return images
 
-    result: list[dict[str, object]] = []
+    result: list[ImageRow] = []
     for img in images:
         filename = img["filename"]
         if filename not in exclude_set:

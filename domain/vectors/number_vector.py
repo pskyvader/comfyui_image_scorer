@@ -2,7 +2,7 @@ from .helpers import get_value_from_entry
 
 
 class IntVector:
-    def __init__(self, name: str, max_normalization: int) -> None:
+    def __init__(self, name: str, max_normalization: int | None) -> None:
         self.name = name
         self.max_normalization = max_normalization
         self.value_list: dict[str, int] = {}
@@ -31,7 +31,7 @@ class IntVector:
 
 
 class FloatVector:
-    def __init__(self, name: str, max_normalization: int) -> None:
+    def __init__(self, name: str, max_normalization: float | None) -> None:
         self.name = name
         self.max_normalization = max_normalization
         self.value_list: dict[str, float] = {}
