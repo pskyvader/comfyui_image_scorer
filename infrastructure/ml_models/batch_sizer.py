@@ -100,9 +100,7 @@ class BatchSizer:
             }
             profiles.append(ProfileData(**profile_fields, history=history))
 
-        vision_models: dict[str, VisionModelConfig] = config["prepare"][
-            "vision_models"
-        ]
+        vision_models: dict[str, VisionModelConfig] = config["prepare"]["vision_models"]
         attribute_models: dict[str, AttributeModelConfig] = config["prepare"][
             "attribute_models"
         ]
@@ -181,7 +179,7 @@ class BatchSizer:
 
         width, height = self._calibration_resolution(width, height)
         key = self._resolution_key(width, height)
-        if key in profile.history and not rebuild:
+        if key in profile.history and len(profile.history[key]) > 0 and not rebuild:
             result = max(entry.batch_size for entry in profile.history[key])
             if bound is not None:
                 result = min(result, bound)
@@ -204,6 +202,35 @@ class BatchSizer:
             result = min(result, bound)
 
         return result
+
+    def _search_ceiling(
+        self,
+        profile: ProfileData,
+        width: int,
+        height: int,
+        bound: int | None,
+    ) -> int:
+        """Starting upper bound for the binary search at one resolution.
+
+        The fit only seeds the search; the probes below decide what fits. A fit
+        whose overhead exceeds the model's own weights cannot be describing this
+        model, so it is ignored in favour of a wide bound rather than allowed to
+        cap the result the way a stale one did.
+        """
+        high = 1000
+        if (
+            profile.pixel_cost is not None
+            and profile.fixed_overhead is not None
+            and profile.fixed_overhead <= profile.model_memory_bytes
+        ):
+            estimate = int(
+                profile.fixed_overhead + profile.pixel_cost * width * height * 3
+            )
+            if estimate > 0:
+                high = max(1, self._free_memory(profile.device_id) // estimate)
+        if bound is not None:
+            high = min(high, bound)
+        return high
 
     def _profile_new_resolution(
         self,
@@ -255,7 +282,6 @@ class BatchSizer:
         )
 
         device_id = profile.device_id
-        available = int(profile.total_memory) - profile.model_memory_bytes
 
         if rebuild and profile.history[key]:
             best = max(entry.batch_size for entry in profile.history[key])
@@ -275,14 +301,7 @@ class BatchSizer:
                 return result
             low, high = 1, best - 1
         else:
-            high = 1000
-            if profile.pixel_cost is not None:
-                per_image = profile.pixel_cost * width * height * 3
-                fixed = profile.fixed_overhead or 0
-                if per_image > 0:
-                    high = max(1, int((available - fixed) / per_image) * 2)
-            if bound is not None:
-                high = min(high, bound)
+            high = self._search_ceiling(profile, width, height, bound)
             low = 1
 
         last_success = 0
@@ -349,8 +368,15 @@ class BatchSizer:
         logger.debug(
             f"Evaluating batch size {candidate} for resolution {width}x{height}"
         )
+        # Sampled before the probe allocates anything. Reading free memory after
+        # the forward compares an absolute footprint against space the probe has
+        # already taken, so the test only passes when the probe fits in roughly
+        # half the card. What a probe may claim is measured up front, and what it
+        # costs is measured as the rise above whatever was already resident.
+        available = self._free_memory(device_id)
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats(device_id)
+        resident_before = int(torch.cuda.memory_allocated(device_id))
         # Probe on the device and in the dtype the model actually holds.
         # ComfyUI partially offloads a model when memory is tight, so building
         # the probe from config alone puts it on a different device than some of
@@ -364,15 +390,12 @@ class BatchSizer:
         )
         try:
             model.eval()
-            # Peak memory is the whole device's high-water mark, so the marginal
-            # cost of this probe is the rise above whatever was already resident.
-            resident_before = int(torch.cuda.memory_allocated(device_id))
             self._run_probe(model, batch_tensor)
             torch.cuda.synchronize(device_id)
 
             peak = int(torch.cuda.max_memory_allocated(device_id))
             delta = peak - resident_before
-            if peak < self._available_for(profile):
+            if delta <= available:
                 profile.history[key].append(
                     HistoryEntry(
                         batch_size=candidate,
@@ -381,6 +404,23 @@ class BatchSizer:
                     )
                 )
                 result = candidate
+            else:
+                logger.debug(
+                    f"batch size {candidate} for {width}x{height} needs {delta} "
+                    f"bytes of activations, {available} free"
+                )
+        except torch.cuda.OutOfMemoryError as e:
+            # Climbing toward the ceiling is expected to hit it; only a failure
+            # at batch 1 means this resolution genuinely does not fit.
+            if candidate <= 1:
+                logger.warning(
+                    f"batch size 1 for resolution {width}x{height} failed with error: {e}"
+                )
+            else:
+                logger.debug(
+                    f"batch size {candidate} for resolution {width}x{height} "
+                    f"failed with error: {e}"
+                )
         except Exception as e:
             logger.warning(
                 f"batch size {candidate} for resolution {width}x{height} failed with error: {e}"
@@ -396,15 +436,18 @@ class BatchSizer:
         devices = {parameter.device for parameter in model.parameters()}
         return len(devices) == 1
 
-    def _available_for(self, profile: ProfileData) -> int:
-        """Memory a probe may claim, given what is already resident.
+    @staticmethod
+    def _free_memory(device_id: str) -> int:
+        """VRAM a probe may claim, sampled before the probe allocates.
 
-        Measuring against total device memory is how a batch gets recorded that
-        fits in isolation but not once the rest of the pipeline is loaded, so
-        the threshold is what ComfyUI reports as free right now.
+        ComfyUI reports the driver's free memory plus the allocator's cached but
+        unused reserve, which is the room actually available to a new
+        allocation. That figure must be read before the probe runs: it shrinks
+        by the probe's own footprint, so pairing it with the probe's peak would
+        compare an absolute footprint against what is left and silently demand
+        twice the memory. Callers compare a probe's marginal cost against this.
         """
-        free = cast("int", comfy.model_management.get_free_memory(profile.device_id))
-        return min(profile.total_memory, free)
+        return cast("int", comfy.model_management.get_free_memory(device_id))
 
     def _fits_now(self, key: str, candidate: int, profile: ProfileData) -> bool:
         """True when a recorded batch still fits in current headroom.
@@ -423,8 +466,8 @@ class BatchSizer:
         if not recorded:
             return False
         entry = max(recorded, key=lambda e: e.batch_size)
-        return (profile.model_memory_bytes + entry.delta_memory) < self._available_for(
-            profile
+        return (profile.model_memory_bytes + entry.delta_memory) < self._free_memory(
+            profile.device_id
         )
 
     def _fit_model(self) -> None:

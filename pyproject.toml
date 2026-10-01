@@ -44,7 +44,7 @@ comfyui-scorer = "comfyui_image_scorer.adapters.cli.main:main"
 [tool.pytest.ini_options]
 addopts = "-s -m 'not realdata'"
 pythonpath = [".."]
-testpaths = ["tests", "adapters", "domain", "core"]
+testpaths = ["tests", "adapters", "domain", "core", "infrastructure"]
 markers = [
     "realdata: destructive end-to-end tests against the real dataset via a live server",
 ]
