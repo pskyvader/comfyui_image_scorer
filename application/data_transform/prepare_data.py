@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import itertools
 import os
 from typing import Any, Iterator
 
@@ -79,21 +78,31 @@ def build_split_files(
     )
     processed_files: set[str] | None = None
     for c in split_ids.sorted_vectors.values():
-        ids = set(c["vector"].vector_list.keys())
+        ids: set[str] = set(c["vector"].vector_list.keys())
         if ids:
             processed_files = ids if processed_files is None else processed_files & ids
+        else:
+            logger.info(
+                f"No ids found in {c['name']}, setting processed files to empty"
+            )
+            processed_files = None
+            break
     processed_files = processed_files or set()
+    logger.info(f"processed files:{len(processed_files)}")
 
-    logger.info(f"collecting files in {image_root}...")
     files: Iterator[tuple[str, str]] = discover_files(image_root)
+
     if processed_files:
         files = (f for f in files if os.path.basename(f[0]) not in processed_files)
-    if limit > 0:
-        files = itertools.islice(files, limit)
+
+    # The collector applies the limit: capping the file stream here would
+    # under-deliver whenever one of the first `limit` files fails validation,
+    # and the collector also cancels the work it does not need.
     collected_data = collect_valid_files(
         files,
         max_workers=max_workers,
         scored_only=True,
+        limit=limit,
     )
 
     if len(collected_data) == 0:
@@ -158,6 +167,14 @@ def build_full_files(
         return {"vectors": 0, "text_data": 0}
 
     vector_list.filter_missing_vectors()
+    if not vector_list.unique_ids:
+        logger.warning(
+            "No ids have vectors for every configured category, so the full "
+            "vector files will not be recreated. Build over every image, or "
+            "clear the stale split/image data, to regenerate them."
+        )
+        return {"vectors": 0, "text_data": 0}
+
     vector_list.join_vectors()
     vector_list.join_text_data()
     vector_list.update_lists()

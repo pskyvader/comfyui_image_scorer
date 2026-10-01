@@ -35,7 +35,7 @@ are implementation details.
 | `core/observability/logger.py` | `get_logger` | Create a package module logger. |
 | `core/observability/logger.py` | `capture_log_output` | Capture package logs and writes during a command. |
 | `core/io/serialization.py` | `discover_files` | Discover image and metadata pairs in sorted, reproducible traversal order. |
-| `core/io/serialization.py` | `collect_valid_files` | Collect valid files in parallel, returning results in input order. |
+| `core/io/serialization.py` | `collect_valid_files` | Collect valid files in parallel, returning results in input order. A positive `limit` stops after that many collected entries and cancels the queued work. |
 | `core/utilities/concurrency.py` | `parallel_batch` | Run a batch function sequentially. |
 | `core/utilities/concurrency.py` | `parallel_for` | Run argument tuples through a worker pool, returning results in input order. |
 | `domain/graph/chain_manager.py` | `ChainManager` | Own in-memory graph topology, chains, components, and comparison history. History entries are indexed by `(winner, loser)` so applying a comparison stays constant-time as the history grows. |

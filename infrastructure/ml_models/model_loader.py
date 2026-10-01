@@ -244,12 +244,6 @@ class ModelLoader:
             return ModelLoader._CLIP_NORM
         return ModelLoader._IMAGENET_NORM
 
-    def is_model_loaded(self, model_key: str, section: str = "vision_models") -> bool:
-        """Whether a model for this key is already loaded and cached."""
-        if section == "attribute_models":
-            return model_key in self._hf_model_cache
-        return model_key in self.vision_model_cache
-
     def load_vision_model_patcher(self, model_key: str) -> ModelPatcher:
         """Return the patcher behind a cached vision model for batch profiling."""
         return self.load_vision_model(model_key)[0].patcher

@@ -263,15 +263,20 @@ class DataTransformer:
         sorted_indices = nonzero_indices[sorted_idx]
 
         cumulative = np.cumsum(sorted_importances)
-        cumulative /= cumulative[-1]  # normalize to 1
-
-        # Keep features until cumulative gain reaches threshold (e.g., 95%)
-        cum_threshold = 0.99
-        keep_mask = cumulative <= cum_threshold
-
-        # Always keep at least one feature
-        if not np.any(keep_mask):
-            keep_mask[0] = True
+        keep_mask = np.ones(sorted_indices.shape[0], dtype=bool)
+        if cumulative.size:
+            cumulative = cumulative / cumulative[-1]  # normalize to 1
+            # Keep features until cumulative gain reaches threshold (e.g., 95%)
+            keep_mask = cumulative <= 0.99
+            # Always keep at least one feature
+            if not np.any(keep_mask):
+                keep_mask[0] = True
+        else:
+            # No feature carried any gain, so there is nothing to rank and
+            # nothing to prune. Keep them all rather than dropping the model.
+            logger.debug(
+                f"All {n_features} features had zero gain; keeping every feature."
+            )
 
         kept_indices = sorted_indices[keep_mask]
 

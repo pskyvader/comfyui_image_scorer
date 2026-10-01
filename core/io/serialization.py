@@ -8,6 +8,7 @@ import time
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from ..observability.logger import get_logger, ModuleLogger
+
 logger: ModuleLogger = get_logger(__name__)
 
 
@@ -38,7 +39,6 @@ def write_single_jsonl(filename: str, data: list[Any], mode: str) -> None:
                     pbar.update(1)
 
 
-
 def discover_files(root: str) -> Iterator[tuple[str, str]]:
     """Yield (image, companion json) pairs in a stable, sorted order.
 
@@ -48,7 +48,7 @@ def discover_files(root: str) -> Iterator[tuple[str, str]]:
     """
     for dirpath, dirs, files in os.walk(root):
         dirs.sort()
-        file_set = set(files)
+        file_set: set[str] = set(files)
         for f in sorted(files):
             if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
                 base = f.rsplit(".", 1)[0]
@@ -62,7 +62,7 @@ def discover_files(root: str) -> Iterator[tuple[str, str]]:
 
 
 def collect_single_file(
-    file: tuple[str, str]
+    file: tuple[str, str],
 ) -> tuple[str, dict[str, Any], str, str] | None:
     _start = time.perf_counter()
     img_path, meta_path = file
@@ -95,15 +95,23 @@ def collect_valid_files(
     files: Iterator[tuple[str, str]],
     max_workers: int,
     scored_only: bool,
+    limit: int = 0,
 ) -> list[tuple[str, dict[str, Any], str, str]]:
-    file_list = list(files)
+    file_list: list[tuple[str, str]] = list(files)
     collected: list[tuple[str, dict[str, Any], str, str] | None] = [None] * len(
         file_list
     )
     if not file_list:
+        # logger.info("file list empty")
         return []
+    # logger.info(f"file list: {len(file_list)}, collected:{len(collected)}")
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    processed = 0
+
+    # Not a `with` block: an early exit must cancel the queued work instead of
+    # waiting for every submitted task to finish.
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+    try:
         futures = {
             executor.submit(collect_single_file, file): index
             for index, file in enumerate(file_list)
@@ -121,8 +129,15 @@ def collect_valid_files(
                     continue
 
                 collected[futures[future]] = result
+                processed += 1
+                if limit > 0 and processed >= limit:
+                    break
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
-    return [entry for entry in collected if entry is not None]
+    results = [entry for entry in collected if entry is not None]
+    # logger.info(f"result 0:{results[0] if results else None}")
+    return results
 
 
 def _recursive_parse_json(obj: Any, path: str | None) -> Any:
@@ -232,9 +247,7 @@ def clean_json_metadata(
         if not base:
             for _, value in json_data.items():
                 if isinstance(value, dict):
-                    base = {
-                        k: v for k, v in value.items() if k not in remove_fields
-                    }
+                    base = {k: v for k, v in value.items() if k not in remove_fields}
                     break
 
     base["score"] = round(float(default_score), 3)

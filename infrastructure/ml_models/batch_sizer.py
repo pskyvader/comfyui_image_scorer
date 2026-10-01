@@ -141,13 +141,10 @@ class BatchSizer:
                 model_memory_bytes=0,
             )
 
-        # Re-measure only when this sizer's model is already resident; otherwise
-        # keep what the profile recorded and let the first profiling pass
-        # refresh it.
-        if model_loader.is_model_loaded(self._model_key, self._section):
-            self._active.model_memory_bytes = int(
-                torch.cuda.memory_allocated(self._active.device_id)
-            )
+        # Forget a recorded weight footprint: it was measured against whatever
+        # else was resident and is not this model's size. The first profiling
+        # pass records the model's own weights instead.
+        self._active.model_memory_bytes = 0
 
         self._ready = True
 
@@ -231,6 +228,14 @@ class BatchSizer:
             return min(1, bound if bound is not None else 1)
 
         comfy.model_management.load_model_gpu(patcher)
+        # load_model_gpu only moves across the weights ComfyUI thinks are
+        # needed, so a model probed while other models are registered can be
+        # left split across devices. Pull the rest of the weights over so the
+        # probe measures the whole model. Asking ComfyUI to free memory first
+        # instead faults, because it tears down models mid-forward.
+        patcher.partially_load(
+            patcher.load_device, extra_memory=0, force_patch_weights=False
+        )
         model = patcher.model
         if not self._fully_resident(model):
             # Probing a split model cannot work: some weights sit on the
@@ -238,12 +243,15 @@ class BatchSizer:
             # forward through it faults rather than raising. Report it instead
             # of letting every candidate "fail" and implying a size problem.
             logger.warning(
-                f"Model '{self._model_key}' is split across devices after "
-                "loading, so it cannot be batch profiled; using a batch of 1"
+                f"Model '{self._model_key}' is still split across devices "
+                "after loading, so it cannot be batch profiled; using a batch of 1"
             )
             return min(1, bound if bound is not None else 1)
+        # The model's own weights, not the whole GPU allocation. Measuring the
+        # allocation instead folds every other resident model into this one and
+        # leaves both the recorded delta and the headroom check meaningless.
         profile.model_memory_bytes = int(
-            torch.cuda.memory_allocated(patcher.load_device)
+            sum(p.numel() * p.element_size() for p in model.parameters())
         )
 
         device_id = profile.device_id
@@ -356,11 +364,14 @@ class BatchSizer:
         )
         try:
             model.eval()
+            # Peak memory is the whole device's high-water mark, so the marginal
+            # cost of this probe is the rise above whatever was already resident.
+            resident_before = int(torch.cuda.memory_allocated(device_id))
             self._run_probe(model, batch_tensor)
             torch.cuda.synchronize(device_id)
 
             peak = int(torch.cuda.max_memory_allocated(device_id))
-            delta = peak - profile.model_memory_bytes
+            delta = peak - resident_before
             if peak < self._available_for(profile):
                 profile.history[key].append(
                     HistoryEntry(
@@ -412,8 +423,9 @@ class BatchSizer:
         if not recorded:
             return False
         entry = max(recorded, key=lambda e: e.batch_size)
-        model_memory = int(torch.cuda.memory_allocated(profile.device_id))
-        return (model_memory + entry.delta_memory) < self._available_for(profile)
+        return (profile.model_memory_bytes + entry.delta_memory) < self._available_for(
+            profile
+        )
 
     def _fit_model(self) -> None:
         _start = time.perf_counter()

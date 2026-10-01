@@ -216,10 +216,6 @@ class VectorList:
                 new_image_paths: dict[str, str] = self._exclude_present_image_path(
                     image_vector
                 )
-                # logger.info(
-                #     f"Image paths: {image_vector.path_list}, images list: {image_vector.image_list}"
-                # )
-                # logger.info(f"New image paths: {new_image_paths}")
                 if new_image_paths:
                     image_vector.create_vector_list_from_paths(new_image_paths)
                 self.sorted_vectors[v]["vector"] = image_vector
@@ -251,11 +247,14 @@ class VectorList:
     def validate_and_convert(
         self, data: list[list[float]], name: str, target_size: int
     ) -> npt.NDArray[np.float32]:
-        # np.array([]) is one-dimensional, so the width check below would raise
-        # IndexError instead of reporting the real problem. A category with no
-        # usable rows is legitimately empty and is filtered out downstream.
+        # An empty category is not an empty result to paper over: it means the
+        # ids being joined have no vectors for this category, and returning a
+        # zero-width array would write a truncated file instead of saying so.
         if not data:
-            return np.zeros((0, target_size), dtype=np.float32)
+            raise ValueError(
+                f"Error in '{name}': no vector rows to convert. The ids being "
+                "joined have no vectors for this category."
+            )
         arr = np.array(data, dtype=np.float32)
         if arr.shape[1] != target_size:
             raise ValueError(
