@@ -160,9 +160,6 @@ def _recursive_parse_json(obj: Any, path: str | None) -> Any:
             result = obj
     else:
         result = obj
-    # if isinstance(result, (dict, list)):
-
-    # else:
 
     return result
 
