@@ -27,9 +27,7 @@ are implementation details.
 
 | Path | Symbol | Description |
 |---|---|---|
-| `__init__.py` | `NODE_CLASS_MAPPINGS` | ComfyUI node-name to class mapping. |
-| `__init__.py` | `NODE_DISPLAY_NAME_MAPPINGS` | ComfyUI display-name mapping. |
-| `scorer.py` | `main` | CLI launcher entry point. |
+| `adapters/comfyui/node_registry.py` | `NODE_DISPLAY_NAME_MAPPINGS` | ComfyUI display-name mapping. |
 | `core/configuration/settings.py` | `Config` | Mutable configuration manager with JSON persistence. |
 | `core/configuration/settings.py` | `config` | Process configuration object. |
 | `core/observability/logger.py` | `get_logger` | Create a package module logger. |
@@ -57,8 +55,6 @@ are implementation details.
 | `domain/comparison/algorithm/history_collapse.py` | `safe_parse_timestamp` | Parse and normalize timestamps into comparable datetime values for deterministic ordering. |
 | `domain/comparison/algorithm/history_collapse.py` | `collapse_comparison_history` | Collapse comparison history to a deterministic survivor set via missing-node, self-link, same-direction, and contradiction rules. |
 | `domain/comparison/algorithm/graph_helpers.py` | `collapse_comparisons` | Collapse comparison history to a deterministic survivor set via missing-node, self-link, same-direction, and contradiction rules. |
-| `domain/comparison/algorithm/graph_helpers.py` | `pair_key` | Canonicalize an unordered image pair. |
-| `domain/comparison/algorithm/graph_helpers.py` | `safe_parse_timestamp` | Parse ISO timestamp strings into comparable datetime objects for deterministic ordering. |
 | `domain/comparison/algorithm/merge_sort_ranker.py` | `select_pair_for_comparison` | Select the next ranking pair. |
 | `domain/ports/graph.py` | `CrystalGraphPort` | Protocol graph/database boundary; `add_link` replaces `add_comparison`. |
 | `domain/ports/repository.py` | `ImageRepository` | Image persistence protocol. |
@@ -200,7 +196,7 @@ are implementation details.
 | `domain/comparison/comparison_recorder.py` | Comparison persistence and graph recording port consumer. |
 | `domain/comparison/algorithm/__init__.py` | Ranking algorithm package marker. |
 | `domain/comparison/algorithm/phase_order.py` | Ranking phase ordering. |
-| `domain/comparison/algorithm/graph_helpers.py` | Graph-query, pair-key, timestamp parsing, candidate-pool helpers, and history collapse. |
+| `domain/comparison/algorithm/graph_helpers.py` | Graph-query, candidate-pool, and collapsibility helpers. |
 | `domain/comparison/algorithm/merge_sort_ranker.py` | Pair selection orchestration for merge-sort ranking. |
 | `domain/comparison/algorithm/pair_active.py` | Active pair selection. |
 | `domain/comparison/algorithm/view.py` | Ranking view and response shaping helpers. |
@@ -370,9 +366,12 @@ are implementation details.
 | Path | Description |
 |---|---|
 | `tests/test_architecture.py` | Layer-import, database-boundary, and proxy-construction architecture gates. |
+| `tests/test_bulk_repository.py` | Chunked bulk writes must match the per-row path exactly, ids included. |
+| `tests/test_concurrency.py` | Ordered worker-pool execution and result mapping. |
 | `tests/test_deduplicate_scored.py` | Scored-tree deduplication over temporary directories: same-stem copies, filename conflicts, and cross-stem byte-identical detection across differing sizes. |
 | `tests/test_general.py` | General command, endpoint, and integration contract tests. |
 | `tests/test_graph_facade.py` | CrystalGraph facade behavior tests. |
 | `tests/test_graph_helpers.py` | History-collapse and graph-helper algorithm tests. |
 | `tests/test_image_processor.py` | `ImageProcessor` behavior: retained-versus-delegated filesystem operations, plus rebuild-from-ranked coverage (image rebuild, history replay and collapse, prompt tags, JSON sync, and run-to-run determinism). |
+| `infrastructure/ml_models/tests/test_batch_sizer.py` | Batch calibration through the public `get()` with a scripted allocator: marginal-cost acceptance, stale-fit ceiling, and the least-squares fit. |
 

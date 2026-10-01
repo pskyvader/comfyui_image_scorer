@@ -112,7 +112,7 @@ for these files; its virtual environment is used only to run validation.
 
 - [x] **P-16 — Integrate Models with ComfyUI Memory Management.**
   - **Why:** Current `ModelLoader` loads models directly with `.to(device)` and maintains manual caches, bypassing ComfyUI's VRAM management, offloading, and device handling (`--cpu`, `--lowvram`, `--gpu-only`, MPS, DirectML). This causes OOM risk and hardcoded CUDA dependencies.
-  - **Rules/structure:** Follow architecture boundaries (`infrastructure` implements domain ports; `domain` must not import `comfy` or manage GPU memory), strict typing (no `Any` or bare `object` in protocols), dtype/device/VRAM correctness, no `torch.no_grad()` or `torch.inference_mode()` in inference code, preserve offline loading, no internet requests.
+  - **Rules/structure:** Follow architecture boundaries (`infrastructure` implements domain ports; `domain` must not import `comfy` or manage GPU memory), strict typing (no `Any` or bare `object` in protocols), dtype/device/VRAM correctness, preserve offline loading, no internet requests.
   - **How:** In `infrastructure/ml_models/model_loader.py`, wrap models with `ModelPatcher` / `CoreModelPatcher` and encapsulate `comfy.model_management.load_model_gpu` inside infrastructure callable wrappers (`ComfyVisionModel`, `ComfyEmbeddingModel`, `ComfyAttributeModel`). Keep `domain/ports/loading.py` purely protocol-based (`VisionModel`, `EmbeddingModel`) without importing `comfy`. Update callers in `domain/` to call the wrapped models directly without context managers or manual GPU loading calls. Explicitly refer to and follow the draft implementation design in [Appendix: P-16 Implementation Specification (Draft)](#appendix-p-16-implementation-specification-draft).
   - **Dependency:** Complete P-09 and P-10 (strict typing cleanup) first; update `FUNCTION_INDEX.md` after implementation.
   - *(Status: complete — `infrastructure/ml_models/model_loader.py` wraps every vision, embedding, and attribute model in a `ModelPatcher` built from `comfy.model_management.text_encoder_device()` / `text_encoder_offload_device()`, and `ComfyVisionModel`/`ComfyEmbeddingModel`/`ComfyAttributeModel` call `load_model_gpu` on every invocation. The hardcoded `device != "cuda"` guards, the manual `model.to(device)` calls, the manual HF model lock, and every `torch.no_grad()`/`torch.inference_mode()` in the inference paths are removed. `domain/ports/loading.py` stays protocol-only: `VisionModel`, `EmbeddingModel`, `AttributeModel`, `Transform`, `BatchTensors`, and `ImageProcessor` describe the callable surfaces domain code uses, and the former underscore-prefixed protocols were renamed because they are now cross-module public contracts. `infrastructure/ml_models/batch_sizer.py` profiles through `load_vision_model_patcher()` and returns a conservative size of 1 on non-CUDA devices. Because ComfyUI only puts its own root on `sys.path` when it loads custom nodes, the package `__init__.py` adds the host ComfyUI root before importing the node registry, so the standalone CLI, the test suite, and the documented registration smoke check all keep working. Verified 2026-09-24: 76 tests pass, architecture tests pass, registration smoke check returns `['AestheticScore']`, and `python scorer.py --help` runs. The real-model `python scorer.py build all --limit 10` check still requires a user run against a downloaded model set.)*
@@ -145,7 +145,7 @@ Add one entry here before finalizing the index for every file or public symbol t
 This appendix preserves the draft technical design and code specifications for task **P-16** (Integrate Models with ComfyUI Memory Management).
 
 - **Why:** Current `ModelLoader` loads models directly with `.to(device)` and maintains manual caches, bypassing ComfyUI's VRAM management, offloading, and device handling (`--cpu`, `--lowvram`, `--gpu-only`, MPS, DirectML). This causes OOM risk, no automatic offloading, and hardcoded CUDA dependency.
-- **Rules/structure:** Follow architecture boundaries (`infrastructure` implements domain ports; `domain` must not import `comfy` or manage GPU memory), strict typing (no `Any` in protocols), dtype/device/VRAM correctness, use ComfyUI optimized ops (`load_model_gpu`, `get_free_memory`), preserve offline loading, no internet requests, no `torch.no_grad()` or `torch.inference_mode()` in inference paths. Update `FUNCTION_INDEX.md` after implementation.
+- **Rules/structure:** Follow architecture boundaries (`infrastructure` implements domain ports; `domain` must not import `comfy` or manage GPU memory), strict typing (no `Any` in protocols), dtype/device/VRAM correctness, use ComfyUI optimized ops (`load_model_gpu`, `get_free_memory`), preserve offline loading, no internet requests. Update `FUNCTION_INDEX.md` after implementation.
 - **How:** In `infrastructure/ml_models/model_loader.py`, wrap models with `ModelPatcher` / `CoreModelPatcher` and encapsulate `comfy.model_management.load_model_gpu` inside infrastructure callable wrappers (`ComfyVisionModel`, `ComfyEmbeddingModel`, `ComfyAttributeModel`). Keep `domain/ports/loading.py` purely protocol-based (`_VisionModel`, `_EmbeddingModel`) without importing `comfy`. Update callers in `domain/` to call the wrapped models directly without context managers or manual GPU loading calls.
 
 ### Files to Modify
@@ -155,10 +155,10 @@ This appendix preserves the draft technical design and code specifications for t
 | `domain/ports/loading.py` | Protocol update (pure `_VisionModel`, `_EmbeddingModel`, `_AttributeModel` protocols) |
 | `infrastructure/ml_models/model_loader.py` | Core implementation & ComfyUI wrappers |
 | `infrastructure/ml_models/batch_sizer.py` | Device-aware profiling (Option 1) |
-| `domain/vectors/image_vector.py` | Caller update (direct execution, no `torch.no_grad`) |
+| `domain/vectors/image_vector.py` | Caller update (direct execution) |
 | `domain/vectors/embedding_vector.py` | Caller update (direct execution) |
 | `domain/analysis/image_analysis.py` | Caller update |
-| `domain/analysis/attribute_analysis.py` | Caller update (direct execution, no `torch.no_grad`) |
+| `domain/analysis/attribute_analysis.py` | Caller update (direct execution) |
 
 ---
 
@@ -642,7 +642,10 @@ def _evaluate_candidate(
     torch.cuda.reset_peak_memory_stats(device_id)
     batch_tensor = torch.zeros((candidate, 3, height, width), device=device_id)
     try:
-        # Inference mode is set globally by ComfyUI; do not use torch.inference_mode() locally
+        # A forward pass must not build an autograd graph: ComfyUI applies
+        # @torch.no_grad() per function and enables nothing process-wide, so
+        # every intermediate is otherwise retained for backward at several times
+        # the peak.
         model(batch_tensor)
         torch.cuda.synchronize(device_id)
 
@@ -702,7 +705,8 @@ def create_image_vector_batch(self, current_batch: list[imageTuple]) -> vectorDi
     )
 
     # Calling model(batch_tensor) triggers load_model_gpu in infrastructure wrapper.
-    # No torch.no_grad() context manager (inference mode is handled globally by ComfyUI).
+    # Run it without building an autograd graph, or every intermediate is
+    # retained for backward at several times the peak.
     outputs = model(batch_tensor)
 
     # ... rest unchanged (validation, normalization) ...

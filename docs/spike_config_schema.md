@@ -1,26 +1,13 @@
-# Spike — `AutoSaveDict` write paths & configuration schema validation (§3.14 #58)
+# Spike — configuration schema validation (§3.14 #58)
 
-Date: 2026-08-24 · Outcome to be decided at spike review with the user.
+Date: 2026-08-24 · Decision: Option B, recorded below and since implemented.
 
-## Current mechanics (`core/configuration/settings.py`, mirrored in old stubs)
+The implementation this spike analysed no longer exists. `Config` used to be a
+`MutableMapping` over `config.json` with per-section `AutoSaveDict` wrappers that
+rewrote the file on every `__setitem__`, so mutation was autosave-on-set with no
+schema and no explicit save step. All of that is gone.
 
-- `Config` is a `MutableMapping` over `config.json` with two cache dicts:
-  `_root_cache` (whole-file dict) and `_sub_cache` (per-section `AutoSaveDict`s).
-- Every section accessed via `config["training"]` constructs (once, cached) an
-  `AutoSaveDict` wrapping that section **with a save callback that rewrites
-  `config.json` on every `__setitem__`/`__delitem__`**.
-- Write paths observed in the codebase:
-  1. Startup bootstrap: `config["image_root"] = get_output_directory()` in all
-     three composition roots (write-back to disk at import time).
-  2. Training/HPO flows persisting results into `config["training"]["topN"]`
-     (`used_keys`, `best_score`, …) after each run — this is how
-     `training_config.json` changes between runs.
-  3. Read-modify-write of ranking knobs? None found outside (1)/(2).
-  4. `Config.clear()` reloads from disk (cache invalidation only).
-- Mutation is therefore **autosave-on-set**, scattered across any code that
-  assigns into a section; there is no explicit "save" step and no schema.
-
-## Options
+## Options considered
 
 **A. Typed models preserve autosave write-back** — pydantic-settings style
 models per section; assignment validates then persists exactly as today.
@@ -29,10 +16,9 @@ disk writes on every set.
 
 **B. Load-time-validated / read-only config + explicit save path** — sections
 parse into frozen typed models at load; mutation happens through a small
-explicit API (e.g., `training_config.update_top_result(...)` → validate →
-persist once). Stronger invariant (config immutable during runs), but every
-current writer must be converted and any external tooling writing
-`config.json` directly stays authoritative only at next load.
+explicit API. Stronger invariant (config immutable during runs), but every
+current writer must be converted and any external tooling writing `config.json`
+directly stays authoritative only at next load.
 
 ## Recommendation
 
@@ -44,5 +30,8 @@ with one sanctioned write API. Validation catches malformed user JSON at load
 ## Decision
 
 **Option B** (2026-08-24, user review): load-time-validated read-only config
-sections plus one explicit save API (training-results updater). Implement per
-the recommendation in a dedicated pass.
+sections plus one explicit save API (training-results updater).
+
+Implemented in `core/configuration/settings.py`: `Config` is a read-only
+validated view that parses each section through `SECTION_MODELS` on first
+access, and persists only through `set_root` and `save_section`.
