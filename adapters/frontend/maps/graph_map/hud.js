@@ -13,12 +13,10 @@ globalThis.ChainMapUI.prototype._updateStatsView = function () {
     if (!tbody) {
         return;
     }
-    const order = ["_applyDirectLinkSprings", "_applySecondaryLinkSprings", "_applyBuoyancy", "_applyRepulsion", "_applyCollisions"];
-    const chartColors = ["#06b6d4", "#8b5cf6", "#22c55e", "#f59e0b", "#ef4444"];
+    const forces = globalThis.FORCE_METRICS.filter(([fn]) => fn !== "_tick");
     const fmt = (v) => v < 0.001 ? (v * 1000).toFixed(2) + "µs" : v.toFixed(3) + "ms";
     let html = "";
-    for (let i = 0; i < order.length; i++) {
-        const fn = order[i];
+    for (const [fn, , color] of forces) {
         const s = this._forceStats[fn];
         if (!s) {
             continue;
@@ -26,7 +24,7 @@ globalThis.ChainMapUI.prototype._updateStatsView = function () {
         const active = this._activeForces.includes(fn);
         const opacity = active ? "" : "opacity-40";
         html += `<tr class="${opacity}">
-            <td class="text-left py-0.5 pr-2 text-gray-300"><span class="inline-block w-1.5 h-1.5 rounded-full align-middle mr-1" style="background:${chartColors[i]}"></span><span class="align-middle">${s.label}</span></td>
+            <td class="text-left py-0.5 pr-2 text-gray-300"><span class="inline-block w-1.5 h-1.5 rounded-full align-middle mr-1" style="background:${color}"></span><span class="align-middle">${s.label}</span></td>
             <td class="text-right py-0.5 px-2 text-cyan-300">${fmt(s.live)}</td>
             <td class="text-right py-0.5 px-2 text-green-300">${fmt(s.avg10s)}</td>
             <td class="text-right py-0.5 px-2 text-yellow-300">${fmt(s.avg60s)}</td>
@@ -62,8 +60,10 @@ globalThis.ChainMapUI.prototype._drawPerfChart = function () {
 
     ctx.clearRect(0, 0, W, H);
 
-    const order = ["_applyDirectLinkSprings", "_applySecondaryLinkSprings", "_applyBuoyancy", "_applyRepulsion", "_applyCollisions"];
-    const colors = ["#06b6d4", "#8b5cf6", "#22c55e", "#f59e0b", "#ef4444"];
+    // The HUD plots the five forces; the tick total is a row in the table, not a series.
+    const plotted = globalThis.FORCE_METRICS.filter(([fn]) => fn !== "_tick");
+    const order = plotted.map(([fn]) => fn);
+    const colors = plotted.map(([, , color]) => color);
 
     let maxDur = 0.5;
     const series = [];

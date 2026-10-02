@@ -274,7 +274,7 @@ globalThis.ThreeGraphRenderer = class {
         }
         nodeAttribute.needsUpdate = true;
 
-        const isDirect = link => link.source._chainNext === link.target.id || link.source._chainPrev === link.target.id || link.target._chainNext === link.source.id || link.target._chainPrev === link.source.id;
+        const isDirect = globalThis.isDirectChainLink;
         if (this.regLinks) {
             const regularAttribute = this.regLinks.geometry.attributes.position;
             const regularPositions = regularAttribute.array;
@@ -502,7 +502,7 @@ globalThis.ThreeGraphRenderer = class {
                 linkIdx++;
                 continue;
             }
-            const isDirect = link.source._chainNext === link.target.id || link.source._chainPrev === link.target.id || link.target._chainNext === link.source.id || link.target._chainPrev === link.source.id;
+            const isDirect = globalThis.isDirectChainLink(link);
             if (link.isMainChain) {
                 primaryPositions.push(sourceX, sourceY, 0, targetX, targetY, 0);
                 primaryMap.push(linkIdx);

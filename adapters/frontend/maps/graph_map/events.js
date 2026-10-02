@@ -264,14 +264,7 @@ globalThis.ChainMapUI.prototype._listen = function () {
     if (pBtn) {
         pBtn.onclick = () => {
             this._paused = !this._paused;
-            const pi = document.getElementById("pause-icon");
-            const pl = document.getElementById("play-icon");
-            if (pi) {
-                pi.classList.toggle("hidden", this._paused);
-            }
-            if (pl) {
-                pl.classList.toggle("hidden", !this._paused);
-            }
+            this._setPausedIcon(this._paused);
             if (!this._paused && this._simNodes.length) {
                 this._startSim();
             } else if (this._paused) {
@@ -343,15 +336,12 @@ globalThis.ChainMapUI.prototype._listen = function () {
             this._restartSim();
         };
     }
-    if (this.physAreaPerNodeVal) {
-        this.physAreaPerNode.addEventListener("input", () => {
-            const p = globalThis.physicsSliderToValue(parseInt(this.physAreaPerNode.value), globalThis.PHYSICS_SLIDER.minAreaPerNode);
-            this.physAreaPerNodeVal.textContent = p.toLocaleString() + " px²";
-        });
-    }
     if (this.physAreaPerNode) {
-        this.physAreaPerNode.addEventListener("change", () => {
+        // The live label is already driven by physApply above, which uses the same
+        // slider config; this block used to add a second input listener that
+        // reformatted the same label differently and always won.
+        this.physAreaPerNode.onchange = () => {
             this._restartSim();
-        });
+        };
     }
 };

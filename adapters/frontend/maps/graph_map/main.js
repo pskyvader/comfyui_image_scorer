@@ -90,14 +90,7 @@ globalThis.ChainMapUI = class {
         }
         this._simAlpha = 1;
         this.renderer.onSimulationEnd = () => {
-            const pauseIcon = document.getElementById("pause-icon");
-            const playIcon = document.getElementById("play-icon");
-            if (pauseIcon) {
-                pauseIcon.classList.add("hidden");
-            }
-            if (playIcon) {
-                playIcon.classList.remove("hidden");
-            }
+            this._setPausedIcon(true);
             this._paused = true;
         };
         this.renderer.startLoop(() => this._tick());
@@ -269,7 +262,6 @@ globalThis.ChainMapUI = class {
                     links: [],
                     selectedIds: [],
                     world: { x: 0, y: 0, width: 800, height: 600 },
-                    nodeBaseSize: this._physicsCfg.nodeBaseSize,
                 });
             }
             if (this.loader) {
@@ -433,7 +425,6 @@ globalThis.ChainMapUI = class {
             links: simulationLinks,
             selectedIds: this.selectedNodes,
             world: worldBounds,
-            nodeBaseSize: this._physicsCfg.nodeBaseSize,
         });
         if (this.loader) {
             this.loader.classList.add("hidden");
@@ -446,13 +437,18 @@ globalThis.ChainMapUI = class {
         this._tickSkipAccum = 0;
         this._sync();
 
+        this._setPausedIcon(true);
+    }
+
+    // One owner for the pause/play icon pair; every caller only decides the state.
+    _setPausedIcon(paused) {
         const pauseIcon = document.getElementById("pause-icon");
         const playIcon = document.getElementById("play-icon");
         if (pauseIcon) {
-            pauseIcon.classList.add("hidden");
+            pauseIcon.classList.toggle("hidden", paused);
         }
         if (playIcon) {
-            playIcon.classList.remove("hidden");
+            playIcon.classList.toggle("hidden", !paused);
         }
     }
 

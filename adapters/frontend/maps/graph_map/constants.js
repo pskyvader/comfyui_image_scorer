@@ -42,6 +42,18 @@ globalThis.RENDER = {
     },
 };
 
+// Per-force telemetry, in HUD display order: [method, label, chart colour].
+// Single owner for the force names, which the physics tick, the stat
+// initialiser, and the HUD table all need to agree on.
+globalThis.FORCE_METRICS = [
+    ["_applyDirectLinkSprings", "Main Springs", "#06b6d4"],
+    ["_applySecondaryLinkSprings", "Sec Springs", "#8b5cf6"],
+    ["_applyBuoyancy", "Buoyancy", "#22c55e"],
+    ["_applyRepulsion", "Repulsion", "#f59e0b"],
+    ["_applyCollisions", "Collisions", "#ef4444"],
+    ["_tick", "Tick Total", "#94a3b8"],
+];
+
 globalThis.PHYSICS_SLIDER = {
     baseLinkLength: { steps: 50, min: 10, max: 1000, precision: 0 },
     linkScoreMultiplier: { steps: 50, min: 0, max: 20, precision: 2 },

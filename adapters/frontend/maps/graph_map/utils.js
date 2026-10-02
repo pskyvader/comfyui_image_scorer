@@ -20,6 +20,13 @@ globalThis.showError = function (message) {
     }, 8000);
 };
 
+globalThis.isDirectChainLink = function (link) {
+    return link.source._chainNext === link.target.id
+        || link.source._chainPrev === link.target.id
+        || link.target._chainNext === link.source.id
+        || link.target._chainPrev === link.source.id;
+};
+
 globalThis.sliderToValue = function (pos, cfg) {
     if (pos <= 0) {
         return cfg.min;

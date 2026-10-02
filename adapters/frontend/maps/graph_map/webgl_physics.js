@@ -73,15 +73,11 @@ globalThis.WebGLPhysics = class {
         this._uploadNodeData(nodes);
         this._uploadLinkData();
 
-        this._ping = 0;
-        this._readbackBuf = new Float32Array(this._nodeCount * 4);
-        this._tempCanvas = document.createElement("canvas");
-        this._tempCtx = this._tempCanvas.getContext("2d");
-        this._tempCanvas.width = 1;
-        this._tempCanvas.height = 1;
-        this._initialized = true;
-        return true;
-    }
+            this._ping = 0;
+            this._readbackBuf = new Float32Array(this._nodeCount * 4);
+            this._initialized = true;
+            return true;
+        }
 
     _buildLinkData(nodes, links) {
         const nodeCount = nodes.length;
@@ -101,7 +97,7 @@ globalThis.WebGLPhysics = class {
             if (si === undefined || ti === undefined || si === ti) {
                 continue;
             }
-            const isDirect = l.source._chainNext === l.target.id || l.source._chainPrev === l.target.id || l.target._chainNext === l.source.id || l.target._chainPrev === l.source.id;
+            const isDirect = globalThis.isDirectChainLink(l);
             let type = 2;
             if (l.isMainChain) {
                 type = isDirect ? 0 : 1;
@@ -235,8 +231,7 @@ void main() {
             this._lastError = "Vertex shader error: " + gl.getShaderInfoLog(vs);
             return null;
         }
-        const unis = [];
-        const fsCode = this._getFragShaderSource(unis);
+        const fsCode = this._getFragShaderSource();
         const fs = gl.createShader(gl.FRAGMENT_SHADER);
         gl.shaderSource(fs, fsCode);
         gl.compileShader(fs);
@@ -257,7 +252,7 @@ void main() {
         return prog;
     }
 
-    _getFragShaderSource(unis) {
+    _getFragShaderSource() {
         return `#version 300 es
 precision highp float;
 in vec2 v_uv;

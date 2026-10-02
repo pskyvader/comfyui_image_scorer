@@ -5,15 +5,7 @@ globalThis.ChainMapUI.prototype._initActiveForces = function () {
     this._forceStats = {};
     this._statsCursor = 0;
     this._chartHistory = {};
-    const all = {
-        _applyDirectLinkSprings: "Main Springs",
-        _applySecondaryLinkSprings: "Sec Springs",
-        _applyBuoyancy: "Buoyancy",
-        _applyRepulsion: "Repulsion",
-        _applyCollisions: "Collisions",
-        _tick: "Tick Total",
-    };
-    for (const [fn, label] of Object.entries(all)) {
+    for (const [fn, label] of globalThis.FORCE_METRICS) {
         this._forceStats[fn] = { label, samples: [], live: 0, avg10s: 0, avg60s: 0 };
         this._chartHistory[fn] = [];
     }
@@ -95,7 +87,7 @@ globalThis.ChainMapUI.prototype._applyDirectLinkSprings = function () {
         if (!l.isMainChain) {
             continue;
         }
-        const isDirect = l.source._chainNext === l.target.id || l.source._chainPrev === l.target.id || l.target._chainNext === l.source.id || l.target._chainPrev === l.source.id;
+        const isDirect = globalThis.isDirectChainLink(l);
         if (!isDirect) {
             continue;
         }
@@ -126,7 +118,7 @@ globalThis.ChainMapUI.prototype._applySecondaryLinkSprings = function () {
         if (!l.isMainChain) {
             continue;
         }
-        const isDirect = l.source._chainNext === l.target.id || l.source._chainPrev === l.target.id || l.target._chainNext === l.source.id || l.target._chainPrev === l.source.id;
+        const isDirect = globalThis.isDirectChainLink(l);
         if (isDirect) {
             continue;
         }
