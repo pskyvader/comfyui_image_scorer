@@ -53,19 +53,11 @@ class CompareMode {
 
     cacheElements() {
         this.elements = {
-            status: document.getElementById("comparison-status"),
+            status: document.getElementById("comparison-status-top"),
             leftImg: document.getElementById("left-image"),
             rightImg: document.getElementById("right-image"),
             leftFilename: document.getElementById("left-filename"),
             rightFilename: document.getElementById("right-filename"),
-            leftScore: document.getElementById("left-score"),
-            rightScore: document.getElementById("right-score"),
-            leftChain: document.getElementById("left-chain"),
-            rightChain: document.getElementById("right-chain"),
-            leftComp: document.getElementById("left-compsize"),
-            rightComp: document.getElementById("right-compsize"),
-            leftComparisons: document.getElementById("left-comparisons"),
-            rightComparisons: document.getElementById("right-comparisons"),
             leftButton: document.getElementById("left-button"),
             rightButton: document.getElementById("right-button"),
             skipButton: document.getElementById("skip-button"),
@@ -87,7 +79,6 @@ class CompareMode {
             debugContent: document.getElementById("debug-content"),
             leftCard: document.querySelector(".left-card"),
             rightCard: document.querySelector(".right-card"),
-            collapsibleIndicator: document.getElementById("collapsible-indicator"),
             resetCacheButton: document.getElementById("reset-cache-button"),
             queueIndicator: this._createQueueIndicator(),
             undoButton: this._createUndoButton(),
@@ -283,23 +274,12 @@ class CompareMode {
     }
 
     updateStatus(msg) {
-        if (this.elements.status) {
-            this.elements.status.textContent = msg;
+        const el = this.elements.status;
+        if (!el) {
+            return;
         }
-    }
-
-    _populateLegend() {
-        const fmt = n => n.toLocaleString();
-        for (const [id, val] of Object.entries({
-            "legend-seed-size": fmt(this._config.seed_size),
-            "legend-seed-target": fmt(this._config.seed_target_comparisons),
-            "legend-insertion-target": fmt(this._config.insertion_target_comparisons),
-        })) {
-            const el = document.getElementById(id);
-            if (el) {
-                el.textContent = val;
-            }
-        }
+        el.textContent = msg || "";
+        el.classList.toggle("hidden", !msg);
     }
 
     // ── Event listeners ──────────────────────────────────────────────
@@ -487,19 +467,10 @@ class CompareMode {
         this._prefetch.start();
     }
 
-    isSamePair(pairA, pairB) {
-        if (!pairA || !pairB || !pairA.left || !pairA.right || !pairB.left || !pairB.right) {
-            return false;
-        }
-
-        const a = [pairA.left.filename, pairA.right.filename].sort();
-        const b = [pairB.left.filename, pairB.right.filename].sort();
-        return a[0] === b[0] && a[1] === b[1];
-    }
-
     // ── Rendering ────────────────────────────────────────────────────
 
     async renderPair() {
+        this.updateStatus(null);
         const { left, right, pair } = this.currentPair;
         const els = this.elements;
 
