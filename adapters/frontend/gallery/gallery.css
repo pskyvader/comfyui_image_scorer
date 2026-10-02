@@ -1,94 +1,5 @@
-/* Gallery CSS - Dark Theme with Tailwind overrides */
-
-/* ======================== */
-/* Modal navigation arrows  */
-/* ======================== */
-.nav-arrow {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 48px;
-    height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    background: rgba(0, 0, 0, 0.6);
-    cursor: pointer;
-    border-radius: 50%;
-    z-index: 1010;
-    transition: background 0.2s, border-color 0.2s;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    -webkit-tap-highlight-color: transparent;
-    user-select: none;
-}
-
-.nav-arrow svg {
-    width: 24px;
-    height: 24px;
-    pointer-events: none;
-}
-
-.nav-arrow:hover {
-    background: rgba(0, 0, 0, 0.85);
-    border-color: #8b5cf6;
-}
-
-.nav-arrow:active {
-    background: rgba(139, 92, 246, 0.4);
-}
-
-.nav-prev {
-    left: 12px;
-}
-
-.nav-next {
-    right: 12px;
-}
-
-@media (max-width: 640px) {
-    .nav-arrow {
-        width: 40px;
-        height: 40px;
-    }
-
-    .nav-arrow svg {
-        width: 20px;
-        height: 20px;
-    }
-
-    .nav-prev {
-        left: 6px;
-    }
-
-    .nav-next {
-        right: 6px;
-    }
-}
-
-/* ======================== */
-/* Gallery grid & items     */
-/* ======================== */
-.gallery-wrapper {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    padding: 20px;
-    background: #0f1015;
-    color: #e2e8f0;
-    min-height: calc(100vh - 40px);
-    overflow-y: auto;
-    overflow-x: hidden;
-}
-
-.gallery-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 15px;
-    min-height: 300px;
-    flex: 1;
-    overflow: visible;
-}
+/* Gallery section styles. The gallery grid and cards are laid out with Tailwind
+   utilities in the markup; these are the rules it does not provide. */
 
 .gallery-item {
     background: rgba(30, 30, 46, 0.6);
@@ -101,143 +12,10 @@
     flex-direction: column;
 }
 
-.gallery-item-image {
-    width: 100%;
-    height: 200px;
-    background: rgba(0, 0, 0, 0.3);
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.gallery-item-image img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    object-position: center;
-}
-
-.gallery-item-info {
-    padding: 12px;
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
-}
-
-.gallery-item-name {
-    font-size: 12px;
-    color: #b0b0b0;
-    margin-bottom: 8px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.gallery-item-score {
-    font-size: 14px;
-    font-weight: bold;
-    color: #8b5cf6;
-    margin-bottom: 6px;
-}
-
-.gallery-item-meta {
-    font-size: 11px;
-    color: #888;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-
-.gallery-item-meta span {
-    display: flex;
-    justify-content: space-between;
-}
-
-/* ======================== */
-/* Loading & empty states   */
-/* ======================== */
-.gallery-loading {
-    grid-column: 1 / -1;
-    text-align: center;
-    padding: 40px 20px;
-    color: #999;
-    font-size: 16px;
-}
-
-.gallery-infinite-scroll-loader {
-    grid-column: 1 / -1;
-    text-align: center;
-    padding: 30px 20px;
-    color: #b0b0b0;
-    font-size: 14px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 10px;
-}
-
-.spinner {
-    display: inline-block;
-    width: 20px;
-    height: 20px;
-    border: 3px solid #374151;
-    border-top: 3px solid #8b5cf6;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-.gallery-empty {
-    grid-column: 1 / -1;
-    text-align: center;
-    padding: 40px 20px;
-    color: #999;
-    font-size: 16px;
-}
-
-/* ======================== */
-/* Modal                    */
-/* ======================== */
-.image-modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.8);
-    animation: fadeIn 0.3s ease;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-.modal-content {
-    position: relative;
-    background: rgba(30, 30, 46, 0.9);
-    margin: auto;
-    padding: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    width: 90%;
-    max-width: 900px;
-    max-height: 90vh;
-    top: 50%;
-    transform: translateY(-50%);
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-    overflow-y: auto;
-    color: #e2e8f0;
-    touch-action: pan-y;
+.gallery-item:hover {
+    border-color: #8b5cf6;
+    transform: scale(1.02);
+    box-shadow: 0 10px 25px rgba(139, 92, 246, 0.2);
 }
 
 .modal-close {
@@ -265,65 +43,59 @@
     transition: all 0.2s ease;
 }
 
-.modal-image {
-    width: 100%;
-    max-height: 60vh;
-    object-fit: contain;
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.3);
-}
-
-.modal-info {
-    padding: 15px;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 4px;
-}
-
 /* ======================== */
-/* Responsive               */
+/* Modal navigation arrows  */
 /* ======================== */
-@media (max-width: 768px) {
-    .gallery-grid {
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    }
-
-    .gallery-item-image {
-        height: 150px;
-    }
-
-    .modal-content {
-        width: 95%;
-        padding: 15px;
-        max-height: 85vh;
-    }
-
-    .modal-image {
-        touch-action: pan-y pinch-zoom;
-    }
+.nav-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 50%;
+    transition: background 0.2s;
+    z-index: 10;
 }
 
-@media (max-width: 480px) {
-    .gallery-grid {
-        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+.nav-arrow:hover {
+    background: rgba(0, 0, 0, 0.8);
+}
+
+.nav-arrow svg {
+    width: 24px;
+    height: 24px;
+    pointer-events: none;
+}
+
+.nav-prev {
+    left: 12px;
+}
+
+.nav-next {
+    right: 12px;
+}
+
+@media (max-width: 640px) {
+    .nav-arrow {
+        width: 36px;
+        height: 36px;
     }
 
-    .gallery-item-image {
-        height: 120px;
+    .nav-arrow svg {
+        width: 18px;
+        height: 18px;
     }
 
-    .gallery-item-info {
-        padding: 8px;
+    .nav-prev {
+        left: 8px;
     }
 
-    .gallery-item-name {
-        font-size: 10px;
-    }
-
-    .gallery-item-score {
-        font-size: 12px;
-    }
-
-    .gallery-item-meta {
-        font-size: 9px;
+    .nav-next {
+        right: 8px;
     }
 }

@@ -4,6 +4,11 @@
 
 const galleryLogger = FrontendLogger.create("external_modules.gallery.frontend.gallery");
 
+// The comparisons slider tops out at 10, which stands for "no upper bound"
+// rather than ten comparisons.
+const UNLIMITED_COMPARISONS = 10;
+const NO_COMPARISON_LIMIT = 999999;
+
 class GalleryView {
     constructor() {
         this.currentPage = 1;
@@ -52,6 +57,7 @@ class GalleryView {
     }
 
     cacheElements() {
+        this.container = document.getElementById("gallery-container");
         this.els = {
             scoreMin: document.getElementById("score-min"),
             scoreMax: document.getElementById("score-max"),
@@ -68,7 +74,7 @@ class GalleryView {
             modalImage: document.getElementById("modal-image"),
             modalFilename: document.getElementById("modal-filename"),
             modalMetadata: document.getElementById("modal-metadata"),
-            modalClose: document.querySelector(".modal-close"),
+            modalClose: this.container?.querySelector(".modal-close"),
             modalPrev: document.getElementById("modal-prev"),
             modalNext: document.getElementById("modal-next"),
             modalHistory: document.getElementById("modal-history"),
@@ -292,7 +298,7 @@ class GalleryView {
                 scoreMin: parseFloat(this.els.scoreMin.value),
                 scoreMax: parseFloat(this.els.scoreMax.value),
                 comparisonsMin: parseInt(this.els.comparisonsMin.value),
-                comparisonsMax: parseInt(this.els.comparisonsMax.value) === 10 ? 999999 : parseInt(this.els.comparisonsMax.value),
+                comparisonsMax: parseInt(this.els.comparisonsMax.value) === UNLIMITED_COMPARISONS ? NO_COMPARISON_LIMIT : parseInt(this.els.comparisonsMax.value),
                 sort: this.els.sortFilter.value,
                 tags: this.els.tagsFilter?.value || "",
                 search_mode: this.els.searchMode?.value || "both",
@@ -430,7 +436,7 @@ class GalleryView {
             }
 
             // Add click handlers to history items
-            document.querySelectorAll(".history-item")
+            this.container?.querySelectorAll(".history-item")
                 .forEach((item) => {
                     item.addEventListener("click", () => {
                         const opponent = decodeURIComponent(item.dataset.opponent);
@@ -487,7 +493,7 @@ class GalleryView {
         const count = this.selectedImages.length;
 
         // Update selected count in header button
-        const selectedCountEl = document.getElementById("selected-count");
+        const selectedCountEl = this.container?.querySelector("#selected-count");
         if (selectedCountEl) {
             selectedCountEl.textContent = count;
         }
