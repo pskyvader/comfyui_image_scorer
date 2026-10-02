@@ -6,13 +6,35 @@ must satisfy this protocol exactly. Return types are concrete proxy types — no
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, TypedDict
 
 from ...domain.graph.component_proxy import ComponentProxy
 from ...domain.graph.link_proxy import LinkProxy
 from ...domain.graph.chain_proxy import ChainProxy
 from ...domain.graph.node_proxy import NodeProxy
-from .repository import ComparisonRow, ImageRow
+from .repository import (
+    ComparisonRow,
+    ImageRow,
+    ImageRowForInsert,
+    RatingStateUpdate,
+)
+
+
+class GraphStructure(TypedDict):
+    """Chain-manager-owned graph structure counts.
+
+    Every value here is derived from the chain manager, which owns the graph.
+    Callers read these instead of recomputing structure from image rows.
+    """
+
+    total_nodes: int
+    total_links: int
+    total_components: int
+    total_chains: int
+    longest_chain_depth: int
+    top_nodes_count: int
+    bottom_nodes_count: int
+    built_at: str | None
 
 
 class CrystalGraphPort(Protocol):
@@ -88,7 +110,7 @@ class CrystalGraphPort(Protocol):
 
     # -- Stats --------------------------------------------------------------
 
-    def get_graph_stats(self) -> dict[str, object]: ...
+    def get_graph_stats(self) -> GraphStructure: ...
 
     # -- Selection working memory                                         #
 
@@ -140,6 +162,13 @@ class CrystalGraphPort(Protocol):
 
     def update_image_tags(self, filename: str, prompt_tags: str) -> None: ...
 
+    def add_images_bulk(self, rows: list[ImageRowForInsert]) -> int: ...
+
+    def update_image_rating_states_bulk(
+        self,
+        rows: list[RatingStateUpdate],
+    ) -> int: ...
+
     def clear_all_images(self) -> None: ...
 
     def reset_all_image_ratings(self, score: float) -> bool: ...
@@ -154,7 +183,7 @@ class CrystalGraphPort(Protocol):
         timestamp: str,
     ) -> int: ...
 
-    def apply_comparison(self, winner: str, loser: str) -> LinkProxy | None: ...
+    def apply_link(self, winner: str, loser: str) -> LinkProxy | None: ...
 
     def clean_comparisons(self) -> dict[str, int]: ...
 

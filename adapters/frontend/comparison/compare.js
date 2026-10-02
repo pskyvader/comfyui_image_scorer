@@ -383,7 +383,7 @@ class CompareMode {
                 rating_mu: d.rating_mu ?? 25.0,
                 rating_sigma: d.rating_sigma ?? 25.0 / 3.0,
                 trueskill_score: d.trueskill_score ?? 0.0,
-                comparison_count: d.comparison_count ?? 0,
+                link_count: d.link_count ?? 0,
                 chain_length: d.chain_length ?? 0,
                 component_size: d.component_size ?? 0,
                 component_id: d.component_id ?? null,

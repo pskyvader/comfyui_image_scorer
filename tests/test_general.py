@@ -46,6 +46,7 @@ from comfyui_image_scorer.core.filesystem.paths import (  # noqa: E402
     split_dir,
     vectors_file,
 )
+from comfyui_image_scorer.domain.ports.graph import GraphStructure  # noqa: E402
 
 # Endpoint -> (CLI command path, function-name tokens expected in the body).
 CONTRACT: list[tuple[str, tuple[str, ...], set[str]]] = [
@@ -322,11 +323,24 @@ class StubGraph:
                 score=row["score"],
                 mu_skill=row["rating_mu"],
                 sigma_uncertainty=row["rating_sigma"],
-                comparison_count=row["comparison_count"],
+                link_count=row["comparison_count"],
                 data=row,
                 get_links=no_links,
             )
         ]
+
+    def get_graph_stats(self) -> GraphStructure:
+        self.calls.append("get_graph_stats")
+        return {
+            "total_nodes": 1,
+            "total_links": 0,
+            "total_components": 1,
+            "total_chains": 1,
+            "longest_chain_depth": 1,
+            "top_nodes_count": 0,
+            "bottom_nodes_count": 0,
+            "built_at": None,
+        }
 
     def get_all_links(self) -> list[Any]:
         self.calls.append("get_all_links")

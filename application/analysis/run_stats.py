@@ -31,7 +31,7 @@ def _print_extremes(title: str, rows: list[RankedExtremes]) -> None:
         print(
             f"  {row['filename']:<40s} score={row['score']:.4f}  "
             f"mu={row['rating_mu']:.2f}  sigma={row['rating_sigma']:.2f}  "
-            f"comps={row['comparison_count']}"
+            f"links={row['link_count']}"
         )
 
 
@@ -39,7 +39,7 @@ def print_stats(stats: GraphStats) -> None:
     print("=" * 60)
     print("Image Scoring System — Stats")
     print("=" * 60)
-    print(f"Total images:       {stats['total']}")
+    print(f"Total nodes:         {stats['total_nodes']}")
     print(f"Ranked images:      {stats['ranked']}")
     print(f"Unranked images:    {stats['unranked']}")
     print(
@@ -53,7 +53,7 @@ def print_stats(stats: GraphStats) -> None:
     print()
     _print_distribution("Rating sigma distribution", stats["rating_sigma"])
     print()
-    _print_distribution("Comparison count distribution", stats["comparison_count"])
+    _print_distribution("Link count distribution", stats["link_count"])
     print()
     _print_extremes("Top 10 images", stats["top"])
     print()

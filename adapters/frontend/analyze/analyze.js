@@ -144,7 +144,7 @@ class AnalyzeView {
             thresholdLabel: `σ ${stats.sigma_threshold}`,
         });
         this._renderChart(grid, "Rating mu distribution", stats.rating_mu, {});
-        this._renderChart(grid, "Comparison count distribution", stats.comparison_count, {});
+        this._renderChart(grid, "Link count distribution", stats.link_count, {});
         root.appendChild(grid);    }
 
     _renderChart(root, title, distribution, options) {
@@ -268,7 +268,7 @@ class AnalyzeView {
                 { text: row.score.toFixed(4), className: "num" },
                 { text: row.rating_mu.toFixed(2), className: "num" },
                 { text: row.rating_sigma.toFixed(2), className: "num" },
-                { text: String(row.comparison_count), className: "num" },
+                { text: String(row.link_count), className: "num" },
             ];
             cells.forEach((cell) => {
                 const td = document.createElement("td");

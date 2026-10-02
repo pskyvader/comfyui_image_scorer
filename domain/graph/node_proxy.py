@@ -53,7 +53,7 @@ class NodeProxy:
         )
 
     @property
-    def comparison_count(self) -> int:
+    def link_count(self) -> int:
         return self._image_data.get("comparison_count", 0)
 
     @property

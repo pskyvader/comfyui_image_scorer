@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from ...core.io.serialization import load_single_jsonl
-from ...core.filesystem.paths import vectors_file, text_data_file, maps_dir
+from ...core.filesystem.paths import analysis_dir, vectors_file, text_data_file
 from ...core.observability.logger import get_logger
 from ...domain.training.matrix_analysis import MatrixAnalyzer
 
@@ -21,7 +21,7 @@ def run_matrix_analysis() -> int:
     analyzer.build_matrix()
     analyzer.calculate_statistics()
 
-    output_path = str(Path(maps_dir) / "matrix_analysis.jsonl")
+    output_path = str(Path(analysis_dir) / "matrix_analysis.jsonl")
     analyzer.export_to_jsonl(output_path)
     logger.info("Matrix analysis saved to %s", output_path)
     return 0

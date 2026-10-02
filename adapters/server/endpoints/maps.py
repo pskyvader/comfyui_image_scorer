@@ -1,6 +1,5 @@
 """Maps API - endpoints for chain visualizations (graph data)."""
 
-import time
 from typing import Any
 
 from flask import Blueprint, Flask, jsonify
@@ -14,7 +13,6 @@ logger: ModuleLogger = get_logger(__name__)
 
 @maps_bp.route("/graph-data", methods=["GET"])
 def get_graph_data():
-    _start = time.perf_counter()
     try:
         deps = get_server_deps()
         if deps.graph.is_cache_stale():
@@ -85,7 +83,7 @@ def get_graph_data():
                 # Node, edge and component counts are derived client-side from the
                 # filtered arrays; only the chain total needs to come from here.
                 "stats": {
-                    "total_chains": stats.get("total_chains", 0),
+                    "total_chains": stats["total_chains"],
                 },
             }
         )

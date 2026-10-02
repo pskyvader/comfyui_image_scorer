@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from flask import Blueprint, Flask, jsonify, request
@@ -17,7 +16,6 @@ logger: ModuleLogger = get_logger(__name__)
 
 @gallery_bp.route("/images", methods=["GET"])
 def list_images():
-    _start = time.perf_counter()
     deps = get_server_deps()
     page = max(request.args.get("page", 1, type=int), 1)
     per_page = request.args.get("per_page", 20, type=int)
@@ -120,7 +118,7 @@ def get_image_info(filename: str):
         {
             "filename": node.filename,
             "score": round(node.score, 4),
-            "comparison_count": node.comparison_count,
+            "link_count": node.link_count,
             "last_compared_at": node.last_compared_at,
             "prompt_tags": node.prompt_tags,
         }

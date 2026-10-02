@@ -35,7 +35,12 @@ The dependency direction is `core -> domain -> application -> adapters`. Infrast
 - `adapters` translates Flask, CLI, frontend, and ComfyUI protocols and may import `core`, `domain`, and `application`.
 - `infrastructure` contains SQLite, filesystem, loaders, ML, and cache implementations and imports only `core` and `domain`.
 
-`CrystalGraph` is the application-facing graph/database boundary. Callers use node, link, chain, and component proxies; they do not import repositories, database tables, or construct proxies directly. Ports are abstract protocols only: no concrete logic, IO, database calls, or plotting belongs in a port.
+### Proxy vocabulary
+
+- `ChainManager` owns graph structure. From `ChainManager` onward, node, link, chain, and component vocabulary names graph structure. Before it — database rows, filesystem, and in-memory raw data — image and comparison vocabulary is correct. Name each layer for the side it sits on: the repository inserts `ComparisonRow` records, the facade adds links.
+- Derive structural values from the chain manager and expose them through the proxies. Do not re-derive them downstream, and do not add a second source for a value the chain manager already owns.
+- `CrystalGraph` is the application-facing graph/database boundary. Callers use node, link, chain, and component proxies; they do not import repositories, database tables, or construct proxies directly. Ports are abstract protocols only: no concrete logic, IO, database calls, or plotting belongs in a port.
+- HTTP payload keys are a contract between the backend and the frontend. Rename one only together with every consumer that reads it.
 
 ## Code rules
 

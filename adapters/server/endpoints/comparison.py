@@ -49,7 +49,7 @@ def _get_processor():
 
 def _get_level_progress_stats(
     all_images: list[ImageRow],
-) -> dict[str, object]:
+) -> dict[str, int]:
     _start = time.perf_counter()
     comp_counts = [int(img["comparison_count"]) for img in all_images]
     base_level = min(comp_counts)

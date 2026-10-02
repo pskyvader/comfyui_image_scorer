@@ -245,16 +245,16 @@ def test_chain_snapshot_matches_known_optimal() -> None:
     assert chain_tuples == {("a1", "a2", "a3", "a4"), ("b1", "b2", "b3")}
 
 
-def test_apply_comparison_returns_the_record_it_touched() -> None:
+def test_apply_link_returns_the_record_it_touched() -> None:
     """Re-applying a pair must return that pair's record, not the newest one."""
     cm = ChainManager()
     cm.build([], all_filenames={"a", "b", "c"})
 
-    first = cm.apply_comparison("a", "b")
-    cm.apply_comparison("b", "c")
-    repeat = cm.apply_comparison("a", "b")
+    first = cm.apply_link("a", "b")
+    cm.apply_link("b", "c")
+    repeat = cm.apply_link("a", "b")
 
-    history = cm.get_comparison_history()
+    history = cm.get_link_history()
     assert (repeat.winner, repeat.loser) == ("a", "b")
     assert repeat is history[0]
     assert first is history[0]

@@ -8,8 +8,8 @@ if TYPE_CHECKING:
 from ..ports.repository import ComparisonRow
 
 
-class ComparisonRecord:
-    """Public comparison record carrying the ordered comparison edge data."""
+class LinkRecord:
+    """Public link record carrying the ordered edge data between two nodes."""
 
     __slots__ = ("id", "winner", "loser", "timestamp")
 
@@ -21,15 +21,15 @@ class ComparisonRecord:
 
 
 class LinkProxy:
-    """Represents one comparison link between two images. Created on demand, zero overhead."""
+    """Represents one link between two nodes. Created on demand, zero overhead."""
 
     def __init__(
         self,
         chain: ChainManager,
-        comparison_record: ComparisonRecord,
+        record: LinkRecord,
     ) -> None:
         self._chain: ChainManager = chain
-        self._record: ComparisonRecord = comparison_record
+        self._record: LinkRecord = record
 
     @property
     def id(self) -> int:

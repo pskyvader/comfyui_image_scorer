@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from ...core.observability.logger import get_logger, ModuleLogger
 from ..ports.repository import ComparisonRow
-from .link_proxy import ComparisonRecord
+from .link_proxy import LinkRecord
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -16,16 +16,6 @@ logger: ModuleLogger = get_logger(__name__)
 # ======================================================================
 # Tiny helpers (pure, no self)
 # ======================================================================
-
-
-def parse_comparison(
-    comp: ComparisonRow,
-) -> tuple[str, str, str, str]:
-    filename_a: str = comp["filename_a"]
-    filename_b: str = comp["filename_b"]
-    winner: str = comp["winner"]
-    loser: str = filename_b if winner == filename_a else filename_a
-    return filename_a, filename_b, winner, loser
 
 
 def add_directed_edge(
@@ -48,18 +38,6 @@ def add_undirected_edge(
     adjacency[filename_b].add(filename_a)
     filenames.add(filename_a)
     filenames.add(filename_b)
-
-
-def process_one_comparison(
-    comp: ComparisonRow,
-    better_than: defaultdict[str, list[str]],
-    worse_than: defaultdict[str, list[str]],
-    adjacency: defaultdict[str, set[str]],
-    filenames: set[str],
-) -> None:
-    filename_a, filename_b, winner, loser = parse_comparison(comp)
-    add_directed_edge(better_than, worse_than, winner, loser)
-    add_undirected_edge(adjacency, filenames, filename_a, filename_b)
 
 
 # ------------------------------------------------------------------
@@ -273,7 +251,6 @@ class ChainManager:
         self._node_pos: dict[str, int] = {}
         self._chain_end_at: dict[str, set[int]] = {}
         self._built_at: datetime | None = None
-        self._db_comparison_count: int = 0
 
         self._chains: dict[int, list[str]] = {}
         self._node_to_chains: dict[str, list[tuple[int, list[str]]]] = {}
@@ -282,7 +259,7 @@ class ChainManager:
         self._common_chains: dict[int, tuple[list[str], bool]] = {}
         self._node_chains: dict[str, dict[int, bool]] = {}
 
-        self._comparison_history: list[ComparisonRecord] = []
+        self._link_history: list[LinkRecord] = []
         self._history_index: dict[tuple[str, str], int] = {}
 
     # ==================================================================
@@ -349,23 +326,20 @@ class ChainManager:
     def set_built_at(self, dt: datetime | None) -> None:
         self._built_at = dt
 
-    def get_db_comparison_count(self) -> int:
-        return self._db_comparison_count
+    def get_link_history(self) -> list[LinkRecord]:
+        return list(self._link_history)
 
-    def set_db_comparison_count(self, count: int) -> None:
-        self._db_comparison_count = count
+    def get_link_count(self) -> int:
+        return len(self._link_history)
 
-    def get_comparison_history(self) -> list[ComparisonRecord]:
-        return list(self._comparison_history)
-
-    def clear_comparison_history(self) -> None:
-        self._comparison_history.clear()
+    def clear_link_history(self) -> None:
+        self._link_history.clear()
         self._history_index.clear()
 
-    def _reindex_comparison_history(self) -> None:
+    def _reindex_link_history(self) -> None:
         """Point each (winner, loser) at its first entry, matching scan order."""
         self._history_index.clear()
-        for index, entry in enumerate(self._comparison_history):
+        for index, entry in enumerate(self._link_history):
             key = (entry.winner, entry.loser)
             if key not in self._history_index:
                 self._history_index[key] = index
@@ -390,8 +364,8 @@ class ChainManager:
         self._build_components()
         self._build_chains()
         # Replace history with fresh entries from this build
-        self._comparison_history = [
-            ComparisonRecord(
+        self._link_history = [
+            LinkRecord(
                 id=comp.get("id", index),
                 winner=comp["winner"],
                 loser=(
@@ -403,7 +377,7 @@ class ChainManager:
             )
             for index, comp in enumerate(comparisons)
         ]
-        self._reindex_comparison_history()
+        self._reindex_link_history()
 
     def link_exists_between(self, first: str, second: str) -> bool:
         return first in self._worse_than[second] or second in self._worse_than[first]
@@ -417,6 +391,22 @@ class ChainManager:
         self._worse_than.clear()
         self._adjacency.clear()
 
+    def _apply_comparison_row(
+        self, comp: ComparisonRow, graph_filenames: set[str]
+    ) -> None:
+        """Fold one stored comparison row into the graph during a build.
+
+        The row is database vocabulary; the edges it produces are graph
+        vocabulary. Keeping the translation here leaves the internal
+        structures private to this class.
+        """
+        filename_a: str = comp["filename_a"]
+        filename_b: str = comp["filename_b"]
+        winner: str = comp["winner"]
+        loser: str = filename_b if winner == filename_a else filename_a
+        add_directed_edge(self._better_than, self._worse_than, winner, loser)
+        add_undirected_edge(self._adjacency, graph_filenames, filename_a, filename_b)
+
     def _build_from_comparisons(self, comparisons: list[ComparisonRow]) -> set[str]:
         graph_filenames: set[str] = set()
         with tqdm(
@@ -426,13 +416,7 @@ class ChainManager:
             delay=3.0,
         ) as pbar:
             for comp in comparisons:
-                process_one_comparison(
-                    comp,
-                    self._better_than,
-                    self._worse_than,
-                    self._adjacency,
-                    graph_filenames,
-                )
+                self._apply_comparison_row(comp, graph_filenames)
                 pbar.update(1)
         return graph_filenames
 
@@ -440,7 +424,7 @@ class ChainManager:
     # Incremental update (single comparison, no DB)
     # ==================================================================
 
-    def apply_comparison(self, winner: str, loser: str) -> ComparisonRecord:
+    def apply_link(self, winner: str, loser: str) -> LinkRecord:
         self._all_filenames.update([winner, loser])
 
         add_directed_edge(self._better_than, self._worse_than, winner, loser)
@@ -449,24 +433,23 @@ class ChainManager:
         self._update_top_bottom_for_edge(winner, loser)
         self._merge_node_components(winner, loser)
 
-        # Record in comparison history (replaces last entry if present)
+        # Record in link history (replaces last entry if present)
         ts = datetime.now(timezone.utc).isoformat()
         key = (winner, loser)
         existing_index = self._history_index.get(key)
         if existing_index is not None:
-            record = self._comparison_history[existing_index]
+            record = self._link_history[existing_index]
             record.timestamp = ts
         else:
-            record = ComparisonRecord(
-                id=len(self._comparison_history),
+            record = LinkRecord(
+                id=len(self._link_history),
                 winner=winner,
                 loser=loser,
                 timestamp=ts,
             )
-            self._history_index[key] = len(self._comparison_history)
-            self._comparison_history.append(record)
+            self._history_index[key] = len(self._link_history)
+            self._link_history.append(record)
 
-        self._db_comparison_count += 1
         self._built_at = datetime.now(timezone.utc)
 
         return record

@@ -22,9 +22,10 @@ from ...domain.graph.chain_manager import ChainManager
 from ...domain.graph.node_proxy import NodeProxy
 from ...domain.graph.chain_proxy import ChainProxy
 from ...domain.graph.component_proxy import ComponentProxy
-from ...domain.graph.link_proxy import LinkProxy, ComparisonRecord
+from ...domain.graph.link_proxy import LinkProxy, LinkRecord
 from ...domain.ports.cache import CacheProvider
 from ...domain.ports.files import FilePort
+from ...domain.ports.graph import GraphStructure
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -45,7 +46,7 @@ class CrystalGraph:
         file_port: FilePort | None = None,
     ) -> None:
         self._chain: ChainManager = ChainManager()
-        self._images: dict[str, ImageRow] = {}
+        self._node_data: dict[str, ImageRow] = {}
         self._chain_map: dict[int, ChainDict] | None = None
         self._rebuilding: bool = False
         self._creating_chain_map: bool = False
@@ -61,7 +62,7 @@ class CrystalGraph:
         self._recent_chain_ids: list[int] = []
 
     def _make_node(self, node_id: str) -> NodeProxy:
-        return NodeProxy(self._chain, node_id, self._images.get(node_id))
+        return NodeProxy(self._chain, node_id, self._node_data.get(node_id))
 
     def _make_chain(self, chain_id: int, nodes: list[str]) -> ChainProxy:
         return ChainProxy(self._chain, chain_id, nodes)
@@ -69,7 +70,7 @@ class CrystalGraph:
     def _make_component(self, component_id: int) -> ComponentProxy:
         return ComponentProxy(self._chain, component_id)
 
-    def _make_link(self, record: ComparisonRecord) -> LinkProxy:
+    def _make_link(self, record: LinkRecord) -> LinkProxy:
         return LinkProxy(self._chain, record)
 
     def read_json_file(self, path: str) -> dict[str, object]:
@@ -107,6 +108,13 @@ class CrystalGraph:
         images: list[ImageRow] | None = None,
         comparisons: list[ComparisonRow] | None = None,
     ) -> None:
+        """Replace the loaded graph from the repositories.
+
+        A rebuild discards the in-memory node map and rebuilds it from the rows
+        handed in, so the map is intentionally left stale for callers that add
+        rows without rebuilding. Callers that mutate rows directly must
+        invalidate the map themselves.
+        """
         _start = time.perf_counter()
         if self._rebuilding:
             logger.warning("Already rebuilding, skipping nested call")
@@ -127,11 +135,10 @@ class CrystalGraph:
                 )
             comparisons = self._comparison_repo.list_links()
 
-        self._images = {img["filename"]: img for img in images}
-        self._chain.set_db_comparison_count(len(comparisons))
+        self._node_data = {img["filename"]: img for img in images}
         self._chain.set_built_at(datetime.now(timezone.utc))
 
-        all_filenames: set[str] = set(self._images.keys())
+        all_filenames: set[str] = set(self._node_data.keys())
         comp: ComparisonRow
         for comp in comparisons:
             all_filenames.add(comp["filename_a"])
@@ -144,8 +151,8 @@ class CrystalGraph:
         self._rebuilding = False
         logger.info("rebuild from database complete", start_timer=_start)
 
-    def apply_comparison(self, winner: str, loser: str) -> LinkProxy | None:
-        return LinkProxy(self._chain, self._chain.apply_comparison(winner, loser))
+    def apply_link(self, winner: str, loser: str) -> LinkProxy | None:
+        return LinkProxy(self._chain, self._chain.apply_link(winner, loser))
 
     def add_link(
         self,
@@ -163,7 +170,7 @@ class CrystalGraph:
             timestamp=timestamp,
         )
         loser = filename_b if winner == filename_a else filename_a
-        record = self._chain.apply_comparison(winner, loser)
+        record = self._chain.apply_link(winner, loser)
         record.id = link_id
         record.timestamp = timestamp
         return link_id
@@ -183,7 +190,7 @@ class CrystalGraph:
             winner = str(row["winner"])
             timestamp = str(row.get("timestamp") or "")
             loser = filename_b if winner == filename_a else filename_a
-            record = self._chain.apply_comparison(winner, loser)
+            record = self._chain.apply_link(winner, loser)
             record.id = link_id
             record.timestamp = timestamp
         return link_ids
@@ -238,12 +245,8 @@ class CrystalGraph:
         if self._comparison_repo is not None:
             if (
                 self._comparison_repo.get_total_comparisons()
-                != self._chain.get_db_comparison_count()
+                != self._chain.get_link_count()
             ):
-                # logger.debug(
-                #     f"stale: total comparisons: {self._comparison_repo.get_total_comparisons()}"
-                #     f", db comparisons: {self._chain.get_db_comparison_count()}"
-                # )
                 return True
         return False
 
@@ -344,12 +347,12 @@ class CrystalGraph:
 
     def get_all_links(self) -> list[LinkProxy]:
         _start = time.perf_counter()
-        records = self._chain.get_comparison_history()
+        records = self._chain.get_link_history()
         logger.debug(f"records: {len(records)}", start_timer=_start)
         return [self._make_link(record) for record in records]
 
     def get_link_count(self) -> int:
-        return len(self._chain.get_comparison_history())
+        return self._chain.get_link_count()
 
     def get_node_count(self) -> int:
         return len(self._chain.get_all_filenames())
@@ -365,12 +368,12 @@ class CrystalGraph:
 
     # -- Stats ----------------------------------------------------------
 
-    def get_graph_stats(self) -> dict[str, object]:
+    def get_graph_stats(self) -> GraphStructure:
         chains: list[list[str]] = list((self._chain.get_chains()).values())
         built_at: datetime | None = self._chain.get_built_at()
         return {
-            "total_images": len(self._images) or len(self._chain.get_all_filenames()),
-            "total_comparisons": self._chain.get_db_comparison_count(),
+            "total_nodes": len(self._chain.get_all_filenames()),
+            "total_links": self._chain.get_link_count(),
             "total_components": self._chain.get_component_count(),
             "total_chains": len(chains),
             "longest_chain_depth": max((len(c) for c in chains), default=0),
@@ -402,6 +405,12 @@ class CrystalGraph:
         rating_mu: float,
         rating_sigma: float,
     ) -> bool:
+        """Insert one image row into the repository.
+
+        The in-memory node map is intentionally not updated here. Rows are
+        inserted in bulk during a scan and the map is replaced wholesale by the
+        next rebuild, so mutating it per row would only cost lookups.
+        """
         assert self._image_repo is not None
         return self._image_repo.add_image(
             filename=filename,
@@ -413,15 +422,28 @@ class CrystalGraph:
         )
 
     def add_images_bulk(self, rows: list[ImageRowForInsert]) -> int:
+        """Insert image rows in bulk, leaving the in-memory node map stale.
+
+        Same reasoning as ``add_image``: the map is rebuilt wholesale rather
+        than patched row by row.
+        """
         assert self._image_repo is not None
         return self._image_repo.add_images_bulk(rows)
 
     def update_image_rating_states_bulk(
         self, rows: list[RatingStateUpdate]
     ) -> int:
+        """Apply rating updates to the repository and the in-memory map.
+
+        ``rows`` must name images already present in the map. A missing
+        filename raises ``KeyError`` on purpose: the ranking pipeline only
+        updates rows it has already loaded, so a miss means the caller and the
+        map disagree about what exists, and silently skipping the map update
+        would leave the proxy reporting a stale rating.
+        """
         assert self._image_repo is not None
         for filename, score, rating_mu, rating_sigma, comparison_count in rows:
-            image = self._images[filename]
+            image = self._node_data[filename]
             image["score"] = score
             image["rating_mu"] = rating_mu
             image["rating_sigma"] = rating_sigma
@@ -437,9 +459,14 @@ class CrystalGraph:
         comparison_count: int,
         touch_timestamp: bool,
     ) -> bool:
+        """Update one image's rating in the repository and the in-memory map.
+
+        Raises ``KeyError`` for an unknown filename for the same reason as
+        ``update_image_rating_states_bulk``.
+        """
         assert self._image_repo is not None
 
-        image = self._images[filename]
+        image = self._node_data[filename]
         image["score"] = score
         image["rating_mu"] = rating_mu
         image["rating_sigma"] = rating_sigma
@@ -483,9 +510,8 @@ class CrystalGraph:
         assert self._comparison_repo is not None
         self._comparison_repo.clear_all_comparisons()
         self._chain.build([], all_filenames=set())
-        self._images.clear()
-        self._chain.set_db_comparison_count(0)
-        self._chain.clear_comparison_history()
+        self._node_data.clear()
+        self._chain.clear_link_history()
         self._loaded = False
 
     def get_chains_map(self) -> dict[int, ChainDict]:

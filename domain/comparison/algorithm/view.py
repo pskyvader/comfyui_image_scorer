@@ -15,7 +15,7 @@ from ...analysis.trueskill import expected_win_probability, Rating
 from ..constants import MIN_CHAIN_THRESHOLD
 from . import graph_helpers
 
-from ....domain.ports.graph import CrystalGraphPort
+from ....domain.ports.graph import CrystalGraphPort, GraphStructure
 
 
 class ScoreBucket(TypedDict):
@@ -42,18 +42,18 @@ class RankedExtremes(TypedDict):
     score: float
     rating_mu: float
     rating_sigma: float
-    comparison_count: int
+    link_count: int
 
 
 class GraphStats(TypedDict):
     """Whole-graph ranking measurements shared by every graph-wide view."""
 
-    total: int
+    total_nodes: int
     score: Distribution
     rating_mu: Distribution
     rating_sigma: Distribution
-    comparison_count: Distribution
-    comparison_level: dict[int, int]
+    link_count: Distribution
+    link_level: dict[int, int]
     sigma_threshold: float
     sigma_above_threshold: int
     sigma_below_threshold: int
@@ -64,6 +64,7 @@ class GraphStats(TypedDict):
     unranked: int
     top: list[RankedExtremes]
     bottom: list[RankedExtremes]
+    structure: GraphStructure
 
 
 DEFAULT_BUCKET_COUNT = 10
@@ -105,7 +106,7 @@ def _extremes(nodes: list[NodeProxy], limit: int, *, highest_first: bool) -> lis
             "score": round(float(node.score), 4),
             "rating_mu": round(float(node.mu_skill), 4),
             "rating_sigma": round(float(node.sigma_uncertainty), 4),
-            "comparison_count": int(node.comparison_count),
+            "link_count": int(node.link_count),
         }
         for node in ordered[:limit]
     ]
@@ -128,7 +129,7 @@ def _describe_one(node: NodeProxy, cg: CrystalGraphPort) -> dict[str, Any]:
     )
 
     seed_target = int(config["ranking"]["seed_target_comparisons"])
-    is_seed = node.comparison_count >= seed_target
+    is_seed = node.link_count >= seed_target
 
     extremes = {"top": 0, "bottom": 0}
     if component is not None:
@@ -143,7 +144,7 @@ def _describe_one(node: NodeProxy, cg: CrystalGraphPort) -> dict[str, Any]:
         "rating_mu": round(float(node.mu_skill), 4),
         "rating_sigma": round(float(node.sigma_uncertainty), 4),
         "trueskill_score": round(float(node.trueskill_score), 4),
-        "comparison_count": int(node.comparison_count),
+        "link_count": int(node.link_count),
         "wins": len(node.get_links(worse_than=True)),
         "losses": len(node.get_links(better_than=True)),
         "chain_length": chain_length,
@@ -177,6 +178,7 @@ def describe_graph(
     ranking_conf = config["ranking"]
     sigma_threshold = float(ranking_conf["sigma_threshold"])
 
+    structure: GraphStructure = cg.get_graph_stats()
     all_nodes = cg.get_all_nodes()
     scores: list[float] = []
     mus: list[float] = []
@@ -191,7 +193,7 @@ def describe_graph(
         score = float(node.score)
         mu = float(node.mu_skill)
         sigma = float(node.sigma_uncertainty)
-        comparisons = int(node.comparison_count)
+        comparisons = int(node.link_count)
         scores.append(score)
         mus.append(mu)
         sigmas.append(sigma)
@@ -214,12 +216,12 @@ def describe_graph(
     if not total:
         empty: Distribution = {"min": 0.0, "max": 0.0, "mean": 0.0, "buckets": []}
         return {
-            "total": 0,
+            "total_nodes": 0,
             "score": empty,
             "rating_mu": empty,
             "rating_sigma": empty,
-            "comparison_count": empty,
-            "comparison_level": {},
+            "link_count": empty,
+            "link_level": {},
             "sigma_threshold": sigma_threshold,
             "sigma_above_threshold": 0,
             "sigma_below_threshold": 0,
@@ -230,15 +232,16 @@ def describe_graph(
             "unranked": 0,
             "top": [],
             "bottom": [],
+            "structure": structure,
         }
 
     return {
-        "total": total,
+        "total_nodes": total,
         "score": _distribution(scores, bucket_count),
         "rating_mu": _distribution(mus, bucket_count),
         "rating_sigma": _distribution(sigmas, bucket_count),
-        "comparison_count": _distribution(counts, bucket_count),
-        "comparison_level": level_counts,
+        "link_count": _distribution(counts, bucket_count),
+        "link_level": level_counts,
         "sigma_threshold": sigma_threshold,
         "sigma_above_threshold": sigma_above,
         "sigma_below_threshold": total - sigma_above,
@@ -249,6 +252,7 @@ def describe_graph(
         "unranked": total - ranked,
         "top": _extremes(all_nodes, extremes_count, highest_first=True),
         "bottom": _extremes(all_nodes, extremes_count, highest_first=False),
+        "structure": structure,
     }
 
 
@@ -269,9 +273,10 @@ def describe_pair(
     left = _describe_one(node_a, cg)
     right = _describe_one(node_b, cg)
 
-    base_level = min(left["comparison_count"], right["comparison_count"])
+    base_level = min(left["link_count"], right["link_count"])
 
     stats = describe_graph(cg)
+    structure = stats["structure"]
 
     rating_a = Rating(mu_skill=node_a.mu_skill, sigma_uncertainty=node_a.sigma_uncertainty)
     rating_b = Rating(mu_skill=node_b.mu_skill, sigma_uncertainty=node_b.sigma_uncertainty)
@@ -285,15 +290,13 @@ def describe_pair(
         and component_a.id == component_b.id
     )
 
-    graph_stats = cg.get_graph_stats()
-
     return {
         "phase": phase_index,
-        "total_images": stats["total"],
-        "total_comparisons": graph_stats["total_comparisons"],
-        "total_chains": graph_stats["total_chains"],
+        "total_nodes": stats["total_nodes"],
+        "total_links": structure["total_links"],
+        "total_chains": structure["total_chains"],
         "target_chains": MIN_CHAIN_THRESHOLD,
-        "level": stats["comparison_level"],
+        "level": stats["link_level"],
         "base_level": base_level,
         "collapsible": graph_helpers.is_collapsable_pair(
             node_a.filename, node_b.filename, cg

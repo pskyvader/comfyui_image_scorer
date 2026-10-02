@@ -43,10 +43,10 @@ are implementation details.
 | `core/io/serialization.py` | `clean_json_metadata` | Normalize a companion JSON entry into the canonical ranked-metadata shape, stripping database-only fields. |
 | `core/utilities/concurrency.py` | `parallel_batch` | Run a batch function sequentially. |
 | `core/utilities/concurrency.py` | `parallel_for` | Run argument tuples through a worker pool, returning results in input order. |
-| `domain/graph/chain_manager.py` | `ChainManager` | Own in-memory graph topology, chains, components, and comparison history. History entries are indexed by `(winner, loser)` so applying a comparison stays constant-time as the history grows. |
-| `domain/graph/node_proxy.py` | `NodeProxy` | Expose graph node data and navigation. |
-| `domain/graph/link_proxy.py` | `ComparisonRecord` | Public comparison edge record carrying the winner/loser link payload. |
-| `domain/graph/link_proxy.py` | `LinkProxy` | Expose one comparison link record. |
+| `domain/graph/chain_manager.py` | `ChainManager` | Own in-memory graph topology, chains, components, and link history. History entries are indexed by `(winner, loser)` so applying a link stays constant-time as the history grows. |
+| `domain/graph/node_proxy.py` | `NodeProxy` | Expose graph node data and navigation. `link_count` reads the node's comparison count. |
+| `domain/graph/link_proxy.py` | `LinkRecord` | Public link record carrying the winner/loser edge payload. |
+| `domain/graph/link_proxy.py` | `LinkProxy` | Expose one link record. |
 | `domain/graph/chain_proxy.py` | `ChainProxy` | Expose one graph chain. |
 | `domain/graph/component_proxy.py` | `ComponentProxy` | Expose one connected component. |
 | `domain/analysis/trueskill.py` | `update_ratings` | Apply one winner/loser rating update. |
@@ -56,7 +56,8 @@ are implementation details.
 | `domain/comparison/algorithm/history_collapse.py` | `collapse_comparison_history` | Collapse comparison history to a deterministic survivor set via missing-node, self-link, same-direction, and contradiction rules. |
 | `domain/comparison/algorithm/graph_helpers.py` | `collapse_comparisons` | Collapse comparison history to a deterministic survivor set via missing-node, self-link, same-direction, and contradiction rules. |
 | `domain/comparison/algorithm/merge_sort_ranker.py` | `select_pair_for_comparison` | Select the next ranking pair. |
-| `domain/ports/graph.py` | `CrystalGraphPort` | Protocol graph/database boundary; `add_link` replaces `add_comparison`. |
+| `domain/ports/graph.py` | `CrystalGraphPort` | Protocol graph/database boundary; `add_link` replaces `add_comparison` and `apply_link` replaces `apply_comparison`. `get_graph_stats` returns `GraphStructure`. |
+| `domain/ports/graph.py` | `GraphStructure` | Typed payload of chain-manager-owned structure counts: `total_nodes`, `total_links`, `total_components`, `total_chains`, `longest_chain_depth`, `top_nodes_count`, `bottom_nodes_count`, and `built_at`. |
 | `domain/ports/repository.py` | `ImageRepository` | Image persistence protocol. |
 | `domain/ports/repository.py` | `ComparisonRepository` | Comparison persistence protocol. |
 | `domain/ports/files.py` | `FilePort` | Filesystem operations protocol: `read_json`, `write_json`, `file_exists`, `list_directory`, `make_directory`, `move_file`, `remove_file`, `ranked_root`, `compute_path`, `sync_metadata`, `clear_folder_cache`, `prewarm_folder_cache`, `deduplicate_scored`, and `cleanup_orphans`. |
@@ -108,7 +109,7 @@ are implementation details.
 | `domain/analysis/trueskill.py` | `INITIAL_UNCERTAINTY` | Initial rating uncertainty constant. |
 | `domain/comparison/comparison_recorder.py` | `ComparisonRecorder` | Comparison persistence and graph recording port consumer. |
 | `domain/comparison/comparison_recorder.py` | `update_scores_after_comparison` | Update scores and ratings after one comparison. |
-| `domain/comparison/algorithm/view.py` | `describe_graph` | Whole-graph ranking measurements: score, rating-mu, rating-sigma and comparison-count distributions, the comparison-level histogram, the sigma-threshold above/below split, single-win, single-loss and ready counts, ranked/unranked totals, and the highest- and lowest-scoring images. Reads every field through `NodeProxy`. |
+| `domain/comparison/algorithm/view.py` | `describe_graph` | Whole-graph ranking measurements: score, rating-mu, rating-sigma and link-count distributions, the link-level histogram, the sigma-threshold above/below split, single-win, single-loss and ready counts, ranked/unranked totals, the highest- and lowest-scoring images, and the `structure` block collected from `CrystalGraphPort.get_graph_stats`. Reads every node field through `NodeProxy`. |
 | `domain/comparison/algorithm/view.py` | `GraphStats` | Typed payload returned by `describe_graph`. |
 | `domain/comparison/algorithm/view.py` | `Distribution` | Typed payload: a measured series' min, max, mean, and ascending equal-width histogram. |
 | `domain/comparison/algorithm/view.py` | `ScoreBucket` | Typed payload: one histogram bucket's `lower`, `upper`, and `count`. |
@@ -118,7 +119,6 @@ are implementation details.
 | `infrastructure/external_services/mediapipe_models.py` | `download_mediapipe_models` | Explicit MediaPipe model download and location handling. |
 | `infrastructure/persistence/cleanup_orphans.py` | `cleanup_orphans` | Clean orphaned image and JSON companion files. |
 | `infrastructure/persistence/folder_organizer.py` | `ensure_tier_structure` | Ensure score folders scored_0.0 through scored_1.0 exist. |
-| `core/utilities/analysis.py` | `distribute` | Distribute values into named buckets by threshold. |
 | `core/utilities/helpers.py` | `remove_directory` | Remove a directory and its contents. |
 | `core/filesystem/paths.py` | `models_dir` | Path to the models output directory. |
 | `core/filesystem/paths.py` | `mediapipe_models_dir` | Path to the downloaded MediaPipe models directory. |
@@ -169,7 +169,6 @@ are implementation details.
 | `core/io/serialization.py` | JSON/JSONL serialization, atomic writes, image discovery, and batch collection. |
 | `core/utilities/__init__.py` | Utility package exports. |
 | `core/utilities/concurrency.py` | Sequential and threaded batch execution helpers. |
-| `core/utilities/analysis.py` | Stateless analysis helpers. |
 | `core/utilities/helpers.py` | Cache, model, vector, and image export cleanup helpers. |
 
 ## Domain
@@ -232,14 +231,14 @@ are implementation details.
 | `application/services/vector_list.py` | Vector collection and derived-data service. |
 | `application/services/image_processor.py` | Ranked-image discovery, database rebuild, metadata sync, and rating replay. Ratings replay in stored link order so repeated rebuilds of unchanged files reproduce identical values. |
 | `application/services/scoring_service.py` | ComfyUI-facing scoring orchestration. |
-| `application/services/graph_service.py` | CrystalGraph facade over graph state and repositories. |
+| `application/services/graph_service.py` | CrystalGraph facade over graph state and repositories. `get_graph_stats` returns the `GraphStructure` counts owned by `ChainManager`. `add_image`, `add_images_bulk`, and `rebuild_from_database` intentionally leave the in-memory node map to be replaced wholesale by the next rebuild; `update_image_rating_state` and `update_image_rating_states_bulk` require the filename to be present in that map and raise `KeyError` otherwise. |
 | `application/data_transform/__init__.py` | Application transformation package marker. |
 | `application/data_transform/prepare_data.py` | Training-data preparation orchestration. |
 | `application/hyperparameters/hyperparameter_optimizer.py` | Hyperparameter search orchestration. |
 | `application/hyperparameters/__init__.py` | Hyperparameter package marker. |
 | `application/analysis/__init__.py` | Application analysis package marker. |
 | `application/analysis/run_parameter_analysis.py` | Parameter-analysis runner. |
-| `application/analysis/run_matrix_analysis.py` | Matrix-analysis runner. |
+| `application/analysis/run_matrix_analysis.py` | Matrix-analysis runner. Writes `matrix_analysis.jsonl` under `core.filesystem.paths.analysis_dir`. |
 | `application/analysis/run_stats.py` | Statistics runner. `print_stats` renders a `GraphStats` payload; `run_stats` collects it from the graph and is the CLI entry point. |
 | `application/analysis/parameter_analysis.py` | Parameter-analysis service. Writes its report under `core.filesystem.paths.analysis_dir`. |
 

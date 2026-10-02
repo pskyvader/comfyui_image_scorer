@@ -76,7 +76,7 @@ const CompareView = (() => {
         const lines = [];
         // Score + comparisons are always relevant.
         lines.push(`Score: ${Utils.formatScore(node.score)}`);
-        lines.push(`Comparisons: ${node.comparison_count}`);
+        lines.push(`Links: ${node.link_count}`);
         // Later phases surface structural context.
         const phase = _phases[phaseIndex];
         if (phase && phase.show_chain_info) {
@@ -244,7 +244,7 @@ const CompareView = (() => {
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Skill (μ)</td><td class="text-white text-right">${node.rating_mu}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Uncertainty (σ)</td><td class="text-white text-right">${node.rating_sigma}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Trueskill Score</td><td class="text-white text-right">${node.trueskill_score}</td></tr>
-            <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Comparisons</td><td class="text-white text-right">${node.comparison_count}</td></tr>
+            <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Links</td><td class="text-white text-right">${node.link_count}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Chain (id:size)</td><td class="text-white text-right">${node.chain_id}:${node.chain_length}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Chain Main Members</td><td class="text-white text-right">${node.chain_main_members}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Component Size</td><td class="text-white text-right">${node.component_size}</td></tr>

@@ -34,7 +34,7 @@ def phase_seed_coverage(
 
     seed_size: int = all_images_length * seed_percentage // 100
     ready_seed_pool: list[NodeProxy] = [
-        i for i in seed_pool if i.comparison_count >= seed_target
+        i for i in seed_pool if i.link_count >= seed_target
     ]
     ready_seed_pool_length: int = len(ready_seed_pool)
 
@@ -53,20 +53,20 @@ def phase_seed_coverage(
 
     # logger.debug(
     #     f"phase 0 active: {ready_seed_pool_length}/{seed_size} seeds ready (target={seed_target}), "
-    #     f"under_target={len([n for n in candidate_nodes if n.comparison_count < seed_target])}",
+    #     f"under_target={len([n for n in candidate_nodes if n.link_count < seed_target])}",
     #     start_timer=_start,
     # )
 
     under_seed_target: list[NodeProxy] = [
-        node for node in candidate_nodes if node.comparison_count < seed_target
+        node for node in candidate_nodes if node.link_count < seed_target
     ]
-    under_seed_target.sort(key=lambda node: node.comparison_count, reverse=True)
+    under_seed_target.sort(key=lambda node: node.link_count, reverse=True)
 
     node_a: NodeProxy = under_seed_target[0]
     pair_list: list[tuple[NodeProxy, NodeProxy]] = [
         (node_a, node_b)
         for node_b in under_seed_target[1 : (seed_size - ready_seed_pool_length + 1)]
-        if node_b.comparison_count <= node_a.comparison_count + 2
+        if node_b.link_count <= node_a.link_count + 2
         and canonicalize_pair(node_a.filename, node_b.filename) not in existing_pair_set
     ]
 
@@ -76,7 +76,7 @@ def phase_seed_coverage(
     )
     # if result:
     #     logger.debug(
-    #         f"phase_seed_coverage: returning pair {result[0].filename}({result[0].comparison_count}) vs {result[1].filename}({result[1].comparison_count})",
+    #         f"phase_seed_coverage: returning pair {result[0].filename}({result[0].link_count}) vs {result[1].filename}({result[1].link_count})",
     #         start_timer=_start,
     #     )
     # else:
@@ -100,7 +100,7 @@ def phase_anchor_insert(
         node
         for node in candidate_images
         if node.filename not in seed_pool_set
-        and node.comparison_count <= insertion_target
+        and node.link_count <= insertion_target
     ]
 
     if len(candidates) < 2:
@@ -109,7 +109,7 @@ def phase_anchor_insert(
             start_timer=_start,
         )
         return None
-    candidates.sort(key=lambda node: (node.comparison_count, node.trueskill_score))
+    candidates.sort(key=lambda node: (node.link_count, node.trueskill_score))
     node_a: NodeProxy = candidates[0]
 
     pool_nodes: list[NodeProxy] = [
@@ -117,11 +117,11 @@ def phase_anchor_insert(
     ]
 
     # for threshold in range(insertion_target + 1):
-    #     pool_nodes = [node for node in candidates if node.comparison_count <= threshold]
+    #     pool_nodes = [node for node in candidates if node.link_count <= threshold]
     #     if len(pool_nodes) >= max(threshold + 2, reserve_count):
     #         break
 
-    pool_nodes.sort(key=lambda node: node.comparison_count)
+    pool_nodes.sort(key=lambda node: node.link_count)
 
     # remaining: list[NodeProxy] = [
     #     node for node in pool_nodes[1:] if node.filename != node_a.filename
@@ -159,7 +159,7 @@ def phase_anchor_insert(
     # )
     if result:
         logger.debug(
-            f"returning pair {result[0].filename}({result[0].comparison_count}) vs {result[1].filename}({result[1].comparison_count})",
+            f"returning pair {result[0].filename}({result[0].link_count}) vs {result[1].filename}({result[1].link_count})",
             start_timer=_start,
         )
         return result
@@ -217,7 +217,7 @@ def _collect_chain_extremes(
         f"collected {len(nodes)} chain extremes, bottom={use_bottom}, check_list={len(check_list)}, errors={errors}",
     )
     logger.debug(f"check list: {check_list[:5]}... (len={len(check_list)})")
-    nodes.sort(key=lambda node: node.comparison_count)
+    nodes.sort(key=lambda node: node.link_count)
     return nodes[:100]
 
 
@@ -260,7 +260,7 @@ def phase_collapsible_pairs(
     candidate_names: set[str] = {
         node.filename
         for node in candidate_nodes
-        # if node.comparison_count > insertion_target
+        # if node.link_count > insertion_target
     }
 
     chains: list[ChainProxy] = list(cg.get_all_chains())
@@ -299,7 +299,7 @@ def phase_collapsible_pairs(
         )
         return None
     logger.debug(
-        f"collapsible pair: {result[0].filename}({result[0].comparison_count}) vs {result[1].filename}({result[1].comparison_count})",
+        f"collapsible pair: {result[0].filename}({result[0].link_count}) vs {result[1].filename}({result[1].link_count})",
         start_timer=_start,
     )
     return result
@@ -324,7 +324,7 @@ def phase_single_win_loss(
 
         nodes: list[NodeProxy] = []
         for node in candidate_nodes:
-            if node.comparison_count <= insertion_target:
+            if node.link_count <= insertion_target:
                 continue
             links: list[NodeProxy] = (
                 node.get_links(worse_than=True)
@@ -344,22 +344,22 @@ def phase_single_win_loss(
             continue
 
         nodes.sort(
-            key=lambda node: (node.comparison_count, node.mu_skill)
+            key=lambda node: (node.link_count, node.mu_skill)
         )  # , reverse=reverse)
         node_a: NodeProxy = nodes[0]
 
         if single_win is True:
-            minimum_count = node_a.comparison_count
+            minimum_count = node_a.link_count
 
-        if filtered_only and node_a.comparison_count >= minimum_count:
+        if filtered_only and node_a.link_count >= minimum_count:
             filtered_nodes: list[NodeProxy] = [
                 node
                 for node in nodes
-                if node.comparison_count <= node_a.comparison_count
+                if node.link_count <= node_a.link_count
             ]
             if len(filtered_nodes) < reserve_count:
                 # logger.info(
-                #     f"skipping single win={single_win}, filtered_only={filtered_only}: only {len(filtered_nodes)} candidates with comparison_count={node_a.comparison_count}"
+                #     f"skipping single win={single_win}, filtered_only={filtered_only}: only {len(filtered_nodes)} candidates with comparison_count={node_a.link_count}"
                 # )
 
                 continue
@@ -418,7 +418,7 @@ def phase_chain_merge(
         a_nodes: list[NodeProxy] = [
             n
             for n in chains[i]
-            if n.filename in candidate_names and n.comparison_count > min_comparisons
+            if n.filename in candidate_names and n.link_count > min_comparisons
         ]
         if len(a_nodes) == 0:
             continue
@@ -491,7 +491,7 @@ def phase_uncertainty_refine(
     candidate_nodes: list[NodeProxy] = [
         node
         for node in candidate_images
-        if node.comparison_count > insertion_target
+        if node.link_count > insertion_target
         and node.sigma_uncertainty >= min_sigma_threshold
     ]
 
@@ -508,7 +508,7 @@ def phase_uncertainty_refine(
             seed_pool.append(node)
         elif not node_a:
             node_a = node
-        elif len(seed_pool) < 10 and node.comparison_count > node_a.comparison_count:
+        elif len(seed_pool) < 10 and node.link_count > node_a.link_count:
             seed_pool.append(node)
         # limit pool to the 100 most uncertain nodes to avoid long processing times
         if node_a and len(seed_pool) > 100:
@@ -584,7 +584,7 @@ def phase_fallback(
 ) -> tuple[NodeProxy, NodeProxy] | None:
     _start: float = time.perf_counter()
     ordered: list[NodeProxy] = sorted(
-        candidate_images, key=lambda node: node.comparison_count
+        candidate_images, key=lambda node: node.link_count
     )
     for idx, left in enumerate(ordered):
         for right in ordered[idx + 1 :]:
