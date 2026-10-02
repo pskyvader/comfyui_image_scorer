@@ -79,3 +79,76 @@
     font-size: 12px;
     color: rgba(255, 255, 255, 0.45);
 }
+
+/* Result details */
+#analyze-container .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 12px;
+}
+#analyze-container .chart-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+}
+#analyze-container .chart-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 8px;
+}
+#analyze-container .chart-empty {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.35);
+}
+#analyze-container .chart-svg .axis text {
+    fill: rgba(255, 255, 255, 0.45);
+    font-size: 9px;
+}
+#analyze-container .chart-svg .axis line,
+#analyze-container .chart-svg .axis path {
+    stroke: rgba(255, 255, 255, 0.15);
+}
+#analyze-container .chart-svg .bar {
+    fill: #8b5cf6;
+}
+#analyze-container .chart-svg .bar:hover {
+    fill: #a78bfa;
+}
+#analyze-container .chart-svg .threshold {
+    stroke: #f59e0b;
+    stroke-dasharray: 3 3;
+    stroke-width: 1;
+}
+#analyze-container .chart-svg .threshold-label {
+    fill: #f59e0b;
+    font-size: 9px;
+}
+
+#analyze-container .data-table {
+    width: 100%;
+    font-size: 11px;
+    border-collapse: collapse;
+    font-family: 'Courier New', monospace;
+}
+#analyze-container .data-table th {
+    text-align: left;
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 600;
+    padding: 4px 6px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+#analyze-container .data-table td {
+    padding: 3px 6px;
+    color: rgba(255, 255, 255, 0.75);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+#analyze-container .data-table td.num {
+    text-align: right;
+}
+#analyze-container .data-table .filename {
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
