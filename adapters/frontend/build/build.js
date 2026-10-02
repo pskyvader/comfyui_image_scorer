@@ -14,6 +14,12 @@ class BuildView {
         this.bindActions();
     }
 
+    destroy() {
+        this.container = null;
+        this.limitDisplay = null;
+        this.batchToggle = null;
+    }
+
     _getBatch() {
         return this.batchToggle ? this.batchToggle.checked : false;
     }

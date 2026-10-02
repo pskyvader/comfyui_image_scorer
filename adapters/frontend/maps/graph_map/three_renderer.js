@@ -127,7 +127,7 @@ globalThis.ThreeGraphRenderer = class {
                 this.controls.touches = { ONE: globalThis.THREE.TOUCH.PAN, TWO: globalThis.THREE.TOUCH.DOLLY_PAN };
             }
         };
-        document.addEventListener("keydown", (event) => {
+        this._onKeyDown = (event) => {
             if (event.key === "r" && event.target.tagName !== "INPUT") {
                 this._rotationEnabled = !this._rotationEnabled;
                 this._updateRotationMode(this._rotationEnabled);
@@ -140,7 +140,8 @@ globalThis.ThreeGraphRenderer = class {
                     this.renderer.render(this.scene, this.camera);
                 }
             }
-        });
+        };
+        document.addEventListener("keydown", this._onKeyDown);
 
         this._ready = true;
     }
@@ -777,6 +778,10 @@ globalThis.ThreeGraphRenderer = class {
     destroy() {
         this.stopLoop();
         this._ready = false;
+        if (this._onKeyDown) {
+            document.removeEventListener("keydown", this._onKeyDown);
+            this._onKeyDown = null;
+        }
         if (this._resizeObserver) {
             this._resizeObserver.disconnect();
             this._resizeObserver = null;

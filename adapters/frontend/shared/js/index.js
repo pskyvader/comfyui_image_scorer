@@ -104,37 +104,24 @@ const router = {
         if (this._currentInstance && typeof this._currentInstance.destroy === "function") {
             this._currentInstance.destroy();
         }
-        if (this._currentSection === "gallery") {
-            window.galleryView = null;
-        }
         this._currentInstance = null;
         this._currentSection = null;
     },
 
     _createSectionInstance(sectionName, params) {
-        if (sectionName === "chains") {
-            if (window.chainMapUI) {
-                window.chainMapUI.init(params);
-                this._currentInstance = window.chainMapUI;
-                this._currentSection = sectionName;
-            }
+        const Cls = window.Sections && window.Sections[sectionName];
+        if (!Cls) {
+            routerLogger.error(`Section class not found: ${sectionName}`);
             return;
         }
-
-        const Cls = window.Sections && window.Sections[sectionName];
-        if (Cls) {
-            const instance = new Cls();
-            if (sectionName === "gallery") {
-                window.galleryView = instance;
-            }
-            if (typeof instance.init === "function") {
-                instance.init(params);
-            }
-            this._currentInstance = instance;
-            this._currentSection = sectionName;
-        } else {
-            routerLogger.error(`Section class not found: ${sectionName}`);
+        // The maps section registers its own shared instance rather than a class,
+        // so its lifecycle is driven by the instance it installs on window.
+        const instance = typeof Cls === "function" ? new Cls() : Cls;
+        if (typeof instance.init === "function") {
+            instance.init(params);
         }
+        this._currentInstance = instance;
+        this._currentSection = sectionName;
     },
 
     updateNavUI(routeName) {

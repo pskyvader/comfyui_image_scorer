@@ -8,6 +8,10 @@ class TrainingView {
         this.bindActions();
     }
 
+    destroy() {
+        this.container = null;
+    }
+
     async _trainingTrain() {
         return api._post("/training/train");
     }

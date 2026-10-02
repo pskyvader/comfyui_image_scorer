@@ -141,7 +141,7 @@ class GalleryView {
         });
 
         // Key bindings
-        document.addEventListener("keydown", (e) => {
+        this._onKeyDown = (e) => {
             if (this.els.modal && !this.els.modal.classList.contains("hidden")) {
                 if (e.key === "ArrowLeft") {
                     this.showPrevImage();
@@ -153,7 +153,8 @@ class GalleryView {
                     this.closeModal();
                 }
             }
-        });
+        };
+        document.addEventListener("keydown", this._onKeyDown);
 
         // Swipe support
         let touchStartX = 0;
@@ -173,11 +174,26 @@ class GalleryView {
 
     async init() {
         galleryLogger.info("Initializing GalleryView...");
+        window.galleryView = this;
         this.cacheElements();
         this.loadFilters();
         this.attachEventListeners();
         this.setupInfiniteScroll();
         await this.search();
+    }
+
+    destroy() {
+        if (this._onKeyDown) {
+            document.removeEventListener("keydown", this._onKeyDown);
+            this._onKeyDown = null;
+        }
+        if (this.observer) {
+            this.observer.disconnect();
+            this.observer = null;
+        }
+        if (window.galleryView === this) {
+            window.galleryView = null;
+        }
     }
 
     loadFilters() {

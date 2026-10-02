@@ -66,18 +66,20 @@ globalThis.ChainMapUI = class {
             return;
         }
         this.renderer.resize();
-        window.addEventListener("resize", () => {
+        this._onResize = () => {
             if (this.renderer) {
                 this.renderer.resize();
             }
-        });
-        document.addEventListener("visibilitychange", () => {
+        };
+        this._onVisibilityChange = () => {
             if (document.hidden) {
                 this._stopSim();
             } else if (!this._paused && this._simNodes.length && this._simAlpha > 0.001) {
                 this._startSim();
             }
-        });
+        };
+        window.addEventListener("resize", this._onResize);
+        document.addEventListener("visibilitychange", this._onVisibilityChange);
         this._listen();
         await this.loadData();
     }
@@ -568,7 +570,15 @@ globalThis.ChainMapUI = class {
         }
     }
 
-    cleanup() {
+    destroy() {
+        if (this._onResize) {
+            window.removeEventListener("resize", this._onResize);
+            this._onResize = null;
+        }
+        if (this._onVisibilityChange) {
+            document.removeEventListener("visibilitychange", this._onVisibilityChange);
+            this._onVisibilityChange = null;
+        }
         if (this.renderer) {
             this._stopSim();
             this.renderer.destroy();
@@ -587,4 +597,6 @@ globalThis.ChainMapUI = class {
 
 window.chainMapUI = new globalThis.ChainMapUI();
 window.Sections = window.Sections || {};
-window.Sections.chains = globalThis.ChainMapUI;
+// The router treats a non-function registration as an already-constructed
+// section, which is what lets this single instance survive across visits.
+window.Sections.chains = window.chainMapUI;

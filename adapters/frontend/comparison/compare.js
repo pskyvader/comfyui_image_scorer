@@ -94,6 +94,17 @@ class CompareMode {
         };
     }
 
+    destroy() {
+        const floating = ["#queue-indicator", "#undo-button"];
+        floating.forEach((selector) => {
+            const el = document.querySelector(selector);
+            if (el) {
+                el.remove();
+            }
+        });
+        this.elements = null;
+    }
+
     // ── UI element creation ──────────────────────────────────────────
 
     _createQueueIndicator() {
@@ -342,8 +353,7 @@ class CompareMode {
         this.attachEventListeners();
 
         // Fetch config and phases in parallel
-        const [serverConfig, phases] = await Promise.all([
-            CompareApi.getRankingConfig(),
+        const [serverConfig, phases] = await Promise.all([            CompareApi.getRankingConfig(),
             CompareApi.getPhases()
                 .catch((e) => {
                     compareLogger.error("Failed to load phases", e);

@@ -8,6 +8,10 @@ class DatabaseView {
         this.bindActions();
     }
 
+    destroy() {
+        this.container = null;
+    }
+
     async _dbAction(action, body) {
         const actions = {
             "rebuild-db": "rebuild-db",

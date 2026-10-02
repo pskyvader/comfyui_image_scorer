@@ -18,6 +18,12 @@ class AnalyzeView {
         this.refreshStats();
     }
 
+    destroy() {
+        this.container = null;
+        this.resultPanel = null;
+        this.resultContent = null;
+    }
+
     async _getStats() {
         return api._get("/analyze/stats");
     }
