@@ -31,23 +31,6 @@ body {
   border: 1px solid var(--border-glass);
 }
 
-.glass-nav {
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-bottom: 1px solid var(--border-glass);
-  position: sticky;
-  top: 0;
-  z-index: 50;
-}
-
-/* Hide mobile elements */
-@media (max-width: 640px) {
-  .hide-mobile {
-    display: none !important;
-  }
-}
-
 /* Scrollbar Styling */
 ::-webkit-scrollbar {
   width: 8px;
@@ -131,45 +114,7 @@ body {
   width: 100%;
 }
 
-/* Transitions */
-.route-enter {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
-.route-enter-active {
-  opacity: 1;
-  transform: translateY(0);
-  transition: opacity 300ms, transform 300ms;
-}
-
-/* Global Button Styles */
-.btn-primary {
-  background: linear-gradient(135deg, var(--primary), var(--primary-hover));
-  box-shadow: 0 4px 15px -3px rgba(139, 92, 246, 0.4);
-}
-
-.btn-secondary {
-  background: linear-gradient(135deg, var(--secondary), #db2777);
-  box-shadow: 0 4px 15px -3px rgba(236, 72, 153, 0.4);
-}
-
-/* Collapsible Card Effect */
-.collapsible-card {
-  border: 1px solid rgba(34, 197, 94, 0.5) !important;
-  box-shadow: 0 0 20px rgba(34, 197, 94, 0.1);
-}
-
-.collapsible-vs {
-  border-color: #22c55e !important;
-  color: #22c55e !important;
-  box-shadow: 0 0 25px rgba(34, 197, 94, 0.4) !important;
-}
-
 /* Hamburger Nav - collapsed by default, all screen sizes */
-.nav-links {
-  display: none;
-}
 .nav-toggle {
   display: block;
 }

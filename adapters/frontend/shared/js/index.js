@@ -32,10 +32,8 @@ const router = {
         },
     },
 
-    currentRoute: null,
     _currentInstance: null,
     _currentSection: null,
-
     async init() {
         window.addEventListener("hashchange", () => this.handleRoute());
 
@@ -86,8 +84,6 @@ const router = {
             requestAnimationFrame(() => {
                 this._createSectionInstance(route.section, params);
             });
-
-            this.currentRoute = routeName;
         } catch (e) {
             routerLogger.error("Router error", e);
             contentArea.innerHTML = `

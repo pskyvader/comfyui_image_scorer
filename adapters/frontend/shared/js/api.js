@@ -5,10 +5,9 @@ class Api {
     }
 
     async _fetch(path, options = {}) {
-        const url = path.startsWith("http") ? path : `${this.apiBase}${path}`;
-        const response = await fetch(url, {
-            headers: { "Content-Type": "application/json" },
+        const response = await fetch(`${this.apiBase}${path}`, {
             ...options,
+            headers: options.body ? { "Content-Type": "application/json" } : {},
         });
         if (!response.ok) {
             let detail = "";
@@ -24,4 +23,3 @@ class Api {
 
 const api = new Api();
 globalThis.api = api;
-window.Api = Api;

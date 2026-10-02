@@ -68,16 +68,6 @@ class Utils {
             document.head.appendChild(style);
         }
     }
-
-    // Preload image for performance
-    static preloadImage(src) {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => resolve(img);
-            img.onerror = reject;
-            img.src = src;
-        });
-    }
 }
 
 // Initialize on page load

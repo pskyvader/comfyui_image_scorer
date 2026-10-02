@@ -4,11 +4,6 @@ class ScopedFrontendLogger {
         this.options = { ...options };
     }
 
-    configure(options = {}) {
-        this.options = { ...this.options, ...options };
-        return this;
-    }
-
     debug(message, startTimer = null, ...details) {
         FrontendLogger.log(this.sourceName, "debug", message, startTimer, this.options, details);
     }
@@ -39,8 +34,6 @@ class ScopedFrontendLogger {
 }
 
 class FrontendLogger {
-    static allowedExactNames = new Set();
-    static allowedPrefixes = [];
     static consoleLevel = "debug";
     static defaultMaxEntries = 100;
     static progressIndicators = ["%", "|", "img/s", "items/s", "[00:", "it/s"];
@@ -49,21 +42,7 @@ class FrontendLogger {
         return new ScopedFrontendLogger(sourceName, options);
     }
 
-    static setNameFilters({ exactNames = [], prefixes = [] } = {}) {
-        this.allowedExactNames = new Set(exactNames);
-        this.allowedPrefixes = [...prefixes];
-    }
-
-    static clearNameFilters() {
-        this.allowedExactNames = new Set();
-        this.allowedPrefixes = [];
-    }
-
     static log(sourceName, level, message, startTimer = null, options = {}, details = []) {
-        if (!this.shouldEmit(sourceName)) {
-            return;
-        }
-
         const renderedMessage = this.formatMessage(message, startTimer);
         const targetMessage = details.length > 0
             ? `${renderedMessage} ${details.map((detail) => this.serializeDetail(detail)).join(" ")}`
@@ -76,16 +55,6 @@ class FrontendLogger {
         } else if (level === "warn" || level === "info") {
             Utils.showToast(renderedMessage, "info");
         }
-    }
-
-    static shouldEmit(sourceName) {
-        if (this.allowedExactNames.size === 0 && this.allowedPrefixes.length === 0) {
-            return true;
-        }
-        if (this.allowedExactNames.has(sourceName)) {
-            return true;
-        }
-        return this.allowedPrefixes.some((prefix) => sourceName.startsWith(prefix));
     }
 
     static formatMessage(message, startTimer) {
@@ -139,7 +108,6 @@ class FrontendLogger {
             const line = document.createElement("div");
             line.textContent = displayMessage;
             line.dataset.isProgress = isProgress ? "true" : "false";
-            line.dataset.level = level;
             target.appendChild(line);
         }
 
@@ -150,16 +118,7 @@ class FrontendLogger {
             target.removeChild(target.firstElementChild);
         }
 
-        const shouldAutoScroll = typeof options.shouldAutoScroll === "function"
-            ? options.shouldAutoScroll()
-            : options.shouldAutoScroll !== false;
-        if (shouldAutoScroll) {
-            target.scrollTop = target.scrollHeight;
-        }
-
-        if (typeof options.afterWrite === "function") {
-            options.afterWrite({ sourceName, level, renderedMessage, target });
-        }
+        target.scrollTop = target.scrollHeight;
     }
 
     static resolveTarget(target) {
