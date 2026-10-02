@@ -62,6 +62,7 @@ CONTRACT: list[tuple[str, tuple[str, ...], set[str]]] = [
         {"delete_full_vectors"},
     ),
     ("/api/database/rebuild-db", ("database", "rebuild"), {"rebuild"}),
+    ("/api/database/sync", ("database", "sync"), {"sync"}),
     ("/api/database/recalculate", ("database", "recalculate"), {"recalculate"}),
     ("/api/database/cleanup", ("database", "cleanup"), {"cleanup"}),
     (
@@ -343,7 +344,10 @@ class FakeDeps:
         from comfyui_image_scorer.adapters.cli.deps import CLIDeps
 
         self.graph: Any = StubGraph()
-        self.processor: Any = SimpleNamespace(rebuild_database_from_ranked=Recorder())
+        self.processor: Any = SimpleNamespace(
+            rebuild_database_from_ranked=Recorder(),
+            sync_ranked_files_from_database=Recorder(),
+        )
         self.model_loader: Any = None
         self.batch_sizer_factory: Any = None
         self.maps_provider: Any = None
@@ -393,6 +397,7 @@ def test_cli_database_commands_with_fake_deps():
         cleanup,
         rebuild,
         recalculate,
+        sync,
     )
 
     deps = _make_fake_deps()
@@ -404,6 +409,9 @@ def test_cli_database_commands_with_fake_deps():
     assert rebuild(cli) == 0
     assert len(deps.processor.rebuild_database_from_ranked.calls) == 1
 
+    assert sync(cli) == 0
+    assert len(deps.processor.sync_ranked_files_from_database.calls) == 1
+
     assert recalculate(cli) == 0
     assert deps.graph.calls.count("reset_all_image_ratings") == 1
 
@@ -412,6 +420,7 @@ def test_cli_database_commands_with_fake_deps():
     ("method", "route", "body"),
     [
         ("POST", "/api/database/rebuild-db", None),
+        ("POST", "/api/database/sync", None),
         ("POST", "/api/database/recalculate", None),
         ("POST", "/api/database/cleanup", None),
         ("POST", "/api/files/cleanup", None),
@@ -438,6 +447,8 @@ def test_endpoints_with_fake_deps(method: str, route: str, body: dict[str, Any] 
         assert len(deps.download_mediapipe_models.calls) == 1
     elif route == "/api/database/rebuild-db":
         assert len(deps.processor.rebuild_database_from_ranked.calls) == 1
+    elif route == "/api/database/sync":
+        assert len(deps.processor.sync_ranked_files_from_database.calls) == 1
     elif route == "/api/database/cleanup":
         assert deps.graph.calls.count("clean_comparisons") == 1
         assert len(deps.vacuum_database.calls) == 1

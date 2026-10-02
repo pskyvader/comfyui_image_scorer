@@ -88,14 +88,18 @@ python scorer.py build split-vectors --limit 100
 python scorer.py build all
 python scorer.py database cleanup
 python scorer.py database recalculate
+python scorer.py database sync
 python scorer.py training train-model
 ```
 
 `database rebuild` is destructive: it deduplicates and cleans ranked files,
 clears the image and comparison tables, and repopulates them from ranked-file
 metadata. Use `database recalculate` when existing history should remain and
-only ratings should be replayed. CLI operations and command endpoints operate
-synchronously; server startup may run maintenance work in background workers.
+only ratings should be replayed. `database sync` goes the other way: it writes
+current database scores and comparison history back into the ranked companion
+JSON files and leaves the database untouched. CLI operations and command
+endpoints operate synchronously; server startup may run maintenance work in
+background workers.
 
 The local web server exposes the analysis, build, comparison, database, gallery, maps, and training workflows.
 

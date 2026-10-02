@@ -68,6 +68,8 @@ are implementation details.
 | `application/services/image_processor.py` | `ImageProcessor.process_image_file` | Moves one image and its JSON into the ranked tree; every read, write, move, and delete is delegated to `FilePort`, with only the duplicate size check read locally. |
 | `application/services/image_processor.py` | `ImageProcessor.reorganize_folder_structure` | Detects loose tier files with an application-owned `Path.glob`/`os.listdir`/`Path.is_dir` scan; JSON reads, tier-path computation, directory creation, and the moves are delegated to `FilePort`. |
 | `application/services/image_processor.py` | `ImageProcessor.rebuild_database_from_ranked` | Rebuild flow; deduplication, orphan cleanup, metadata sync, and folder-cache control are delegated to `FilePort`. |
+| `application/services/image_processor.py` | `ImageProcessor.sync_ranked_files_from_database` | Sync database state into ranked companion JSON without changing the database; collects the ranked entries with an application-owned scan and delegates every read, write, and move to `FilePort`. |
+| `application/services/image_processor.py` | `ImageProcessor.sync_database_to_files` | Write one database row and its stored comparison history per collected ranked entry into companion JSON; the caller supplies the collected entries. |
 | `application/services/scoring_service.py` | `ScoringService` | Image scoring orchestration service. |
 | `application/services/vector_list.py` | `VectorList` | Vector collection and derived-data service. |
 | `application/hyperparameters/hyperparameter_optimizer.py` | `HpoRunner` | Hyperparameter search runner. |
@@ -77,6 +79,7 @@ are implementation details.
 | `adapters/server/main.py` | `main` | Start and initialize the Flask ranking server. |
 | `adapters/cli/main.py` | `main` | Parse CLI arguments and dispatch commands. |
 | `adapters/cli/commands/database.py` | `rebuild` | Explicitly rebuild the ranking database from ranked files. |
+| `adapters/cli/commands/database.py` | `sync` | Reload the graph and write database state back into ranked companion JSON. |
 | `adapters/cli/commands/database.py` | `recalculate` | Replay existing comparison history into ratings. |
 | `adapters/cli/commands/database.py` | `cleanup` | Clean stale comparisons and VACUUM the database. |
 | `adapters/cli/commands/server.py` | `run_server` | Start the ranking server from CLI. |

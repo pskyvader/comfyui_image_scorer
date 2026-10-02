@@ -133,6 +133,11 @@ def add_database_parser(
     )
 
     database_sub.add_parser(
+        "sync",
+        help="Write database scores and comparison history back into ranked files",
+    )
+
+    database_sub.add_parser(
         "recalculate", help="Recalculate scores/replay from existing data"
     )
 
@@ -282,12 +287,14 @@ def main() -> int:
             return 1
 
     elif args.command == "database":
-        from .commands.database import cleanup, rebuild, recalculate
+        from .commands.database import cleanup, rebuild, recalculate, sync
 
         if args.database_command == "cleanup":
             return cleanup(deps=deps)
         elif args.database_command == "rebuild":
             return rebuild(deps=deps)
+        elif args.database_command == "sync":
+            return sync(deps=deps)
         elif args.database_command == "recalculate":
             return recalculate(deps=deps)
         else:

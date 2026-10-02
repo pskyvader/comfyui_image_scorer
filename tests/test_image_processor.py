@@ -588,3 +588,57 @@ def test_rebuild_database_from_ranked_syncs_json_to_disk(tmp_path: Path) -> None
         assert rating_mu == row["rating_mu"]
         assert rating_sigma == row["rating_sigma"]
         assert comparison_count == row["comparison_count"]
+
+
+def test_sync_ranked_files_from_database_writes_current_database_state(
+    tmp_path: Path,
+) -> None:
+    """Database-only sync writes current rows, including metadata without a score."""
+    tier = tmp_path / "scored_0.5"
+    _write_ranked(tier, "a.png", {"positive_prompt": "tag-a"})
+
+    harness = _harness(tmp_path)
+    harness.processor.rebuild_database_from_ranked()
+    harness.port.sync_calls.clear()
+    harness.port.calls.clear()
+
+    row = harness.images.rows["a.png"]
+    row["score"] = 0.9
+    row["rating_mu"] = 30.0
+    row["rating_sigma"] = 4.0
+    row["comparison_count"] = 7
+    harness.graph.rebuild_from_database()
+
+    harness.processor.sync_ranked_files_from_database()
+
+    assert harness.port.sync_calls == [("a.png", 0.9, 30.0, 4.0, 7)]
+    assert "deduplicate_scored" not in harness.port.calls
+    assert "cleanup_orphans" not in harness.port.calls
+
+
+def test_sync_ranked_files_from_database_keeps_database_images_missing_files(
+    tmp_path: Path,
+) -> None:
+    """A database image with no companion JSON is still handed to the port."""
+    tier = tmp_path / "scored_0.5"
+    _write_ranked(tier, "a.png", {"positive_prompt": "tag-a"})
+
+    harness = _harness(tmp_path)
+    harness.processor.rebuild_database_from_ranked()
+    harness.port.sync_calls.clear()
+
+    harness.images.rows["ghost.png"] = ImageRow(
+        filename="ghost.png",
+        score=0.4,
+        rating_mu=INITIAL_MEAN,
+        rating_sigma=INITIAL_UNCERTAINTY,
+        comparison_count=0,
+        last_compared_at=None,
+        ranking_generation=0,
+        prompt_tags=None,
+    )
+    harness.graph.rebuild_from_database()
+
+    harness.processor.sync_ranked_files_from_database()
+
+    assert {entry[0] for entry in harness.port.sync_calls} == {"a.png", "ghost.png"}

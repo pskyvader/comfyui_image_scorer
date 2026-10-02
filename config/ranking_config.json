@@ -9,7 +9,7 @@
     "seed_percentage": 5,
     "seed_target_comparisons": 15,
     "insertion_target_comparisons": 3,
-    "score_steepness": 2,
+    "score_steepness": 2.5,
     "sigma_threshold": 3.5,
     "compress_images": false
 }

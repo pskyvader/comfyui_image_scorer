@@ -17,6 +17,7 @@ from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.configuration.settings import config, DB_BULK_CHUNK
 from ...core.io.serialization import (
     clean_json_metadata,
+    CollectedFile,
     collect_valid_files,
     discover_files,
     extract_prompt_tags,
@@ -443,28 +444,16 @@ class ImageProcessor:
             comparison_rows,
             valid_filenames,
         )
-        filename_to_comparisons: dict[str, list[ComparisonRow]] = defaultdict(list)
         for chunk_start in tqdm(
             range(0, len(survivors), DB_BULK_CHUNK),
             desc="Adding survivors to database",
             unit="chunk",
             delay=3.0,
+            position=0,
         ):
-            chunk = survivors[chunk_start : chunk_start + DB_BULK_CHUNK]
-            link_ids = self._graph.add_comparisons_bulk(chunk)
-            for row, link_id in zip(chunk, link_ids):
-                filename_a = str(row["filename_a"])
-                filename_b = str(row["filename_b"])
-                timestamp = str(row.get("timestamp") or "")
-                survivor_row: ComparisonRow = {
-                    "id": link_id,
-                    "filename_a": filename_a,
-                    "filename_b": filename_b,
-                    "winner": str(row["winner"]),
-                    "timestamp": timestamp,
-                }
-                filename_to_comparisons[filename_a].append(survivor_row)
-                filename_to_comparisons[filename_b].append(survivor_row)
+            self._graph.add_comparisons_bulk(
+                survivors[chunk_start : chunk_start + DB_BULK_CHUNK]
+            )
 
         logger.debug(
             f"collapsed {len(comparison_rows)} historical comparisons from ranked files "
@@ -476,7 +465,36 @@ class ImageProcessor:
 
         self._recompute_ratings_from_database_history()
 
-        all_images = [node.data for node in self._graph.get_all_nodes()]
+        self.sync_database_to_files(all_entries)
+        self.sync_processed_images_from_db()
+        logger.debug(
+            f"Rebuild complete. {self._graph.get_node_count()} images in database.",
+            start_timer=_start,
+        )
+
+    def sync_ranked_files_from_database(self) -> None:
+        """Write database state into ranked companion JSON without touching the database."""
+        _start: float = time.perf_counter()
+        ranked_root: Path = self._path_ops.ranked_root()
+        if not ranked_root.exists():
+            return
+
+        prepare_conf = config["prepare"]
+        all_entries = collect_valid_files(
+            discover_files(str(ranked_root)),
+            max_workers=int(prepare_conf["max_workers"]),
+            scored_only=False,
+        )
+        self.sync_database_to_files(all_entries)
+        logger.debug(
+            f"Synced {len(all_entries)} ranked files from database.",
+            start_timer=_start,
+        )
+
+    def sync_database_to_files(self, all_entries: list[CollectedFile]) -> None:
+        """Rewrite each database image's companion JSON from database state."""
+        _start: float = time.perf_counter()
+        ranked_root: Path = self._path_ops.ranked_root()
 
         filename_to_path: dict[str, Path] = {}
         filename_to_entry: dict[str, dict[str, object]] = {}
@@ -486,8 +504,14 @@ class ImageProcessor:
             filename_to_entry[p.name] = _entry
 
         filename_to_image_data: dict[str, ImageRow] = {}
-        for img in all_images:
-            filename_to_image_data[img["filename"]] = img
+        for node in self._graph.get_all_nodes():
+            filename_to_image_data[node.data["filename"]] = node.data
+
+        filename_to_comparisons: dict[str, list[ComparisonRow]] = defaultdict(list)
+        for link in self._graph.get_all_links():
+            row = link.data
+            filename_to_comparisons[str(row["filename_a"])].append(row)
+            filename_to_comparisons[str(row["filename_b"])].append(row)
 
         self._path_ops.prewarm_folder_cache(ranked_root)
 
@@ -506,7 +530,7 @@ class ImageProcessor:
                 float(img["rating_sigma"]),
                 int(img["comparison_count"]),
             )
-            for img in all_images
+            for img in filename_to_image_data.values()
         ]
         prepare_conf = config["prepare"]
         logger.debug("sync json data...", start_timer=_start)
@@ -525,11 +549,6 @@ class ImageProcessor:
             start_timer=_start,
         )
         self._path_ops.clear_folder_cache()
-        self.sync_processed_images_from_db()
-        logger.debug(
-            f"Rebuild complete. {len(all_images)} images in database.",
-            start_timer=_start,
-        )
 
     def _recompute_ratings_from_database_history(self) -> int:
         self._graph.reset_all_image_ratings(score=self.default_score)

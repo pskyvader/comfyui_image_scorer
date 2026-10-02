@@ -2,7 +2,7 @@ import json
 import jsonlines
 import os
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, TypeAlias
 from tqdm import tqdm
 import time
 
@@ -10,6 +10,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from ..observability.logger import get_logger, ModuleLogger
 
 logger: ModuleLogger = get_logger(__name__)
+
+# One discovered ranked image: image path, companion JSON entry, timestamp, file id.
+CollectedFile: TypeAlias = tuple[str, dict[str, Any], str, str]
 
 
 def load_single_jsonl(filename: str, skip_invalid: bool = True) -> Iterator[Any]:
@@ -62,7 +65,7 @@ def discover_files(root: str) -> Iterator[tuple[str, str]]:
 
 def collect_single_file(
     file: tuple[str, str],
-) -> tuple[str, dict[str, Any], str, str] | None:
+) -> CollectedFile | None:
     _start = time.perf_counter()
     img_path, meta_path = file
 
@@ -95,11 +98,9 @@ def collect_valid_files(
     max_workers: int,
     scored_only: bool,
     limit: int = 0,
-) -> list[tuple[str, dict[str, Any], str, str]]:
+) -> list[CollectedFile]:
     file_list: list[tuple[str, str]] = list(files)
-    collected: list[tuple[str, dict[str, Any], str, str] | None] = [None] * len(
-        file_list
-    )
+    collected: list[CollectedFile | None] = [None] * len(file_list)
     if not file_list:
         # logger.info("file list empty")
         return []

@@ -7,7 +7,7 @@ with log output captured for the response.
 from flask import Blueprint, Flask, jsonify
 
 from ....core.observability.logger import capture_log_output, get_logger, ModuleLogger
-from ...cli.commands.database import cleanup, rebuild, recalculate
+from ...cli.commands.database import cleanup, rebuild, recalculate, sync
 from ..deps import ServerDeps, get_server_deps
 
 logger: ModuleLogger = get_logger(__name__)
@@ -19,6 +19,14 @@ def rebuild_database():
     deps = get_server_deps()
     with capture_log_output() as lines:
         code = rebuild(deps=deps.to_cli_deps())
+    return jsonify({"status": "done", "result": code, "log": lines})
+
+
+@database_bp.route("/sync", methods=["POST"])
+def sync_ranked_files():
+    deps = get_server_deps()
+    with capture_log_output() as lines:
+        code = sync(deps=deps.to_cli_deps())
     return jsonify({"status": "done", "result": code, "log": lines})
 
 

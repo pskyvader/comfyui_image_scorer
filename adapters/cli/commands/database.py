@@ -1,4 +1,4 @@
-"""Database maintenance commands: rebuild, recalculate, cleanup."""
+"""Database maintenance commands: rebuild, sync, recalculate, cleanup."""
 
 import time
 
@@ -26,6 +26,14 @@ def rebuild(deps: CLIDeps) -> int:
     _start = time.perf_counter()
     deps.processor.rebuild_database_from_ranked()
     logger.info("Database rebuilt from ranked files.", start_timer=_start)
+    return 0
+
+
+def sync(deps: CLIDeps) -> int:
+    _start = time.perf_counter()
+    deps.graph.rebuild_from_database()
+    deps.processor.sync_ranked_files_from_database()
+    logger.info("Ranked files synced from the database.", start_timer=_start)
     return 0
 
 
