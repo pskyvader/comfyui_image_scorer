@@ -108,6 +108,13 @@ are implementation details.
 | `domain/analysis/trueskill.py` | `INITIAL_UNCERTAINTY` | Initial rating uncertainty constant. |
 | `domain/comparison/comparison_recorder.py` | `ComparisonRecorder` | Comparison persistence and graph recording port consumer. |
 | `domain/comparison/comparison_recorder.py` | `update_scores_after_comparison` | Update scores and ratings after one comparison. |
+| `domain/comparison/algorithm/view.py` | `describe_graph` | Whole-graph ranking measurements: score, rating-mu, rating-sigma and comparison-count distributions, the comparison-level histogram, the sigma-threshold above/below split, single-win, single-loss and ready counts, ranked/unranked totals, and the highest- and lowest-scoring images. Reads every field through `NodeProxy`. |
+| `domain/comparison/algorithm/view.py` | `GraphStats` | Typed payload returned by `describe_graph`. |
+| `domain/comparison/algorithm/view.py` | `Distribution` | Typed payload: a measured series' min, max, mean, and ascending equal-width histogram. |
+| `domain/comparison/algorithm/view.py` | `ScoreBucket` | Typed payload: one histogram bucket's `lower`, `upper`, and `count`. |
+| `domain/comparison/algorithm/view.py` | `RankedExtremes` | Typed payload: one row of a top/bottom score table. |
+| `domain/comparison/algorithm/view.py` | `DEFAULT_BUCKET_COUNT` | Default histogram bucket count. |
+| `domain/comparison/algorithm/view.py` | `DEFAULT_EXTREMES_COUNT` | Default number of rows in each top/bottom table. |
 | `infrastructure/external_services/mediapipe_models.py` | `download_mediapipe_models` | Explicit MediaPipe model download and location handling. |
 | `infrastructure/persistence/cleanup_orphans.py` | `cleanup_orphans` | Clean orphaned image and JSON companion files. |
 | `infrastructure/persistence/folder_organizer.py` | `ensure_tier_structure` | Ensure score folders scored_0.0 through scored_1.0 exist. |
@@ -202,7 +209,7 @@ are implementation details.
 | `domain/comparison/algorithm/graph_helpers.py` | Graph-query, candidate-pool, and collapsibility helpers. |
 | `domain/comparison/algorithm/merge_sort_ranker.py` | Pair selection orchestration for merge-sort ranking. |
 | `domain/comparison/algorithm/pair_active.py` | Active pair selection. |
-| `domain/comparison/algorithm/view.py` | Ranking view and response shaping helpers. |
+| `domain/comparison/algorithm/view.py` | Ranking view and response shaping helpers. Owns the whole-graph ranking measurements in `describe_graph`; `describe_pair` is a projection of that payload. |
 | `domain/loading/__init__.py` | Loading package marker. |
 | `domain/ports/__init__.py` | Domain port exports. |
 | `domain/ports/cache.py` | Cache provider protocol. |
@@ -232,7 +239,7 @@ are implementation details.
 | `application/analysis/__init__.py` | Application analysis package marker. |
 | `application/analysis/run_parameter_analysis.py` | Parameter-analysis runner. |
 | `application/analysis/run_matrix_analysis.py` | Matrix-analysis runner. |
-| `application/analysis/run_stats.py` | Statistics runner. |
+| `application/analysis/run_stats.py` | Statistics runner. `print_stats` renders a `GraphStats` payload; `run_stats` collects it from the graph and is the CLI entry point. |
 | `application/analysis/parameter_analysis.py` | Parameter-analysis service. |
 
 ## Adapters

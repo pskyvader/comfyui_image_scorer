@@ -1,13 +1,13 @@
 """Read-only serialization of graph objects into comparison-frontend payloads.
 
-Both functions accept ``NodeProxy`` objects directly so that, when the phase
+All functions accept ``NodeProxy`` objects directly so that, when the phase
 selectors later return proxies instead of filename strings, no signature change
-is required here. All field reading is isolated in the two helpers below.
+is required here. All field reading is isolated in the helpers below.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 
 from ....core.configuration.settings import config
 from ...graph.node_proxy import NodeProxy
@@ -16,6 +16,100 @@ from ..constants import MIN_CHAIN_THRESHOLD
 from . import graph_helpers
 
 from ....domain.ports.graph import CrystalGraphPort
+
+
+class ScoreBucket(TypedDict):
+    """One equal-width histogram bucket."""
+
+    lower: float
+    upper: float
+    count: int
+
+
+class Distribution(TypedDict):
+    """A measured series plus its histogram, in ascending bucket order."""
+
+    min: float
+    max: float
+    mean: float
+    buckets: list[ScoreBucket]
+
+
+class RankedExtremes(TypedDict):
+    """One row of a top/bottom score table."""
+
+    filename: str
+    score: float
+    rating_mu: float
+    rating_sigma: float
+    comparison_count: int
+
+
+class GraphStats(TypedDict):
+    """Whole-graph ranking measurements shared by every graph-wide view."""
+
+    total: int
+    score: Distribution
+    rating_mu: Distribution
+    rating_sigma: Distribution
+    comparison_count: Distribution
+    comparison_level: dict[int, int]
+    sigma_threshold: float
+    sigma_above_threshold: int
+    sigma_below_threshold: int
+    single_win_count: int
+    single_loss_count: int
+    ready_count: int
+    ranked: int
+    unranked: int
+    top: list[RankedExtremes]
+    bottom: list[RankedExtremes]
+
+
+DEFAULT_BUCKET_COUNT = 10
+DEFAULT_EXTREMES_COUNT = 10
+
+
+def _bucket_edges(values: list[float], bucket_count: int) -> list[tuple[float, float]]:
+    lower = min(values)
+    upper = max(values)
+    if upper == lower:
+        return [(lower, upper)]
+    width = (upper - lower) / bucket_count
+    return [(lower + i * width, lower + (i + 1) * width) for i in range(bucket_count)]
+
+
+def _distribution(values: list[float], bucket_count: int) -> Distribution:
+    edges = _bucket_edges(values, bucket_count)
+    last = len(edges) - 1
+    buckets: list[ScoreBucket] = []
+    for index, (lower, upper) in enumerate(edges):
+        if index == last:
+            count = sum(1 for v in values if lower <= v <= upper)
+        else:
+            count = sum(1 for v in values if lower <= v < upper)
+        buckets.append({"lower": lower, "upper": upper, "count": count})
+    return {
+        "min": min(values),
+        "max": max(values),
+        "mean": sum(values) / len(values),
+        "buckets": buckets,
+    }
+
+
+def _extremes(nodes: list[NodeProxy], limit: int, *, highest_first: bool) -> list[RankedExtremes]:
+    ordered = sorted(nodes, key=lambda n: float(n.score), reverse=highest_first)
+    return [
+        {
+            "filename": node.filename,
+            "score": round(float(node.score), 4),
+            "rating_mu": round(float(node.mu_skill), 4),
+            "rating_sigma": round(float(node.sigma_uncertainty), 4),
+            "comparison_count": int(node.comparison_count),
+        }
+        for node in ordered[:limit]
+    ]
+
 
 
 def _describe_one(node: NodeProxy, cg: CrystalGraphPort) -> dict[str, Any]:
@@ -69,6 +163,95 @@ def describe_image(node: NodeProxy, cg: CrystalGraphPort) -> dict[str, Any]:
     return _describe_one(node, cg)
 
 
+def describe_graph(
+    cg: CrystalGraphPort,
+    bucket_count: int = DEFAULT_BUCKET_COUNT,
+    extremes_count: int = DEFAULT_EXTREMES_COUNT,
+) -> GraphStats:
+    """Return whole-graph ranking measurements.
+
+    Promoted out of ``describe_pair`` so the analyze page can serialize the same
+    numbers the pair payload carries. There is one owner for the sigma-threshold
+    and readiness counts; the pair payload is a projection of this.
+    """
+    ranking_conf = config["ranking"]
+    sigma_threshold = float(ranking_conf["sigma_threshold"])
+
+    all_nodes = cg.get_all_nodes()
+    scores: list[float] = []
+    mus: list[float] = []
+    sigmas: list[float] = []
+    counts: list[float] = []
+    level_counts: dict[int, int] = {}
+    sigma_above = 0
+    single_win_count = 0
+    single_loss_count = 0
+    ready_count = 0
+    for node in all_nodes:
+        score = float(node.score)
+        mu = float(node.mu_skill)
+        sigma = float(node.sigma_uncertainty)
+        comparisons = int(node.comparison_count)
+        scores.append(score)
+        mus.append(mu)
+        sigmas.append(sigma)
+        counts.append(comparisons)
+        level_counts[comparisons] = level_counts.get(comparisons, 0) + 1
+        if sigma >= sigma_threshold:
+            sigma_above += 1
+        wins = len(node.get_links(worse_than=True))
+        losses = len(node.get_links(better_than=True))
+        if wins == 1:
+            single_win_count += 1
+        if losses == 1:
+            single_loss_count += 1
+        if wins > 1 and losses > 1:
+            ready_count += 1
+
+    ranked = sum(1 for c in counts if c > 0)
+    total = len(all_nodes)
+
+    if not total:
+        empty: Distribution = {"min": 0.0, "max": 0.0, "mean": 0.0, "buckets": []}
+        return {
+            "total": 0,
+            "score": empty,
+            "rating_mu": empty,
+            "rating_sigma": empty,
+            "comparison_count": empty,
+            "comparison_level": {},
+            "sigma_threshold": sigma_threshold,
+            "sigma_above_threshold": 0,
+            "sigma_below_threshold": 0,
+            "single_win_count": 0,
+            "single_loss_count": 0,
+            "ready_count": 0,
+            "ranked": 0,
+            "unranked": 0,
+            "top": [],
+            "bottom": [],
+        }
+
+    return {
+        "total": total,
+        "score": _distribution(scores, bucket_count),
+        "rating_mu": _distribution(mus, bucket_count),
+        "rating_sigma": _distribution(sigmas, bucket_count),
+        "comparison_count": _distribution(counts, bucket_count),
+        "comparison_level": level_counts,
+        "sigma_threshold": sigma_threshold,
+        "sigma_above_threshold": sigma_above,
+        "sigma_below_threshold": total - sigma_above,
+        "single_win_count": single_win_count,
+        "single_loss_count": single_loss_count,
+        "ready_count": ready_count,
+        "ranked": ranked,
+        "unranked": total - ranked,
+        "top": _extremes(all_nodes, extremes_count, highest_first=True),
+        "bottom": _extremes(all_nodes, extremes_count, highest_first=False),
+    }
+
+
 def describe_pair(
     node_a: NodeProxy,
     node_b: NodeProxy,
@@ -88,29 +271,7 @@ def describe_pair(
 
     base_level = min(left["comparison_count"], right["comparison_count"])
 
-    sigma_threshold = float(ranking_conf["sigma_threshold"])
-    level_counts: dict[int, int] = {}
-    all_nodes = cg.get_all_nodes()
-    sigma_above = 0
-    sigma_below = 0
-    single_win_count = 0
-    single_loss_count = 0
-    ready_count = 0
-    for n in all_nodes:
-        c = int(n.comparison_count)
-        level_counts[c] = level_counts.get(c, 0) + 1
-        if float(n.sigma_uncertainty) >= sigma_threshold:
-            sigma_above += 1
-        else:
-            sigma_below += 1
-        wins = len(n.get_links(worse_than=True))
-        losses = len(n.get_links(better_than=True))
-        if wins == 1:
-            single_win_count += 1
-        if losses == 1:
-            single_loss_count += 1
-        if wins > 1 and losses > 1:
-            ready_count += 1
+    stats = describe_graph(cg)
 
     rating_a = Rating(mu_skill=node_a.mu_skill, sigma_uncertainty=node_a.sigma_uncertainty)
     rating_b = Rating(mu_skill=node_b.mu_skill, sigma_uncertainty=node_b.sigma_uncertainty)
@@ -128,11 +289,11 @@ def describe_pair(
 
     return {
         "phase": phase_index,
-        "total_images": len(all_nodes),
+        "total_images": stats["total"],
         "total_comparisons": graph_stats["total_comparisons"],
         "total_chains": graph_stats["total_chains"],
         "target_chains": MIN_CHAIN_THRESHOLD,
-        "level": level_counts,
+        "level": stats["comparison_level"],
         "base_level": base_level,
         "collapsible": graph_helpers.is_collapsable_pair(
             node_a.filename, node_b.filename, cg
@@ -144,11 +305,11 @@ def describe_pair(
             ranking_conf["insertion_target_comparisons"]
         ),
         "reserve_count": int(ranking_conf["reserve_count"]),
-        "sigma_threshold": sigma_threshold,
-        "sigma_above_threshold": sigma_above,
-        "sigma_below_threshold": sigma_below,
-        "single_win_count": single_win_count,
-        "single_loss_count": single_loss_count,
-        "ready_count": ready_count,
+        "sigma_threshold": stats["sigma_threshold"],
+        "sigma_above_threshold": stats["sigma_above_threshold"],
+        "sigma_below_threshold": stats["sigma_below_threshold"],
+        "single_win_count": stats["single_win_count"],
+        "single_loss_count": stats["single_loss_count"],
+        "ready_count": stats["ready_count"],
         "probability_a_beats_b": round(probability_a_beats_b, 4),
     }

@@ -90,7 +90,7 @@ CONTRACT: list[tuple[str, tuple[str, ...], set[str]]] = [
         ("files", "cleanup"),
         {"deduplicate_scored", "cleanup_orphans"},
     ),
-    ("/api/analyze/stats", ("analyze", "stats"), {"run_stats"}),
+    ("/api/analyze/stats", ("analyze", "stats"), {"describe_graph", "print_stats"}),
     (
         "/api/analyze/analyze-parameters",
         ("analyze", "parameters"),
@@ -311,7 +311,22 @@ class StubGraph:
 
     def get_all_nodes(self) -> list[Any]:
         self.calls.append("get_all_nodes")
-        return [SimpleNamespace(filename="stub.png", data=self.list_nodes()[0])]
+        row = self.list_nodes()[0]
+
+        def no_links(**_kwargs: Any) -> list[Any]:
+            return []
+
+        return [
+            SimpleNamespace(
+                filename=row["filename"],
+                score=row["score"],
+                mu_skill=row["rating_mu"],
+                sigma_uncertainty=row["rating_sigma"],
+                comparison_count=row["comparison_count"],
+                data=row,
+                get_links=no_links,
+            )
+        ]
 
     def get_all_links(self) -> list[Any]:
         self.calls.append("get_all_links")

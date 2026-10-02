@@ -1,84 +1,65 @@
-from typing import Any
+"""Print the whole-graph ranking summary.
 
-from ...core.observability.logger import get_logger
+The measurements come from ``describe_graph`` so the CLI text, the analyze
+endpoint payload, and the comparison pair payload all report one set of
+numbers. Callers that already hold the payload use ``print_stats`` directly
+instead of collecting it twice.
+"""
 
-logger = get_logger(__name__)
-
-
-def _distribute(values: list[float], bins: int) -> dict[str, int]:
-    if not values:
-        return {}
-    mn, mx = min(values), max(values)
-    if mx == mn:
-        return {f"{mn:.3f}": len(values)}
-    step = (mx - mn) / bins
-    buckets: dict[str, int] = {}
-    for i in range(bins):
-        lo = mn + i * step
-        hi = lo + step
-        label = f"{lo:.3f}-{hi:.3f}"
-        if i == bins - 1:
-            buckets[label] = sum(1 for v in values if lo <= v <= hi)
-        else:
-            buckets[label] = sum(1 for v in values if lo <= v < hi)
-    return buckets
+from ...domain.comparison.algorithm.view import (
+    describe_graph,
+    Distribution,
+    GraphStats,
+    RankedExtremes,
+)
+from ...domain.ports.graph import CrystalGraphPort
 
 
-def run_stats(graph: Any) -> int:
-    images = [node.data for node in graph.get_all_nodes()]
-    comparisons = [link.data for link in graph.get_all_links()]
+def _print_distribution(title: str, distribution: Distribution) -> None:
+    print(f"{title}:")
+    print(
+        f"  min={distribution['min']:.4f}  max={distribution['max']:.4f}  "
+        f"mean={distribution['mean']:.4f}"
+    )
+    for bucket in distribution["buckets"]:
+        print(f"  {bucket['lower']:.3f}-{bucket['upper']:.3f}: {bucket['count']}")
 
-    scores = [img.get("score", 0) for img in images]
-    mus = [img.get("rating_mu", 0) for img in images]
-    sigmas = [img.get("rating_sigma", 0) for img in images]
-    comp_counts = [img.get("comparison_count", 0) for img in images]
 
-    score_buckets = _distribute(scores, 10)
-    mu_buckets = _distribute(mus, 10)
-    sigma_buckets = _distribute(sigmas, 10)
-    comp_buckets = _distribute(comp_counts, 10)
+def _print_extremes(title: str, rows: list[RankedExtremes]) -> None:
+    print(f"{title}:")
+    for row in rows:
+        print(
+            f"  {row['filename']:<40s} score={row['score']:.4f}  "
+            f"mu={row['rating_mu']:.2f}  sigma={row['rating_sigma']:.2f}  "
+            f"comps={row['comparison_count']}"
+        )
 
-    top = sorted(images, key=lambda x: x.get("score", 0), reverse=True)[:10]
-    bottom = sorted(images, key=lambda x: x.get("score", 0))[:10]
 
+def print_stats(stats: GraphStats) -> None:
     print("=" * 60)
     print("Image Scoring System — Stats")
     print("=" * 60)
-    print(f"Total images:       {len(images)}")
-    print(f"Total comparisons:  {len(comparisons)}")
-    print(f"Score range:        {min(scores):.4f} – {max(scores):.4f}")
-    print(f"Mean score:         {sum(scores) / len(scores) if scores else 0:.4f}")
+    print(f"Total images:       {stats['total']}")
+    print(f"Ranked images:      {stats['ranked']}")
+    print(f"Unranked images:    {stats['unranked']}")
+    print(
+        f"Sigma threshold:    {stats['sigma_threshold']:.2f} "
+        f"({stats['sigma_below_threshold']} ready, {stats['sigma_above_threshold']} above)"
+    )
     print()
-    print("Score distribution:")
-    for bucket, count in sorted(score_buckets.items()):
-        print(f"  {bucket}: {count}")
+    _print_distribution("Score distribution", stats["score"])
     print()
-    print("Rating mu distribution:")
-    for bucket, count in sorted(mu_buckets.items()):
-        print(f"  {bucket}: {count}")
+    _print_distribution("Rating mu distribution", stats["rating_mu"])
     print()
-    print("Rating sigma distribution:")
-    for bucket, count in sorted(sigma_buckets.items()):
-        print(f"  {bucket}: {count}")
+    _print_distribution("Rating sigma distribution", stats["rating_sigma"])
     print()
-    print("Comparison count distribution:")
-    for bucket, count in sorted(comp_buckets.items()):
-        print(f"  {bucket}: {count}")
+    _print_distribution("Comparison count distribution", stats["comparison_count"])
     print()
-    print("Top 10 images:")
-    for img in top:
-        print(
-            f"  {img['filename']:<40s} score={img.get('score', 0):.4f}  "
-            f"mu={img.get('rating_mu', 0):.2f}  sigma={img.get('rating_sigma', 0):.2f}  "
-            f"comps={img.get('comparison_count', 0)}"
-        )
+    _print_extremes("Top 10 images", stats["top"])
     print()
-    print("Bottom 10 images:")
-    for img in bottom:
-        print(
-            f"  {img['filename']:<40s} score={img.get('score', 0):.4f}  "
-            f"mu={img.get('rating_mu', 0):.2f}  sigma={img.get('rating_sigma', 0):.2f}  "
-            f"comps={img.get('comparison_count', 0)}"
-        )
+    _print_extremes("Bottom 10 images", stats["bottom"])
 
+
+def run_stats(graph: CrystalGraphPort) -> int:
+    print_stats(describe_graph(graph))
     return 0
