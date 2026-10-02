@@ -219,3 +219,8 @@ AI_jobs/
 
 # Downloaded MediaPipe task models
 models/mediapipe/
+
+# The packaging template's `build/` rule matches at any depth and swallowed the
+# build frontend section, leaving it unversioned while the index listed it.
+!adapters/frontend/build/
+!adapters/frontend/build/**

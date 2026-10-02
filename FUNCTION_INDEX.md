@@ -279,28 +279,22 @@ are implementation details.
 | `adapters/frontend/analyze/analyze.css` | Analysis page styles. |
 | `adapters/frontend/analyze/analyze.html` | Analysis page markup. |
 | `adapters/frontend/analyze/analyze.js` | Analysis page behavior. |
-| `adapters/frontend/analyze/__init__.py` | Analysis frontend package marker. |
 | `adapters/frontend/build/build.css` | Build page styles. |
 | `adapters/frontend/build/build.html` | Build page markup. |
 | `adapters/frontend/build/build.js` | Build page behavior. |
-| `adapters/frontend/build/__init__.py` | Build frontend package marker. |
 | `adapters/frontend/comparison/compare.css` | Comparison page styles. |
 | `adapters/frontend/comparison/compare.html` | Comparison page markup. |
 | `adapters/frontend/comparison/compare.js` | Comparison page controller. |
 | `adapters/frontend/comparison/compare_queue.js` | Comparison queue behavior. |
 | `adapters/frontend/comparison/compare_view.js` | Comparison view rendering. |
-| `adapters/frontend/comparison/__init__.py` | Comparison frontend package marker. |
 | `adapters/frontend/database/database.css` | Database page styles. |
 | `adapters/frontend/database/database.html` | Database page markup. |
 | `adapters/frontend/database/database.js` | Database page behavior. |
-| `adapters/frontend/database/__init__.py` | Database frontend package marker. |
 | `adapters/frontend/gallery/gallery.css` | Gallery page styles. |
 | `adapters/frontend/gallery/gallery.html` | Gallery page markup. |
 | `adapters/frontend/gallery/gallery.js` | Gallery page behavior. |
-| `adapters/frontend/gallery/__init__.py` | Gallery frontend package marker. |
 | `adapters/frontend/maps/maps.css` | Map page styles. |
 | `adapters/frontend/maps/maps.html` | Map page markup. |
-| `adapters/frontend/maps/__init__.py` | Maps frontend package marker. |
 | `adapters/frontend/maps/graph_map/actions.js` | Graph-map actions. |
 | `adapters/frontend/maps/graph_map/backend.js` | Graph-map data access. |
 | `adapters/frontend/maps/graph_map/constants.js` | Graph-map constants. |
@@ -317,12 +311,9 @@ are implementation details.
 | `adapters/frontend/maps/graph_map/tooltip.js` | Graph-map tooltip rendering. |
 | `adapters/frontend/maps/graph_map/utils.js` | Graph-map utilities. |
 | `adapters/frontend/maps/graph_map/webgl_physics.js` | WebGL graph physics. |
-| `adapters/frontend/maps/graph_map/__init__.py` | Graph-map package marker. |
 | `adapters/frontend/training/training.css` | Training page styles. |
 | `adapters/frontend/training/training.html` | Training page markup. |
 | `adapters/frontend/training/training.js` | Training page behavior. |
-| `adapters/frontend/training/__init__.py` | Training frontend package marker. |
-| `adapters/frontend/shared/__init__.py` | Shared frontend package marker. |
 | `adapters/frontend/shared/css/index.css` | Shared frontend styles. |
 | `adapters/frontend/shared/html/index.html` | Shared frontend shell markup. |
 | `adapters/frontend/shared/js/api.js` | Shared API client. |

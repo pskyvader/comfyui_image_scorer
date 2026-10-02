@@ -92,9 +92,15 @@ for these files; its virtual environment is used only to run validation.
   - **How:** delete `domain/database/__init__.py`, `domain/graph/_init.py`, `domain/graph/_/_init__.py`; update `FUNCTION_INDEX.md` to remove their entries. *(Status: complete - all three paths are gone from the live tree, grep finds no imports of them, and no FUNCTION_INDEX.md entry references them.)*
 
 - [x] **P-13 — Remove empty frontend adapter packages.**
-  - **Why:** `adapters/maps/`, `gallery/`, `comparison/`, `build/`, `analyze/`, `database/`, `training/` contain only empty `__init__.py` files; they are not imported by any Python code (server serves static folders directly). (`adapters/maps2/` and `adapters/maps3/` were already removed when the maps2/maps3 frontends were consolidated into `adapters/frontend/maps/`.)
-  - **Rules/structure:** follow dead-code removal and minimal-dependency rules in `AGENTS.md`.
-  - **How:** delete the seven empty adapter directories; keep `adapters/frontend/` static assets and `adapters/server/endpoints/maps.py` (the only registered maps API). Update `FUNCTION_INDEX.md`.
+   - **Why:** `adapters/maps/`, `gallery/`, `comparison/`, `build/`, `analyze/`, `database/`, `training/` contain only empty `__init__.py` files; they are not imported by any Python code (server serves static folders directly). (`adapters/maps2/` and `adapters/maps3/` were already removed when the maps2/maps3 frontends were consolidated into `adapters/frontend/maps/`.)
+   - **Rules/structure:** follow dead-code removal and minimal-dependency rules in `AGENTS.md`.
+   - **How:** delete the seven empty adapter directories; keep `adapters/frontend/` static assets and `adapters/server/endpoints/maps.py` (the only registered maps API). Update `FUNCTION_INDEX.md`. *(Reopened: the task was closed while all nine `adapters/frontend/*/__init__.py` files were still present and still listed in `FUNCTION_INDEX.md` as package markers. `AGENTS.md` forbids creating empty init files, so those are dead rather than load-bearing. Status: complete — all nine are deleted, the stale `__pycache__` directories they produced are removed, grep confirms no Python imports `adapters.frontend`, `tests/test_architecture.py` does not reference them, and the nine `FUNCTION_INDEX.md` entries are gone.)*
+
+- [x] **P-33 — Track the build frontend section.**
+   - **Why:** the packaging template's `build/` rule in `.gitignore` matches at any depth, so it silently swallowed `adapters/frontend/build/`. The build page's markup, styles, and controller were unversioned while `FUNCTION_INDEX.md` listed them as live inventory, meaning a fresh clone served a broken Build section.
+   - **Rules/structure:** follow the file-layout preservation and live-inventory rules in `AGENTS.md`; the tracked tree must match what the index describes.
+   - **How:** add a trailing negation for `adapters/frontend/build/` after the `build/` rule, then add `build.html`, `build.css`, and `build.js` to the index. *(Status: complete — the negation is in place, `git status --ignored` now reports only `.pytest_cache/` and `output/` as ignored, and the three build frontend files are tracked.)*
+
 
 - [x] **P-14 — Run architecture boundary tests.**
   - **Why:** `AGENTS.md` validation step 4 requires `tests/test_architecture.py` (layer-import, database-boundary, proxy-construction gates) to pass; no explicit plan task covers this.
