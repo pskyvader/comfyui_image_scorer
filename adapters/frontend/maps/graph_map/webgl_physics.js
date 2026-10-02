@@ -391,22 +391,6 @@ void main() {
 }`;
     }
 
-    updateNodes(nodes) {
-        const gl = this.gl;
-        const data = new Float32Array(this._stateTexSize * 4);
-        for (let i = 0; i < nodes.length && i < this._nodeCount; i++) {
-            const n = nodes[i];
-            data[i * 4] = n.x || 0;
-            data[i * 4 + 1] = n.y || 0;
-            data[i * 4 + 2] = n.vx || 0;
-            data[i * 4 + 3] = n.vy || 0;
-        }
-        gl.bindTexture(gl.TEXTURE_2D, this._texState[this._ping]);
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this._stateTexW, this._stateTexH, gl.RGBA, gl.FLOAT, data);
-        gl.bindTexture(gl.TEXTURE_2D, this._texState[1 - this._ping]);
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this._stateTexW, this._stateTexH, gl.RGBA, gl.FLOAT, data);
-    }
-
     tick(alpha, cfg, activeForces, mapHalf, dampingEnabled) {
         const gl = this.gl;
         if (!this._initialized || !this._prog) {

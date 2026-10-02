@@ -4,6 +4,7 @@ globalThis.ThreeGraphRenderer = class {
     constructor({ container }) {
         this.container = container;
         this._ready = false;
+        this._errorElement = false;
 
         this.nodesData = [];
         this.linksData = [];
@@ -37,7 +38,9 @@ globalThis.ThreeGraphRenderer = class {
             errorElement.className = "webgl-error";
             errorElement.textContent = "WebGL is required for graph rendering.";
             container.appendChild(errorElement);
-            this._errorElement = errorElement;
+            // Flag only. The element stays in the DOM to show the message and is
+            // never queried again, so retaining a reference bought nothing.
+            this._errorElement = true;
             return;
         }
 

@@ -285,21 +285,20 @@ are implementation details.
 |---|---|
 | `adapters/frontend/analyze/analyze.css` | Analysis page styles. |
 | `adapters/frontend/analyze/analyze.html` | Analysis page markup. |
-| `adapters/frontend/analyze/analyze.js` | Analysis page behavior. |
+| `adapters/frontend/analyze/analyze.js` | Analysis page behavior. Extends `SectionView`. Renders the graph structure cards from the stats payload. |
 | `adapters/frontend/build/build.css` | Build page styles. |
 | `adapters/frontend/build/build.html` | Build page markup. |
-| `adapters/frontend/build/build.js` | Build page behavior. |
+| `adapters/frontend/build/build.js` | Build page behavior. Extends `SectionView` and adds the prepare-limit buttons. |
 | `adapters/frontend/comparison/compare.css` | Comparison page styles. |
 | `adapters/frontend/comparison/compare.html` | Comparison page markup. |
 | `adapters/frontend/comparison/compare.js` | Comparison page controller. |
 | `adapters/frontend/comparison/compare_queue.js` | Comparison queue behavior. |
 | `adapters/frontend/comparison/compare_view.js` | Comparison view rendering. |
-| `adapters/frontend/database/database.css` | Database page styles. |
 | `adapters/frontend/database/database.html` | Database page markup. |
-| `adapters/frontend/database/database.js` | Database page behavior. |
+| `adapters/frontend/database/database.js` | Database page behavior. Extends `SectionView`. |
 | `adapters/frontend/gallery/gallery.css` | Gallery page styles. |
 | `adapters/frontend/gallery/gallery.html` | Gallery page markup. |
-| `adapters/frontend/gallery/gallery.js` | Gallery page behavior. |
+| `adapters/frontend/gallery/gallery.js` | Gallery page behavior. Reports its selection to the router, which renders the shared Compare Selected control. |
 | `adapters/frontend/maps/maps.css` | Map page styles. |
 | `adapters/frontend/maps/maps.html` | Map page markup. |
 | `adapters/frontend/maps/graph_map/actions.js` | Graph-map actions. |
@@ -309,23 +308,23 @@ are implementation details.
 | `adapters/frontend/maps/graph_map/dom_cache.js` | Graph-map DOM cache. |
 | `adapters/frontend/maps/graph_map/events.js` | Graph-map event handling. |
 | `adapters/frontend/maps/graph_map/filters.js` | Graph-map filters. |
-| `adapters/frontend/maps/graph_map/hud.js` | Graph-map heads-up display. |
+| `adapters/frontend/maps/graph_map/hud.js` | Graph-map heads-up display. Reports the node selection to the router. |
 | `adapters/frontend/maps/graph_map/interactions.js` | Graph-map interaction handling. |
 | `adapters/frontend/maps/graph_map/main.js` | Graph-map entry point. |
 | `adapters/frontend/maps/graph_map/persistence.js` | Graph-map view persistence. |
 | `adapters/frontend/maps/graph_map/physics.js` | Graph-map physics. |
-| `adapters/frontend/maps/graph_map/three_renderer.js` | Three.js graph renderer. |
+| `adapters/frontend/maps/graph_map/three_renderer.js` | Three.js graph renderer. `_errorElement` is a boolean flag; the WebGL failure notice is appended to the container and left there. |
 | `adapters/frontend/maps/graph_map/tooltip.js` | Graph-map tooltip rendering. |
 | `adapters/frontend/maps/graph_map/utils.js` | Graph-map utilities. |
 | `adapters/frontend/maps/graph_map/webgl_physics.js` | WebGL graph physics. |
-| `adapters/frontend/training/training.css` | Training page styles. |
 | `adapters/frontend/training/training.html` | Training page markup. |
-| `adapters/frontend/training/training.js` | Training page behavior. |
-| `adapters/frontend/shared/css/index.css` | Shared frontend styles. |
-| `adapters/frontend/shared/html/index.html` | Shared frontend shell markup. |
+| `adapters/frontend/training/training.js` | Training page behavior. Extends `SectionView`. |
+| `adapters/frontend/shared/css/index.css` | Shared frontend styles. Owns the section action and log chrome (`.section-title`, `.action-btn` and its `primary`/`danger` variants, `.log-area`, `.action-row`, `.action-desc`) scoped to the analyze, build, database and training containers, plus the range sliders used by the gallery and map controls. |
+| `adapters/frontend/shared/html/index.html` | Shared frontend shell markup. Hosts the Compare Selected control, which the router shows only for the gallery and chain-map sections. |
 | `adapters/frontend/shared/js/api.js` | Shared API client. |
-| `adapters/frontend/shared/js/index.js` | Shared frontend bootstrap. |
-| `adapters/frontend/shared/js/logger.js` | Shared browser logging. |
+| `adapters/frontend/shared/js/index.js` | Shared frontend bootstrap and SPA router. Owns Compare Selected visibility and the selected count, and delegates the control's click to the current section instance's `compareSelected`. |
+| `adapters/frontend/shared/js/logger.js` | Shared browser logging. Messages take optional detail arguments rendered into the log target and passed to the console; there is no timing argument. |
+| `adapters/frontend/shared/js/section_view.js` | `SectionView` base class for the analyze, build, database and training views. Owns the container lookup, the scoped logger, the `data-action` and clear-log wiring, and the log echo. Subclasses supply a container id and logger name and override `afterInit` or `bindActions`. |
 | `adapters/frontend/shared/js/utils.js` | Shared browser utilities. |
 
 ## Infrastructure

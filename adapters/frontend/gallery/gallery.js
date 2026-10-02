@@ -84,7 +84,6 @@ class GalleryView {
             historyLosses: document.getElementById("history-losses"),
             searchMode: document.getElementById("search-mode"),
             modalSelectBtn: document.getElementById("modal-select-btn"),
-            compareSelectedBtn: document.getElementById("compare-selected-btn"),
         };
     }
 
@@ -492,16 +491,7 @@ class GalleryView {
     updateSelectionUI() {
         const count = this.selectedImages.length;
 
-        // Update selected count in header button
-        const selectedCountEl = this.container?.querySelector("#selected-count");
-        if (selectedCountEl) {
-            selectedCountEl.textContent = count;
-        }
-
-        // Show/hide compare button in header
-        if (this.els.compareSelectedBtn) {
-            this.els.compareSelectedBtn.classList.toggle("hidden", count < 2);
-        }
+        router.setSelectedCount(count);
 
         // Update button text in modal
         if (this.els.modalSelectBtn) {

@@ -5,21 +5,25 @@ function formatNumber(value) {
     return STATS_FORMAT.format(Math.round(value * 10000) / 10000);
 }
 
-class AnalyzeView {
-    init(params) {
-        this.container = document.getElementById("analyze-container");
-        const logArea = this.container?.querySelector("#log-area");
-        this.logger = FrontendLogger.create("external_modules.analyze.frontend.analyze", {
-            target: () => logArea,
-        });
+function formatTimestamp(value) {
+    if (!value) return "-";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? "-" : parsed.toLocaleString();
+}
+
+class AnalyzeView extends SectionView {
+    constructor() {
+        super("analyze-container", "external_modules.analyze.frontend.analyze");
+    }
+
+    afterInit() {
         this.resultPanel = this.container?.querySelector("#result-panel");
         this.resultContent = this.container?.querySelector("#result-content");
-        this.bindActions();
         this.refreshStats();
     }
 
     destroy() {
-        this.container = null;
+        super.destroy();
         this.resultPanel = null;
         this.resultContent = null;
     }
@@ -37,18 +41,12 @@ class AnalyzeView {
     }
 
     bindActions() {
+        super.bindActions();
         const container = this.container;
         if (!container) return;
 
-        container.querySelectorAll("[data-action]").forEach(btn => {
-            btn.addEventListener("click", () => this.handleAction(btn.dataset.action));
-        });
-
         const refreshBtn = container.querySelector("#refresh-stats-btn");
         if (refreshBtn) refreshBtn.addEventListener("click", () => this.refreshStats());
-
-        const clearLogBtn = container.querySelector("#clear-log-btn");
-        if (clearLogBtn) clearLogBtn.addEventListener("click", () => this.logger.clear());
 
         const clearResultBtn = container.querySelector("#clear-result-btn");
         if (clearResultBtn) clearResultBtn.addEventListener("click", () => this.clearResult());
@@ -97,26 +95,12 @@ class AnalyzeView {
         if (!this.resultContent) return;
         this.resultContent.innerHTML = "";
         this._renderSummary(this.resultContent, stats);
+        this._renderStructure(this.resultContent, stats);
         this._renderCharts(this.resultContent, stats);
         this._renderTables(this.resultContent, stats);
     }
 
-    _renderSummary(root, stats) {
-        const readyPercent = stats.total ? ((stats.sigma_below_threshold || 0) / stats.total) * 100 : 0;
-        const cards = [
-            { label: "Images", value: formatNumber(stats.total) },
-            { label: "Ranked", value: formatNumber(stats.ranked) },
-            { label: "Unranked", value: formatNumber(stats.unranked) },
-            { label: "Mean score", value: formatNumber(stats.score?.mean) },
-            { label: "Ready (σ < thr)", value: formatNumber(stats.sigma_below_threshold) },
-            { label: "Ready share", value: `${readyPercent.toFixed(1)}%` },
-            { label: "Above threshold", value: formatNumber(stats.sigma_above_threshold) },
-            { label: "σ threshold", value: formatNumber(stats.sigma_threshold) },
-            { label: "Ready (wins+losses)", value: formatNumber(stats.ready_count) },
-            { label: "Single win", value: formatNumber(stats.single_win_count) },
-            { label: "Single loss", value: formatNumber(stats.single_loss_count) },
-        ];
-
+    _renderCardGrid(root, cards) {
         const grid = document.createElement("div");
         grid.className = "stat-grid";
         cards.forEach((card) => {
@@ -133,6 +117,40 @@ class AnalyzeView {
             grid.appendChild(box);
         });
         root.appendChild(grid);
+    }
+
+    _renderSummary(root, stats) {
+        const total = stats.total_nodes || 0;
+        const readyPercent = total ? ((stats.sigma_below_threshold || 0) / total) * 100 : 0;
+        const cards = [
+            { label: "Images", value: formatNumber(total) },
+            { label: "Ranked", value: formatNumber(stats.ranked) },
+            { label: "Unranked", value: formatNumber(stats.unranked) },
+            { label: "Mean score", value: formatNumber(stats.score?.mean) },
+            { label: "Ready (σ < thr)", value: formatNumber(stats.sigma_below_threshold) },
+            { label: "Ready share", value: `${readyPercent.toFixed(1)}%` },
+            { label: "Above threshold", value: formatNumber(stats.sigma_above_threshold) },
+            { label: "σ threshold", value: formatNumber(stats.sigma_threshold) },
+            { label: "Ready (wins+losses)", value: formatNumber(stats.ready_count) },
+            { label: "Single win", value: formatNumber(stats.single_win_count) },
+            { label: "Single loss", value: formatNumber(stats.single_loss_count) },
+        ];
+        this._renderCardGrid(root, cards);
+    }
+
+    _renderStructure(root, stats) {
+        const structure = stats.structure;
+        if (!structure) return;
+        const cards = [
+            { label: "Comparisons", value: formatNumber(structure.total_links) },
+            { label: "Components", value: formatNumber(structure.total_components) },
+            { label: "Chains", value: formatNumber(structure.total_chains) },
+            { label: "Longest chain", value: formatNumber(structure.longest_chain_depth) },
+            { label: "Top nodes", value: formatNumber(structure.top_nodes_count) },
+            { label: "Bottom nodes", value: formatNumber(structure.bottom_nodes_count) },
+            { label: "Graph built", value: formatTimestamp(structure.built_at) },
+        ];
+        this._renderCardGrid(root, cards);
     }
 
     _renderCharts(root, stats) {

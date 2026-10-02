@@ -126,11 +126,5 @@ globalThis.ChainMapUI.prototype._drawPerfChart = function () {
 };
 
 globalThis.ChainMapUI.prototype.updateSelectionUI = function () {
-    const c = this.selectedNodes.length;
-    if (this.selectedCountEl) {
-        this.selectedCountEl.textContent = c;
-    }
-    if (this.compareSelectedBtn) {
-        this.compareSelectedBtn.classList.toggle("hidden", c < 2);
-    }
+    router.setSelectedCount(this.selectedNodes.length);
 };

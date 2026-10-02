@@ -83,10 +83,6 @@ globalThis.ChainMapUI.prototype._listen = function () {
         };
     }
 
-    if (this.compareSelectedBtn) {
-        this.compareSelectedBtn.onclick = () => this.compareSelected();
-    }
-
     const tgl = (id, cb) => {
         const el = document.getElementById(id);
         if (el) {

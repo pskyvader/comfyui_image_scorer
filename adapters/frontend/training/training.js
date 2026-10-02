@@ -1,15 +1,6 @@
-class TrainingView {
-    init(params) {
-        this.container = document.getElementById("training-container");
-        const logArea = this.container?.querySelector("#log-area");
-        this.logger = FrontendLogger.create("external_modules.training.frontend.training", {
-            target: () => logArea,
-        });
-        this.bindActions();
-    }
-
-    destroy() {
-        this.container = null;
+class TrainingView extends SectionView {
+    constructor() {
+        super("training-container", "external_modules.training.frontend.training");
     }
 
     async _trainingTrain() {
@@ -18,23 +9,6 @@ class TrainingView {
 
     async _trainingHpo(body = {}) {
         return api._post("/training/hpo", body);
-    }
-
-    bindActions() {
-        const container = this.container;
-        if (!container) return;
-        container.querySelectorAll("[data-action]").forEach((btn) => {
-            btn.addEventListener("click", () => this.handleAction(btn.dataset.action));
-        });
-        const clearBtn = container.querySelector("#clear-log-btn");
-        if (clearBtn) {
-            clearBtn.addEventListener("click", () => this.logger.clear());
-        }
-    }
-
-    _renderResponse(res) {
-        (res.log || []).forEach((line) => this.logger.info(line));
-        this.logger.info(`Result: ${JSON.stringify(res.result)}`);
     }
 
     async handleAction(action) {

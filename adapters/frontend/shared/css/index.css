@@ -155,3 +155,92 @@ body {
 nav {
   position: relative;
 }
+
+/* Section action and log chrome. Analyze, build, database and training all
+   rendered these identically, so they are defined once here instead of being
+   copied into each section stylesheet. The selector is scoped to those four
+   containers so the gallery, comparison and map views stay unaffected, and
+   :is() keeps the specificity identical to the per-container ids it replaces. */
+:is(#analyze-container, #build-container, #database-container, #training-container) .section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin-bottom: 12px;
+  letter-spacing: 0.02em;
+}
+
+:is(#analyze-container, #build-container, #database-container, #training-container) .action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.15s ease;
+  cursor: pointer;
+  background: rgba(139, 92, 246, 0.12);
+  color: #c4b5fd;
+}
+
+:is(#analyze-container, #build-container, #database-container, #training-container) .action-btn:hover {
+  background: rgba(139, 92, 246, 0.25);
+  border-color: rgba(139, 92, 246, 0.3);
+}
+
+:is(#analyze-container, #build-container, #database-container, #training-container) .action-btn.primary {
+  background: rgba(59, 130, 246, 0.12);
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.15);
+}
+
+:is(#analyze-container, #build-container, #database-container, #training-container) .action-btn.primary:hover {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+:is(#analyze-container, #build-container, #database-container, #training-container) .action-btn.danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+:is(#analyze-container, #build-container, #database-container, #training-container) .action-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* The height lives here rather than on an inline style per section; database
+   previously declared none and relied on the inline copy. */
+:is(#analyze-container, #build-container, #database-container, #training-container) .log-area {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 12px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: #94a3b8;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  max-height: 300px;
+}
+
+:is(#analyze-container, #build-container, #database-container, #training-container) .log-area > div {
+  padding: 1px 0;
+}
+
+:is(#analyze-container, #build-container, #training-container) .action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+
+:is(#analyze-container, #build-container, #training-container) .action-desc {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+}

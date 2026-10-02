@@ -1,15 +1,6 @@
-class DatabaseView {
-    init(params) {
-        this.container = document.getElementById("database-container");
-        const logArea = this.container?.querySelector("#log-area");
-        this.logger = FrontendLogger.create("external_modules.database.frontend.database", {
-            target: () => logArea,
-        });
-        this.bindActions();
-    }
-
-    destroy() {
-        this.container = null;
+class DatabaseView extends SectionView {
+    constructor() {
+        super("database-container", "external_modules.database.frontend.database");
     }
 
     async _dbAction(action, body) {
@@ -34,23 +25,6 @@ class DatabaseView {
         const path = actions[action];
         if (!path) throw new Error(`Unknown action: ${action}`);
         return api._post(`/files/${path}`, body);
-    }
-
-    bindActions() {
-        const container = this.container;
-        if (!container) return;
-        container.querySelectorAll("[data-action]").forEach((btn) => {
-            btn.addEventListener("click", () => this.handleAction(btn.dataset.action));
-        });
-        const clearBtn = container.querySelector("#clear-log-btn");
-        if (clearBtn) {
-            clearBtn.addEventListener("click", () => this.logger.clear());
-        }
-    }
-
-    _renderResponse(res) {
-        (res.log || []).forEach((line) => this.logger.info(line));
-        this.logger.info(`Result: ${JSON.stringify(res.result)}`);
     }
 
     async handleAction(action) {

@@ -202,7 +202,7 @@ class CompareMode {
         }
 
         btn.style.display = "block";
-        // compareLogger.info("Updating undo UI for submission queue:", null, this._queue.submissionQueue);
+        // compareLogger.info("Updating undo UI for submission queue:", this._queue.submissionQueue);
 
         const last = this._queue.peekLast();
         const isLeftWinner = last.winnerFilename === last.filenameA;
@@ -348,7 +348,7 @@ class CompareMode {
         this._config.seed_target_comparisons = serverConfig.seed_target_comparisons;
         this._config.insertion_target_comparisons = serverConfig.insertion_target_comparisons;
         this._config.sigma_threshold = serverConfig.sigma_threshold;
-        compareLogger.info("Ranking config loaded:", null, this._config);
+        compareLogger.info("Ranking config loaded:", this._config);
 
         // Push phase metadata into CompareView with config values for descriptions
         if (phases) {
@@ -454,10 +454,10 @@ class CompareMode {
             this.showLoading(false);
             return;
         }
-        // compareLogger.info("Loaded pair:", null, pair, { cached: cached !== null });
-        // compareLogger.info("Loaded pair top-level keys:", null, pair ? Object.keys(pair) : null);
+        // compareLogger.info("Loaded pair:", pair, { cached: cached !== null });
+        // compareLogger.info("Loaded pair top-level keys:", pair ? Object.keys(pair) : null);
         if (pair && !pair.pair) {
-            compareLogger.error("Backend response missing `pair` envelope; has keys:", null, Object.keys(pair));
+            compareLogger.error("Backend response missing `pair` envelope; has keys:", Object.keys(pair));
         }
         this.currentPair = { ...pair, _preloadedLeft: cached?.leftImg, _preloadedRight: cached?.rightImg };
         await this.renderPair();
@@ -525,7 +525,7 @@ class CompareMode {
     // ── Vote submission ──────────────────────────────────────────────
 
     async submitVote(winner) {
-        // compareLogger.info("Submitting vote for:", null, winner, this.currentPair);
+        // compareLogger.info("Submitting vote for:", winner, this.currentPair);
         const winnerFilename = winner === "left" ? this.currentPair.left.filename : this.currentPair.right.filename;
         const filenameA = this.currentPair.left.filename;
         const filenameB = this.currentPair.right.filename;

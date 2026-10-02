@@ -7,7 +7,9 @@
     <title>Image Ranking System</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- D3.js (for Chain Map) + Three.js (WebGL rendering) -->
+    <!-- D3.js (for Chain Map) + Three.js (WebGL rendering). The two Three.js URLs
+     must stay on the same version: the build is published as r128 and the
+     matching examples bundle as 0.128.0. -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -28,9 +30,9 @@
     <link rel="stylesheet" href="/static/comparison/compare.css">
     <link rel="stylesheet" href="/static/gallery/gallery.css">
     <link rel="stylesheet" href="/static/maps/maps.css">
-    <link rel="stylesheet" href="/static/database/database.css">
+    
     <link rel="stylesheet" href="/static/build/build.css">
-    <link rel="stylesheet" href="/static/training/training.css">
+    
     <link rel="stylesheet" href="/static/analyze/analyze.css">
 </head>
 
@@ -60,6 +62,18 @@
         </div>
     </nav>
 
+    <!-- Compare Selected. Shared by the gallery and chain-map sections, which
+         both had their own copy of this control with the same element ids. The
+         router shows it only for those two sections and delegates the click to
+         whichever instance is current. -->
+    <div id="compare-selected-wrap" class="hidden container mx-auto px-2 md:px-4 pb-2 flex justify-center">
+        <button id="compare-selected-btn"
+            onclick="router.compareSelected()"
+            class="hidden px-6 py-2 bg-pink-600 hover:bg-pink-500 text-white rounded-lg transition text-sm font-bold shadow-lg flex items-center gap-2 animate-pulse">
+            Compare Selected (<span id="selected-count">0</span>)
+        </button>
+    </div>
+
     <!-- Main Content Area -->
     <main id="app-content" class="flex-grow container mx-auto px-2 py-4 md:px-4 md:py-8">
         <!-- Section content injected by SPA router -->
@@ -71,6 +85,7 @@
     <script src="/js/logger.js"></script>
     <script src="/js/api.js"></script>
     <script src="/js/utils.js"></script>
+<script src="/js/section_view.js"></script>
 
     <!-- Section Logic -->
     <script src="/static/comparison/compare_queue.js"></script>

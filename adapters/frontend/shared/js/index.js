@@ -1,5 +1,8 @@
 const routerLogger = FrontendLogger.create("external_modules.server.frontend.js.index");
 
+/* Sections that offer the shared Compare Selected control. */
+const COMPARE_SELECTED_SECTIONS = new Set(["gallery", "chains"]);
+
 const router = {
     routes: {
         compare: {
@@ -34,6 +37,43 @@ const router = {
 
     _currentInstance: null,
     _currentSection: null,
+
+    /* Compare Selected lives in the shell rather than in each section, so the
+       router owns its visibility and delegates the click to the current
+       instance. Sections report their selection through setSelectedCount. */
+    setSelectedCount(count) {
+        this._selectedCount = count;
+        const btn = document.getElementById("compare-selected-btn");
+        const label = document.getElementById("selected-count");
+        if (label) {
+            label.textContent = count;
+        }
+        if (btn) {
+            btn.classList.toggle("hidden", count < 2);
+        }
+    },
+
+    _updateCompareSelectedVisibility() {
+        const wrap = document.getElementById("compare-selected-wrap");
+        if (!wrap) {
+            return;
+        }
+        const active = COMPARE_SELECTED_SECTIONS.has(this._currentSection);
+        wrap.classList.toggle("hidden", !active);
+        if (active) {
+            this.setSelectedCount(this._selectedCount ?? 0);
+        }
+    },
+
+    compareSelected() {
+        const instance = this._currentInstance;
+        if (instance && typeof instance.compareSelected === "function") {
+            instance.compareSelected();
+        } else {
+            routerLogger.warn("Compare Selected is unavailable in this section");
+        }
+    },
+
     async init() {
         window.addEventListener("hashchange", () => this.handleRoute());
 
@@ -118,6 +158,7 @@ const router = {
         }
         this._currentInstance = instance;
         this._currentSection = sectionName;
+        this._updateCompareSelectedVisibility();
     },
 
     updateNavUI(routeName) {

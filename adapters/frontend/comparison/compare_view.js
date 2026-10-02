@@ -307,7 +307,7 @@ const CompareView = (() => {
     }
 
     function render(pair, left, right, elements) {
-        // viewLogger.info("render payload:", null, {
+        // viewLogger.info("render payload:", {
         //     pairKeys: pair ? Object.keys(pair) : null,
         //     pairPhase: pair ? pair.phase : undefined,
         //     leftKeys: left ? Object.keys(left) : null,

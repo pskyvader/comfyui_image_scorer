@@ -1,21 +1,19 @@
-class BuildView {
-    init(params) {
-        this.container = document.getElementById("build-container");
-        const logArea = this.container?.querySelector("#log-area");
-        this.logger = FrontendLogger.create("external_modules.build.frontend.build", {
-            target: () => logArea,
-        });
+class BuildView extends SectionView {
+    constructor() {
+        super("build-container", "external_modules.build.frontend.build");
+    }
+
+    afterInit() {
         this.limitDisplay = this.container?.querySelector("#prepare-limit-display");
         this.batchToggle = this.container?.querySelector("#batch-toggle");
         this.currentLimit = 100;
         if (this.limitDisplay) {
             this.limitDisplay.textContent = `Current: ${this.currentLimit}`;
         }
-        this.bindActions();
     }
 
     destroy() {
-        this.container = null;
+        super.destroy();
         this.limitDisplay = null;
         this.batchToggle = null;
     }
@@ -33,15 +31,11 @@ class BuildView {
     }
 
     bindActions() {
+        super.bindActions();
         const container = this.container;
         if (!container) {
             return;
         }
-
-        container.querySelectorAll("[data-action]")
-            .forEach((btn) => {
-                btn.addEventListener("click", () => this.handleAction(btn.dataset.action));
-            });
 
         container.querySelectorAll("[data-prepare-limit]")
             .forEach((btn) => {
@@ -52,16 +46,6 @@ class BuildView {
                     }
                 });
             });
-
-        const clearBtn = container.querySelector("#clear-log-btn");
-        if (clearBtn) {
-            clearBtn.addEventListener("click", () => this.logger.clear());
-        }
-    }
-
-    _renderResponse(res) {
-        (res.log || []).forEach((line) => this.logger.info(line));
-        this.logger.info(`Result: ${JSON.stringify(res.result)}`);
     }
 
     async handleAction(action) {

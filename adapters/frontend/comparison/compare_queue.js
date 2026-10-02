@@ -139,10 +139,6 @@ class QueueManager {
         this.onDrained = () => { };
     }
 
-    get pendingCount() {
-        return this.submissionQueue.length + this.outgoingQueue.length;
-    }
-
     enqueue(entry) {
         this.submissionQueue.push({
             ...entry,
@@ -286,7 +282,7 @@ class PrefetchManager {
 
     start() {
         if (this._prefetching || this._cache.length >= this._targetSize) {
-            compareQueueLogger.debug("Prefetch skipped", null, {
+            compareQueueLogger.debug("Prefetch skipped", {
                 prefetching: this._prefetching,
                 cached: this._cache.length,
                 target: this._targetSize,
@@ -295,10 +291,6 @@ class PrefetchManager {
         }
         this._prefetching = true;
         this._loop();
-    }
-
-    stop() {
-        this._prefetching = false;
     }
 
     async _loop() {

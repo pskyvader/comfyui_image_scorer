@@ -4,24 +4,24 @@ class ScopedFrontendLogger {
         this.options = { ...options };
     }
 
-    debug(message, startTimer = null, ...details) {
-        FrontendLogger.log(this.sourceName, "debug", message, startTimer, this.options, details);
+    debug(message, ...details) {
+        FrontendLogger.log(this.sourceName, "debug", message, this.options, details);
     }
 
-    info(message, startTimer = null, ...details) {
-        FrontendLogger.log(this.sourceName, "info", message, startTimer, this.options, details);
+    info(message, ...details) {
+        FrontendLogger.log(this.sourceName, "info", message, this.options, details);
     }
 
-    warn(message, startTimer = null, ...details) {
-        FrontendLogger.log(this.sourceName, "warn", message, startTimer, this.options, details);
+    warn(message, ...details) {
+        FrontendLogger.log(this.sourceName, "warn", message, this.options, details);
     }
 
-    error(message, startTimer = null, ...details) {
-        FrontendLogger.log(this.sourceName, "error", message, startTimer, this.options, details);
+    error(message, ...details) {
+        FrontendLogger.log(this.sourceName, "error", message, this.options, details);
     }
 
-    success(message, startTimer = null, ...details) {
-        FrontendLogger.log(this.sourceName, "info", message, startTimer, this.options, details);
+    success(message, ...details) {
+        FrontendLogger.log(this.sourceName, "info", message, this.options, details);
         Utils.showToast(message, "success");
     }
 
@@ -42,31 +42,18 @@ class FrontendLogger {
         return new ScopedFrontendLogger(sourceName, options);
     }
 
-    static log(sourceName, level, message, startTimer = null, options = {}, details = []) {
-        const renderedMessage = this.formatMessage(message, startTimer);
+    static log(sourceName, level, message, options = {}, details = []) {
         const targetMessage = details.length > 0
-            ? `${renderedMessage} ${details.map((detail) => this.serializeDetail(detail)).join(" ")}`
-            : renderedMessage;
-        this.writeConsole(sourceName, level, renderedMessage, details);
+            ? `${message} ${details.map((detail) => this.serializeDetail(detail)).join(" ")}`
+            : message;
+        this.writeConsole(sourceName, level, message, details);
         this.writeTarget(sourceName, level, targetMessage, options);
 
         if (level === "error") {
-            Utils.showToast(renderedMessage, "error");
+            Utils.showToast(message, "error");
         } else if (level === "warn" || level === "info") {
-            Utils.showToast(renderedMessage, "info");
+            Utils.showToast(message, "info");
         }
-    }
-
-    static formatMessage(message, startTimer) {
-        let renderedMessage = message;
-        if (typeof startTimer === "number") {
-            const now = typeof performance !== "undefined" && typeof performance.now === "function"
-                ? performance.now()
-                : Date.now();
-            renderedMessage = `${message} (${((now - startTimer) / 1000).toFixed(4)}s)`;
-        }
-
-        return renderedMessage;
     }
 
     static serializeDetail(detail) {
