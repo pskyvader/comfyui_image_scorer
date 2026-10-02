@@ -128,31 +128,6 @@ def get_image_info(filename: str):
     return result
 
 
-@gallery_bp.route("/search", methods=["GET"])
-def search_images():
-    _start = time.perf_counter()
-    query = request.args.get("query", "").lower()
-    score_min = request.args.get("score_min", 0.0, type=float)
-    score_max = request.args.get("score_max", 1.0, type=float)
-
-    results: list[dict[str, Any]] = []
-    for node in get_server_deps().graph.get_all_nodes():
-        if query and query not in node.filename.lower():
-            continue
-        if not (score_min <= node.score <= score_max):
-            continue
-        results.append(
-            {
-                "filename": node.filename,
-                "score": round(node.score, 3),
-                "file": f"{node.filename}?score={round(node.score, 3)}",
-                "comparison_count": node.comparison_count,
-            }
-        )
-    result = jsonify({"results": results, "count": len(results)})
-    return result
-
-
 @gallery_bp.route("/history/<path:filename>", methods=["GET"])
 def get_image_history(filename: str):
     deps = get_server_deps()

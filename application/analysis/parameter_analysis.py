@@ -12,13 +12,9 @@ from pathlib import Path
 from typing import Any
 from ...core.io.serialization import load_single_jsonl
 from ...core.observability.logger import get_logger, ModuleLogger
-from ...core.filesystem.paths import vectors_file, text_data_file
+from ...core.filesystem.paths import analysis_dir, vectors_file, text_data_file
 
 logger: ModuleLogger = get_logger(__name__)
-
-SKLEARN_AVAILABLE = True
-
-MATPLOTLIB_AVAILABLE = False
 
 
 class ParameterAnalyzer:
@@ -26,7 +22,7 @@ class ParameterAnalyzer:
         self,
         vectors_data: list[dict[str, Any]],
         text_data: list[dict[str, Any]],
-        output_dir: str = "output/analysis",
+        output_dir: str = analysis_dir,
     ):
         self.vectors = vectors_data
         self.text_data = text_data

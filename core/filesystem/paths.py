@@ -6,6 +6,7 @@ root: Path = Path(__file__).parents[2]
 # config_dir: str = os.path.join(root, "config")
 output_dir: str = os.path.join(root, "output")
 maps_dir: str = os.path.join(output_dir, "maps")
+analysis_dir: str = os.path.join(output_dir, "analysis")
 cache_file: str = os.path.join(output_dir, "cache.db")
 
 

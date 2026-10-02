@@ -7,7 +7,6 @@ Each cell contains scores for records that have both parameters.
 """
 
 from collections import defaultdict
-import numpy as np
 from tqdm import tqdm
 import polars as pl
 
@@ -226,9 +225,9 @@ class MatrixAnalyzer:
                 self.cell_stats[(p2, p1)] = stats
         return self.cell_stats
 
-    def export_to_json(self, output_path: str) -> None:
+    def export_to_jsonl(self, output_path: str) -> None:
         export_data_list: list[dict[str, object]] = []
-        with tqdm(total=len(self.cell_stats), desc="Exporting to JSON", unit=" cells", delay=3.0) as pbar:
+        with tqdm(total=len(self.cell_stats), desc="Exporting to JSONL", unit=" cells", delay=3.0) as pbar:
             for (p1_id, p2_id), stats in self.cell_stats.items():
                 if p1_id > p2_id:
                     pbar.update(1)
@@ -239,28 +238,3 @@ class MatrixAnalyzer:
                 pbar.update(1)
         write_single_jsonl(output_path, export_data_list)
         logger.info("Exported %d cell statistics to %s", len(export_data_list), output_path)
-
-    def print_top_correlations(self, top_n: int = 20) -> None:
-        logger.info("\nTop %d strongest parameter correlations (by mean score):", top_n)
-        logger.info("=" * 80)
-        sorted_cells = sorted(self.cell_stats.items(), key=lambda x: x[1]["mean"], reverse=True)[:top_n]
-        for (p1_id, p2_id), stats in sorted_cells:
-            p1_param = self.param_list[p1_id] if p1_id < len(self.param_list) else str(p1_id)
-            p2_param = self.param_list[p2_id] if p2_id < len(self.param_list) else str(p2_id)
-            logger.info("%-40s + %-40s", p1_param, p2_param)
-            logger.info("  mean: %.2f | std: %.2f | count: %d", stats["mean"], stats["std"], stats["count"])
-
-    def get_matrix_size(self) -> tuple[int, int]:
-        return (len(self.param_list), len(self.param_list))
-
-    def get_matrix_summary(self) -> dict[str, object]:
-        all_means = [stats["mean"] for stats in self.cell_stats.values()]
-        all_counts = [stats["count"] for stats in self.cell_stats.values()]
-        return {
-            "total_parameters": len(self.param_list),
-            "matrix_cells": len(self.cell_stats),
-            "total_score_entries": sum(all_counts),
-            "mean_of_means": float(np.mean(all_means)) if all_means else 0.0,
-            "loaded_records": len(self.text_data),
-            "loaded_vectors": len(self.scores),
-        }

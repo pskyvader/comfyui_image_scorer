@@ -21,7 +21,7 @@ def run_matrix_analysis() -> int:
     analyzer.build_matrix()
     analyzer.calculate_statistics()
 
-    output_path = str(Path(maps_dir) / "matrix_analysis.json")
-    analyzer.export_to_json(output_path)
+    output_path = str(Path(maps_dir) / "matrix_analysis.jsonl")
+    analyzer.export_to_jsonl(output_path)
     logger.info("Matrix analysis saved to %s", output_path)
     return 0

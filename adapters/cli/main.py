@@ -201,7 +201,7 @@ def add_analyze_parser(
         "parameters", help="Run parameter analysis -> generates report"
     )
     analyze_sub.add_parser(
-        "matrix", help="Build co-occurrence matrix -> matrix_analysis.json"
+        "matrix", help="Build co-occurrence matrix -> matrix_analysis.jsonl"
     )
     analyze_sub.add_parser(
         "stats", help="Print image/scores/comparisons summary to stdout"

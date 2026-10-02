@@ -82,10 +82,9 @@ def get_graph_data():
                 "edges": edges,
                 "components": component_members,
                 "chains": chains,
+                # Node, edge and component counts are derived client-side from the
+                # filtered arrays; only the chain total needs to come from here.
                 "stats": {
-                    "total_nodes": len(nodes),
-                    "total_edges": len(edges),
-                    "total_components": len(all_components),
                     "total_chains": stats.get("total_chains", 0),
                 },
             }

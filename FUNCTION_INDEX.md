@@ -123,6 +123,7 @@ are implementation details.
 | `core/filesystem/paths.py` | `models_dir` | Path to the models output directory. |
 | `core/filesystem/paths.py` | `mediapipe_models_dir` | Path to the downloaded MediaPipe models directory. |
 | `core/filesystem/paths.py` | `training_plots_dir` | Path to the training plots directory. |
+| `core/filesystem/paths.py` | `analysis_dir` | Path to the parameter-analysis output directory. |
 | `core/filesystem/paths.py` | `training_model` | Path to the training model artifact. |
 | `infrastructure/persistence/database.py` | `get_db_connection` | Open a configured SQLite connection. |
 | `infrastructure/persistence/images_repository.py` | `list_nodes` | Read image rows from SQLite. |
@@ -198,7 +199,7 @@ are implementation details.
 | `domain/training/calibration.py` | Training calibration helpers. |
 | `domain/training/__init__.py` | Training package marker. |
 | `domain/training/grid.py` | Training grid definitions. |
-| `domain/training/matrix_analysis.py` | Training matrix analysis. |
+| `domain/training/matrix_analysis.py` | Training matrix analysis. Exports cell statistics as JSON Lines via `MatrixAnalyzer.export_to_jsonl`. |
 | `domain/data_transformation/__init__.py` | Transformation package marker. |
 | `domain/data_transformation/data_transformer.py` | Feature transformation pipeline. |
 | `domain/comparison/__init__.py` | Comparison package marker. |
@@ -240,7 +241,7 @@ are implementation details.
 | `application/analysis/run_parameter_analysis.py` | Parameter-analysis runner. |
 | `application/analysis/run_matrix_analysis.py` | Matrix-analysis runner. |
 | `application/analysis/run_stats.py` | Statistics runner. `print_stats` renders a `GraphStats` payload; `run_stats` collects it from the graph and is the CLI entry point. |
-| `application/analysis/parameter_analysis.py` | Parameter-analysis service. |
+| `application/analysis/parameter_analysis.py` | Parameter-analysis service. Writes its report under `core.filesystem.paths.analysis_dir`. |
 
 ## Adapters
 
@@ -258,7 +259,7 @@ are implementation details.
 | `adapters/server/endpoints/build.py` | Build HTTP endpoints. |
 | `adapters/server/endpoints/files.py` | File-management HTTP endpoints. |
 | `adapters/server/endpoints/comparison.py` | Comparison HTTP endpoints. |
-| `adapters/server/endpoints/gallery.py` | Gallery HTTP endpoints. |
+| `adapters/server/endpoints/gallery.py` | Gallery HTTP endpoints. Filtering, search, tag matching, sorting, and pagination are served by `GET /api/gallery/images`. |
 | `adapters/server/endpoints/maps.py` | Map HTTP endpoints. |
 | `adapters/server/tests/test_compressed_image.py` | Compressed-image adapter tests. |
 | `adapters/server/tests/__init__.py` | Server test package marker. |
