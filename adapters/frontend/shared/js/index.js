@@ -44,21 +44,6 @@ const router = {
         } else {
             this.handleRoute();
         }
-
-        this.bindNavLinks();
-    },
-
-    bindNavLinks() {
-        document.querySelectorAll("nav a")
-            .forEach((link) => {
-                link.addEventListener("click", (e) => {
-                    const href = link.getAttribute("href");
-                    if (href === "/") {
-                        e.preventDefault();
-                        window.location.hash = "#compare";
-                    }
-                });
-            });
     },
 
     async handleRoute() {
@@ -159,14 +144,12 @@ const router = {
                 if (!href) {
                     return;
                 }
-                const isMatch = href === `#${routeName}` || (routeName === "compare" && (href === "/" || href === "#compare" || href === "/#compare"));
+                const isMatch = href === `#${routeName}`;
 
                 if (isMatch) {
-                    link.classList.add("text-white", "bg-white/10", "font-medium");
-                    link.classList.remove("text-gray-300");
+                    link.classList.add("nav-link-active");
                 } else {
-                    link.classList.remove("text-white", "bg-white/10", "font-medium");
-                    link.classList.add("text-gray-300");
+                    link.classList.remove("nav-link-active");
                 }
             });
     },

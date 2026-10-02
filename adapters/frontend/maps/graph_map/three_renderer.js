@@ -43,7 +43,7 @@ globalThis.ThreeGraphRenderer = class {
 
         try {
             this.renderer = new globalThis.THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-        } catch {
+        } catch (error) {
             mapsRendererLogger.error("WebGL init error", error);
             this._errorElement = true;
             return;

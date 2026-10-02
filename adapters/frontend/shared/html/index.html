@@ -41,8 +41,6 @@
             <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-500">
                 Image Ranker</h1>
             <div class="flex items-center gap-3">
-                <span id="status-indicator"
-                    class="hidden sm:inline-block px-3 py-1 text-xs font-semibold rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">Ready</span>
                 <button class="nav-toggle" id="nav-toggle-btn" aria-label="Menu">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                         stroke-linejoin="round" class="w-6 h-6">
@@ -67,8 +65,7 @@
         <!-- Section content injected by SPA router -->
     </main>
 
-    <!-- Toast Container -->
-    <div id="toast-container"></div>
+    <!-- Toast notifications are appended to the body by shared/js/utils.js -->
 
     <!-- Core Logic -->
     <script src="/js/logger.js"></script>
