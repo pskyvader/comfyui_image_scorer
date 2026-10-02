@@ -175,9 +175,31 @@ for these files; its virtual environment is used only to run validation.
 
 For every task, follow the agent rulebook's narrow-to-broad validation order. From the module root, use the configured non-real-data pytest suite as appropriate, then `ruff check --select ARG,F401 --target-version py313 .`, `pyright`, architecture/database/proxy tests, and the node-registration smoke check. Record the command, date, and result for any baseline. Run real-data tests only by explicit request because they are destructive. Documentation work is complete only when the four documents preserve their ownership boundaries, the index describes only the live tree, and every missing description has first been recorded as a task here.
 
+### Baseline after P-33 through P-39
+
+Measured 2026-10-01, after the frontend ownership, teardown, and dead-code work and the ranking-measurement serialization:
+
+| Check | Command | Result |
+|---|---|---|
+| Focused suites | `python -m pytest tests/test_graph_facade.py tests/test_image_processor.py tests/test_architecture.py -q` | 19 passed |
+| Package suite | `python -m pytest -q` | 117 passed, 1 deselected |
+| Lint | `ruff check --select ARG,F401,SLF001 --target-version py313 .` | clean |
+| Types | `pyright` | 192 errors, measured identical with and without P-34 |
+| Boundaries | `pytest tests/test_architecture.py -q` | 3 passed |
+| Registration | `NODE_CLASS_MAPPINGS` smoke check | `['AestheticScore']` |
+| Frontend syntax | `node --check` over all 28 scripts | 0 failures |
+| Assets | every path referenced by the shared template, against a live server | 36 referenced, 0 failures |
+
+The earlier `247` and `246` figures recorded by P-16 and P-17 are superseded; the residual `pyright` count is third-party `reportUnknown*` leakage as P-11 described, plus untyped locals in `matrix_analysis.py` that predate this work.
+
+`GET /api/analyze/stats` was exercised against a live server on the real 30,473-image graph: the response carries the 17 `GraphStats` keys, `ranked + unranked == total`, `sigma_above_threshold + sigma_below_threshold == total`, the ten score buckets sum exactly to the total, buckets ascend, and the highest and lowest rows sit at the ends of the score range. The first score bucket counts 4,643 where the old equal-width printer showed 4,618; both are consistent with their own float edge accumulation, and the new bucket totals are exact. Real-data and command-contract suites were not run, as they require an explicit request.
+
+
 ## Index description tasks
 
 Add one entry here before finalizing the index for every file or public symbol that lacks a useful description. Each entry must name the path or symbol and state the ownership or behavior the index description must explain.
+
+- **I-01 — Three test files are absent from the structure index.** Found 2026-10-01 while verifying that the index still matched the live tree after P-33 through P-39. `domain/graph/tests/__init__.py` and `infrastructure/ml_models/tests/__init__.py` are test package markers that carry no behavior, and `infrastructure/ml_models/tests/test_model_loader.py` covers the ComfyUI model patcher wrappers introduced by P-16. None is described in `FUNCTION_INDEX.md`. Add a `Tests` entry for the two markers and a row for the loader test describing what it covers, or state why the markers need no entry.
 
 ---
 
