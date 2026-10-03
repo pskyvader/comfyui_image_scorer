@@ -52,7 +52,12 @@ from huggingface_hub import snapshot_download
 
 from ...core.observability.logger import get_logger, ModuleLogger
 
-from ...domain.ports.loading import AttributeOutput, ImageProcessor, ModelInfo
+from ...domain.ports.loading import (
+    AttributeOutput,
+    ImageProcessor,
+    ModelInfo,
+    Transform,
+)
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -238,7 +243,7 @@ class ModelLoader:
     def __init__(self):
         self.embedding_model: tuple[ComfyEmbeddingModel, int] | None = None
         self.vision_model_cache: dict[
-            str, tuple[ComfyVisionModel, int, int, Compose]
+            str, tuple[ComfyVisionModel, int, int, Transform]
         ] = {}
         self._model_info_cache: dict[str, ModelInfo] = {}
         self._hf_model_cache: dict[
@@ -273,7 +278,7 @@ class ModelLoader:
 
     def load_vision_model(
         self, model_key: str
-    ) -> tuple[ComfyVisionModel, int, int, Compose]:
+    ) -> tuple[ComfyVisionModel, int, int, Transform]:
         cached = self.vision_model_cache.get(model_key)
         if cached is not None:
             return cached
@@ -330,7 +335,10 @@ class ModelLoader:
                 ]
             )
 
-        result = (ComfyVisionModel(patcher), output_dim, total_memory, transform)
+        # torchvision.transforms.Compose ships no annotations, so pyright cannot
+        # see that its __call__ already takes a PIL image and returns a tensor.
+        wrapped_transform = cast("Transform", transform)
+        result = (ComfyVisionModel(patcher), output_dim, total_memory, wrapped_transform)
         self.vision_model_cache[model_key] = result
         self._model_info_cache[model_key] = ModelInfo(
             variable_input=variable_input, input_size=model_input_size
