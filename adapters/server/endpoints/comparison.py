@@ -81,6 +81,7 @@ def get_ranking_config():
             "parallel_requests": bool(ranking_conf["parallel_requests"]),
             "timeout_ms": int(ranking_conf["timeout_ms"]),
             "seed_size": seed_size,
+            "seed_percentage": seed_percentage,
             "seed_target_comparisons": int(ranking_conf["seed_target_comparisons"]),
             "insertion_target_comparisons": int(
                 ranking_conf["insertion_target_comparisons"]
@@ -106,10 +107,10 @@ def get_status():
     if total == 0:
         result = jsonify(
             {
-                "total_images": 0,
-                "ranked_images": 0,
-                "unranked_images": 0,
-                "total_comparisons": 0,
+                "total_nodes": 0,
+                "ranked_nodes": 0,
+                "unranked_nodes": 0,
+                "total_links": 0,
                 "skipped_comparisons": 0,
                 "min_images": 2,
                 "current_target": 1,
@@ -128,10 +129,10 @@ def get_status():
     ranked = sum(1 for img in all_images if int(img["comparison_count"]) > 0)
     result = jsonify(
         {
-            "total_images": total,
-            "ranked_images": ranked,
-            "unranked_images": total - ranked,
-            "total_comparisons": deps.graph.get_link_count(),
+            "total_nodes": total,
+            "ranked_nodes": ranked,
+            "unranked_nodes": total - ranked,
+            "total_links": deps.graph.get_link_count(),
             "skipped_comparisons": 0,
             "min_images": 2,
             "current_target": level_stats["current_target"],
@@ -159,8 +160,8 @@ def get_next_pair():
         with processor.recent_lock:
             recent_files_ordered = list(processor.recent_images)
 
-    total_images = deps.graph.get_node_count()
-    if total_images < 2:
+    total_nodes = deps.graph.get_node_count()
+    if total_nodes < 2:
         result = (
             jsonify(
                 {

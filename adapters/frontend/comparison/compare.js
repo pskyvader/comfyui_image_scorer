@@ -400,9 +400,8 @@ class CompareMode {
                 total_links: 0,
                 level: {},
                 base_level: 0,
-                collapsable: false,
                 same_component: false,
-                seed_percentage: this._config.seed_size ? 0 : 0,
+                seed_percentage: this._config.seed_percentage || 0,
                 seed_target_comparisons: this._config.seed_target_comparisons || 0,
                 insertion_target_comparisons: this._config.insertion_target_comparisons || 0,
                 reserve_count: this._config.reserve_count || 1,
@@ -565,13 +564,13 @@ class CompareMode {
         const status = await CompareApi.getStatus();
         const els = this.elements;
         if (els.statsTotal) {
-            els.statsTotal.textContent = status.total_images;
+            els.statsTotal.textContent = status.total_nodes;
         }
         if (els.statsRanked) {
-            els.statsRanked.textContent = status.ranked_images;
+            els.statsRanked.textContent = status.ranked_nodes;
         }
         if (els.statsComparisons) {
-            els.statsComparisons.textContent = status.total_comparisons;
+            els.statsComparisons.textContent = status.total_links;
         }
         if (els.statsComponents) {
             els.statsComponents.textContent = status.total_components;
