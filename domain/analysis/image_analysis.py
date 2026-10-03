@@ -325,7 +325,14 @@ class ImageAnalysis(ImageVector):
         analysis: dict[str, float] = {}
         for key in METRIC_KEYS:
             if key in entry:
-                analysis[key] = entry[key]
+                value = entry[key]
+                # The metric pass writes these, so a non-number here is a bug
+                # rather than user metadata to be coerced.
+                if not isinstance(value, int | float):
+                    raise TypeError(
+                        f"Metric '{key}' must be a number, got {type(value).__name__}"
+                    )
+                analysis[key] = float(value)
                 del entry[key]
         entry["analysis"] = analysis
         return entry
@@ -455,7 +462,9 @@ class ImageAnalysis(ImageVector):
         elif isinstance(lora, list):
             lora = {str(name): 1.0 for name in lora if name}
         elif isinstance(lora, str) and lora:
-            w = float(weight) if weight is not None else 1.0
+            # lora_weight comes from the image's own metadata, so an unusable
+            # shape falls back to unit weight rather than failing the build.
+            w = float(weight) if isinstance(weight, int | float | str) else 1.0
             lora = {lora: w}
         else:
             lora = entry.get("lora")

@@ -1,6 +1,16 @@
 from .helpers import get_value_from_entry
 
 
+def _require_number(value: object, name: str, entry_id: str) -> int | float | str:
+    """Narrow a raw entry value to the numeric shapes a numeric vector accepts."""
+    if not isinstance(value, int | float | str):
+        raise TypeError(
+            f"Vector '{name}' for '{entry_id}' expects a number, "
+            f"got {type(value).__name__}"
+        )
+    return value
+
+
 class IntVector:
     def __init__(self, name: str, max_normalization: int | None) -> None:
         self.name = name
@@ -12,9 +22,9 @@ class IntVector:
         self, entries: dict[str, dict[str, object]], alias: list[str] | None
     ) -> dict[str, int]:
         for id, entry in list(entries.items()):
-            current_value = get_value_from_entry(entry, self.name, alias)
-            if current_value is None:
-                current_value = 0
+            current_value = _require_number(
+                get_value_from_entry(entry, self.name, alias), self.name, id
+            )
             self.value_list[id] = int(current_value)
         return self.value_list
 
@@ -41,9 +51,9 @@ class FloatVector:
         self, entries: dict[str, dict[str, object]], alias: list[str] | None
     ) -> dict[str, float]:
         for id, entry in list(entries.items()):
-            current_value = get_value_from_entry(entry, self.name, alias)
-            if current_value is None:
-                current_value = 0.0
+            current_value = _require_number(
+                get_value_from_entry(entry, self.name, alias), self.name, id
+            )
             self.value_list[id] = float(current_value)
         return self.value_list
 

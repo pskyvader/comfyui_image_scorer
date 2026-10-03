@@ -20,6 +20,8 @@ from .. import parameter_analysis as parameter_analysis_module
 from .. import run_matrix_analysis, run_parameter_analysis
 from ..inputs import AnalysisInputs, collect_analysis_inputs
 from ..row_fields import as_number, as_pairs, as_weight_map, strongest
+from ....domain.ports.graph import CrystalGraphPort
+from ....domain.ports.loading import TrainingLoader
 
 # The real text_data.jsonl payload keys. Keeping them here means a change to the
 # writer that renames or drops one shows up as a failing assertion rather than as
