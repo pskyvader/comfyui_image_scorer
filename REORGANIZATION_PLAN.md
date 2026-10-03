@@ -1,61 +1,43 @@
 # Reorganization Plan
 
-This roadmap covers the remaining implementation and documentation work for the image-scorer module. The rules, functionality description, and current structure are maintained separately; this file owns sequencing, dependencies, acceptance criteria, and remediation status.
+This file owns the module's remediation status: what remains, why, and how it must
+be implemented. The rules, functionality description, and current structure are
+maintained separately in `AGENTS.md`, `README.md`, and `FUNCTION_INDEX.md`. No
+document may duplicate another's content.
 
-Every task below includes **why** the work is required and **how** it must be implemented. Each implementation must preserve the architecture boundaries, ownership rules, and validation discipline owned by `AGENTS.md`, and must use the current paths and symbols in the structure index owned by `FUNCTION_INDEX.md`. After an implementation change, update the index to the new current state; do not pre-document the change in the index.
+Any work added here must preserve the architecture boundaries, ownership rules, and
+validation discipline owned by `AGENTS.md`, and must use the current paths and
+symbols in `FUNCTION_INDEX.md`. After a change that alters the live tree, symbols,
+ownership, or public interfaces, update the index to the new current state; do not
+pre-document the change in the index.
 
 The documentation baseline is the module-local Git repository at commit
 `5fc9cd0` (`just more changes`). The ComfyUI root repository is not the history source
 for these files; its virtual environment is used only to run validation.
 
-Task identifiers were renumbered to run consecutively on 2026-10-02, when the
-completed tasks were removed. Earlier commit messages use the old identifiers:
+## Status
+
+The roadmap is closed. Every task in it landed on 2026-10-02, verified against
+the code rather than against its recorded status, and no task remains. The task
+bodies are gone; the commit subjects are the record.
+
+| Former id | Task | Commit subject |
+|---|---|---|
+| D-01, D-02, I-01 | Complete the structure index and resolve the missing descriptions | `Close the gaps in the structure index` |
+| P-01 | One pure history-collapse operation | `Remove the duplicate history-collapse operation` |
+| P-02 | Clear the remaining real type-check diagnostics | `Fix the remaining real type-check diagnostics` |
+| P-03 | Reconcile the model loader's annotations with its domain port | `Make the model loader satisfy its own domain port` |
+| P-04 | Node/link vocabulary on the comparison status payload | `Finish the node/link vocabulary on the status payload` |
+| P-05 | Collect the application tests from the default suite | `Collect the application tests from the default suite` |
+
+Identifiers were renumbered to run consecutively on 2026-10-02, when the tasks
+verified as already done were removed. Earlier commit messages use the old ones:
 D-02 to D-01, D-03 to D-02, P-05 to P-01, P-10 to P-02, P-16 to P-03, P-40 to P-04,
-and P-43 to P-05. Index entries keep the `I-` prefix and were not renumbered.
+and P-43 to P-05. Index entries kept the `I-` prefix throughout.
 
-## Documentation tasks
-
-- [ ] **D-01 — Complete the current structure index.**
-   - **Why:** every implementation task needs an accurate path and symbol anchor; missing descriptions hide ownership and make edits speculative. Five live files and one port method list still have no entry, so the index does not yet enumerate the whole tracked tree.
-   - **Rules/structure:** follow the live-tree and current-state documentation rules in `AGENTS.md`; anchor entries to the paths currently listed by the repository structure in `FUNCTION_INDEX.md`.
-   - **How:** enumerate every current package, test, configuration, frontend, documentation, and script file. Add concise file descriptions plus reliable public classes, protocols, functions, constants, node mappings, and CLI entry-point descriptions. Do not list planned or removed files. The concrete gaps are recorded as I-01 below.
-
-- [ ] **D-02 — Resolve missing index descriptions before finalization.**
-  - **Why:** a blank description is an undocumented structure constraint and prevents agents from knowing what a file owns.
-  - **Rules/structure:** follow the ownership, source-of-truth, and no-future-state rules in `AGENTS.md`; name the exact live path or symbol from `FUNCTION_INDEX.md`.
-  - **How:** add each missing file or symbol here under “Index description tasks,” state the required explanation, then add that explanation to `FUNCTION_INDEX.md` before marking the task complete.
-
-## Pending implementation tasks
-
-- [ ] **P-01 — Add one pure history-collapse operation.**
-   - **Why:** `domain/comparison/algorithm/history_collapse.py` now owns `collapse_comparison_history`, which the rebuild and the comparison repository both call, but the older `collapse_comparisons` in `domain/comparison/algorithm/graph_helpers.py` is still a second implementation of the same missing-node, self-link, same-direction and contradiction rules. It has no production caller left, only `tests/test_graph_helpers.py`, and it is typed over bare `dict[str, object]` rows instead of `ComparisonRow`. It is also the reason `graph_helpers` imports `canonicalize_pair` and `safe_parse_timestamp` from `history_collapse` and re-exports them, and the reason `infrastructure/persistence/deduplicate_scored.py` and `infrastructure/persistence/path_handler.py` import `safe_parse_timestamp` through a module that does not own it.
-   - **Rules/structure:** follow the pure-domain, deterministic-data, dead-code, and no-re-export rules in `AGENTS.md`. The owning layer is `domain/comparison/algorithm/history_collapse.py`; SQLite access stays in `infrastructure`.
-   - **How:** delete `collapse_comparisons` from `graph_helpers.py` and the imports it is the last user of, repoint `deduplicate_scored.py` and `path_handler.py` at `domain.comparison.algorithm.history_collapse`, and retarget `tests/test_graph_helpers.py` at `collapse_comparison_history`. Keep one focused case per rule, including duplicate two-sided histories, contradictions, self-links, missing nodes, equal timestamps and id uniqueness. Update `FUNCTION_INDEX.md` after the live tree changes.
-
-- [ ] **P-02 — Clear the remaining real type-check diagnostics.**
-   - **Why:** the recorded status for this task claimed the residual `pyright` count was entirely `reportUnknown*` leakage from third-party packages. Measured 2026-10-02, the module reports 189 errors and 20 of them are real interface errors in this module's own code, which that claim would hide.
-   - **Rules/structure:** follow strict typing and minimal-change rules in `AGENTS.md`. Fix the cause; a blanket `# type: ignore` is not a resolution.
-   - **How:** the 20 real diagnostics fall into four groups. Two belong to this task:
-     - `application/analysis/tests/test_analysis.py:281-282` cast to the string names `"CrystalGraphPort"` and `"TrainingLoader"`, which the module never imports, so pyright reports two `reportUndefinedVariable` errors. Import both from `domain.ports` and cast to the real symbols.
-     - `domain/analysis/image_analysis.py:328,458` and `domain/vectors/number_vector.py:18,47` pass `object`-typed values into `float` and `int` conversions, producing six `reportArgumentType` errors. Give each value a concrete type where it is produced instead of casting at the use site.
-     - Not this task, the first of the other two: the nine `reportArgumentType` errors at `domain/comparison/algorithm/graph_helpers.py:144-165` all sit inside the duplicate `collapse_comparisons`, so P-01 removes them by deleting it.
-     - Not this task either: the three `reportArgumentType` errors at `adapters/cli/deps.py:97`, `adapters/comfyui/services.py:33`, and `adapters/server/main.py:124` are the model-loader port mismatch, which P-03 owns.
-     Leave the remaining 169 `reportUnknownMemberType`, `reportUnknownVariableType`, and `reportUnknownArgumentType` diagnostics alone: they come from `sklearn`, `scipy`, `comfy.model_management`, `timm`, `transformers`, `huggingface_hub`, `safetensors`, and `torch.cuda`. Re-run `pyright` afterwards and record the new count and date in the baseline table.
-
-- [ ] **P-03 — Reconcile the model loader's annotations with its domain port.**
-   - **Why:** the ComfyUI memory-management work moved model device placement and VRAM ownership behind `ComfyVisionModel`, `ComfyEmbeddingModel`, and `ComfyAttributeModel` and left `domain/ports/loading.py` as pure protocols, but the two sides were never made to agree. `infrastructure.ml_models.model_loader.ModelLoader` does not structurally satisfy `domain.ports.loading.ModelLoader`, so `pyright` rejects the injection at all three composition roots — `adapters/cli/deps.py:97`, `adapters/comfyui/services.py:33`, and `adapters/server/main.py:124`. `load_vision_model` is annotated `tuple[ComfyVisionModel, int, int, Compose]` where the port declares `tuple[VisionModel, int, int, Transform]`: `torchvision.transforms.Compose.__call__` takes an untyped positional `img` and returns untyped, so it does not match the `Transform` protocol's `__call__(self, image: Image.Image) -> torch.Tensor`. Everything else is in place: the wrappers call `load_model_gpu` on every invocation, `batch_sizer.py` profiles through `load_vision_model_patcher()` and returns 1 off CUDA, the package `__init__.py` adds the host ComfyUI root to `sys.path`, and `infrastructure/ml_models/tests/test_model_loader.py` covers the three forwards.
-   - **Rules/structure:** follow the protocol-purity, composition-root, and strict-typing rules in `AGENTS.md`. `domain/ports/loading.py` keeps describing only the callable surfaces domain code uses and stays free of `comfy` imports; the reconciliation belongs in the infrastructure annotations rather than in a loosened port, and the vision/embedding/attribute device behaviour stays owned by the wrappers.
-   - **How:** make the concrete return annotations structurally satisfy the declared port, keeping one owner for each callable surface, and confirm the three composition roots type-check. Validate with `pyright`, `pytest tests/test_architecture.py`, and `pytest infrastructure/ml_models/tests/`.
-
-- [ ] **P-04 — Finish the node/link vocabulary on the comparison status payload.**
-   - **Why:** the node/link vocabulary rename that closed earlier graph work covered the pair payload but not every payload. `GET /api/comparison/status` still emits image vocabulary for counts it takes straight from the graph — `total_images`, `ranked_images`, `unranked_images`, and `total_comparisons` — while `total_components`, `total_chains`, and `active_nodes` in the same object already use the new vocabulary. `adapters/frontend/comparison/compare.js:568-581` reads all seven, so nothing is broken today, but the same number is `total_nodes` in the pair payload and `total_images` in the status payload, which is exactly the split the rename existed to close. Two keys in the placeholder pair object at `compare.js:397-410` are also stale: `collapsable` is dead, because the backend and `compare_view.js` spell it `collapsible`, and `seed_percentage: this._config.seed_size ? 0 : 0` evaluates to `0` on both branches while `compare_view.js:282` renders it in the debug table.
-   - **Rules/structure:** the `Proxy vocabulary` section in `AGENTS.md` owns both the boundary rule and the HTTP-key contract rule — rename a payload key only together with every consumer that reads it. The database column stays `comparison_count`; only graph-facing names change.
-   - **How:** rename the four status keys to node/link vocabulary, update `compare.js:updateStats` in the same change, drop the dead `collapsable` key, and make the placeholder `seed_percentage` read the configured value. Verify with `node --check` over the frontend scripts and the endpoint contract tests.
-
-- [ ] **P-05 — Collect the application tests from the default suite.**
-   - **Why:** `pyproject.toml` sets `testpaths = ["tests", "adapters", "domain", "core", "infrastructure"]`, which omits `application`. The 14 analyzer tests in `application/analysis/tests/test_analysis.py` pass when named explicitly but have never run in the default suite, because `AGENTS.md` defines the default package suite as the configured non-real-data suite and that suite does not reach them.
-   - **Rules/structure:** the configuration is what is wrong, not the tests. Keep the real-data marker and the `-m 'not realdata'` selection as they are.
-   - **How:** add `"application"` to `testpaths`, re-run `python -m pytest -q`, and record the new count and date as the baseline. Expect the count to rise from 117 to 131 with nothing else changing; if it does not, an application test is failing silently today.
+Findings recorded rather than fixed are listed under
+[Deferred findings](#deferred-findings): the missing HTTP payload contract test,
+the three unread keys on the status payload, and the write-only `_start` timers.
 
 ## Required rebuild invariants
 - Database and in-memory graph history remain synchronized.
@@ -68,44 +50,37 @@ and P-43 to P-05. Index entries keep the `I-` prefix and were not renumbered.
 
 ## Validation
 
-For every task, follow the agent rulebook's narrow-to-broad validation order. From the module root, use the configured non-real-data pytest suite as appropriate, then `ruff check --select ARG,F401,SLF001 --target-version py313 .`, `pyright`, architecture/database/proxy tests, and the node-registration smoke check. Record the command, date, and result for any baseline. Run real-data tests only by explicit request because they are destructive. Documentation work is complete only when the four documents preserve their ownership boundaries, the index describes only the live tree, and every missing description has first been recorded as a task here.
+For every change, follow the agent rulebook's narrow-to-broad validation order. From the module root, use the configured non-real-data pytest suite as appropriate, then `ruff check --select ARG,F401,SLF001 --target-version py313 .`, `pyright`, architecture/database/proxy tests, and the node-registration smoke check. Record the command, date, and result for any baseline. Run real-data tests only by explicit request because they are destructive. Documentation work is complete only when the four documents preserve their ownership boundaries and the index describes only the live tree.
 
 ### Baseline
 
-Measured 2026-10-02 while re-verifying this plan. It reflects the tree as it stands, not the result of any task below.
+Measured 2026-10-02 after the roadmap closed.
 
 | Check | Command | Result |
 |---|---|---|
-| Focused suites | `python -m pytest tests/test_graph_facade.py tests/test_image_processor.py tests/test_architecture.py -q` | 19 passed |
-| Package suite | `python -m pytest -q` | 117 passed, 1 deselected |
-| Application tests | `python -m pytest application/analysis/tests/test_analysis.py -q` | 14 passed, not collected by the package suite (P-05) |
-| Lint | `ruff check --select ARG,F401,SLF001 --target-version py313 .` | clean; the `domain/comparison/algorithm/pair_active.py` F401 older baselines recorded as pre-existing is gone, its only reference now being a comment |
-| Types | `pyright` | 189 errors; 20 are real (P-01, P-02, P-03), the rest are third-party `reportUnknown*` leakage |
+| Focused suites | `python -m pytest tests/test_graph_facade.py tests/test_image_processor.py tests/test_history_collapse.py tests/test_architecture.py -q` | 34 passed |
+| Package suite | `python -m pytest -q` | 131 passed, 1 deselected |
+| Lint | `ruff check --select ARG,F401,SLF001 --target-version py313 .` | clean |
+| Types | `pyright` | 165 errors, all `reportUnknown*` leakage from untyped third-party packages; no diagnostic in this module's own interfaces remains |
 | Boundaries | `pytest tests/test_architecture.py -q` | 3 passed |
 | Registration | `NODE_CLASS_MAPPINGS` smoke check | `['AestheticScore']` |
 | Frontend syntax | `node --check` over all 29 scripts | 0 failures |
 | Assets | 35 local `src`/`href` references from the shell and section markup, resolved through the `/static/<section>/`, `/css/`, and `/js/` routes in `adapters/server/main.py` | 35 referenced, 0 failures |
+| Index completeness | every tracked path against every indexed path | 215 files, 0 unindexed, 0 stale |
 
-Earlier `945`, `246`, `247`, and `192` figures recorded by superseded tasks are history, not the current baseline. `pyright` must drop below 189 once P-01, P-02, and P-03 land; record the new figure and date here at that point.
+The residual `pyright` rules are `reportUnknownMemberType` 58, `reportUnknownVariableType` 54, and `reportUnknownArgumentType` 53, from `sklearn`, `scipy`, `comfy.model_management`, `timm`, `transformers`, `huggingface_hub`, `safetensors`, and `torch.cuda`. Fixing them means stubbing third-party packages, which is not this module's code.
+
+Earlier figures of 945, 246, 247, 192, and 189 recorded by superseded tasks are history, not the current baseline.
 
 `GET /api/analyze/stats` was exercised against a live server on the real 30,473-image graph: the response carries the 17 `GraphStats` keys, `ranked + unranked == total`, `sigma_above_threshold + sigma_below_threshold == total`, the ten score buckets sum exactly to the total, buckets ascend, and the highest and lowest rows sit at the ends of the score range. Real-data and command-contract suites were not run in this pass, as they require an explicit request. See the last deferred finding: another process was writing to `output/` during that measurement, so treat its counts as indicative.
-
-## Index description tasks
-
-Add one entry here before finalizing the index for every file or public symbol that lacks a useful description. Each entry must name the path or symbol and state the ownership or behavior the index description must explain.
-
-- **I-01 — Five live files and one port method list are absent from the structure index.** Re-verified 2026-10-02 by diffing every tracked path against every indexed path. No index entry is stale — each resolves to a file that exists — but these live paths and symbols have no `FUNCTION_INDEX.md` entry, so the index does not yet satisfy D-01.
-  - `application/analysis/run_stats.py` — the CLI `run_stats` that drives `scorer.py analyze stats` and `print_stats` beside it, which `adapters/server/endpoints/analyze.py` imports so the endpoint prints the same numbers the CLI does. Neither symbol is indexed.
-  - `experiments/loop_detection.ipynb` — the second experimental notebook. The index lists only `experiments/depth_comparisons.ipynb`.
-  - `domain/graph/tests/__init__.py` and `infrastructure/ml_models/tests/__init__.py` — test package markers that carry no behavior. Add `Tests` entries for both, or state why they need none.
-  - `infrastructure/ml_models/tests/test_model_loader.py` — covers the `ComfyVisionModel`, `ComfyEmbeddingModel`, and `ComfyAttributeModel` patcher wrappers by asserting each forward carries no autograd graph. The index lists `test_batch_sizer.py` beside it but not this one.
-  - `domain/ports/files.py` `FilePort` — the indexed method list is missing `pop_sync_counters`, which the protocol declares and `adapters/server/endpoints/database.py` reads.
 
 ## Deferred findings
 
 Found while executing the graph-vocabulary, frontend, and analyzer work and recorded rather than fixed, because each is a separate decision from the work it was found in.
 
-- **No test pins the HTTP payload contract.** The graph-vocabulary rename missed two consumers: the analyze dashboard read `stats.total` and rendered Images as a dash, and the comparison footer read `pair.total_images` and threw on every phase because `undefined.toLocaleString()` fails. The backend sent `collapsible` while the view read `pair.collapsable`, so that row and the footer suffix always took the false branch. All four were fixed by hand, and a one-off audit of the keys the analyze and comparison views read now reports no unknown reads, but nothing enforces it: the suite only parses the frontend scripts and never checks that a key a view reads is a key the backend emits, so the next rename can ship the same breakage. Add a test that compares the keys every view script reads against the keys the shaping functions actually return. Note that `/api/comparison/status` is still outside the rename, which P-04 tracks.
+- **No test pins the HTTP payload contract.** The graph-vocabulary rename missed two consumers: the analyze dashboard read `stats.total` and rendered Images as a dash, and the comparison footer read `pair.total_images` and threw on every phase because `undefined.toLocaleString()` fails. The backend sent `collapsible` while the view read `pair.collapsable`, so that row and the footer suffix always took the false branch. All four were fixed by hand, and the status payload has since been renamed too, but nothing enforces any of it: the suite only parses the frontend scripts and never checks that a key a view reads is a key the backend emits, so the next rename can ship the same breakage. Add a test that compares the keys every view script reads against the keys the shaping functions actually return. A one-off audit reports no unknown reads on either comparison payload today; that audit is not in the suite.
+- **Three keys on `GET /api/ranking/status` are emitted and never read.** Auditing the payload against `compare.js` and `compare_view.js` on 2026-10-02 found `min_images` (always `2`), `skipped_comparisons` (always `0`), and `baseline_comparisons` (an exact duplicate of `base_level`, which is also in the payload) with no reader anywhere. A fourth, `unranked_nodes`, is also unread but is the complement of `ranked_nodes` and worth keeping. Delete the three, or wire them to something.
+
 - **`VectorList.join_text_data` stringifies every column.** `application/services/vector_list.py:373` writes each value through `str()`, so `text_data.jsonl` stores `steps` as `"20"` and one-hot columns as Python repr strings such as `"{'euler_ancestral': 1.0}"`, which is not valid JSON. `application/analysis/row_fields.py` works around it by preferring the real type and parsing the stringified form, but the artifact itself is lossy. Stop stringifying structured columns, or split the sidecar so numeric and map columns stay typed. This needs a rewrite of the 190 MB artifact, so it is its own task.
 - **Unbalanced parentheses defeat term splitting.** About 66 of 400 real prompts contain more `(` than `)`, and `domain/vectors/terms.py:tokenize_by_depth` cannot find a matching depth, so the remainder of the prompt is emitted as one enormous term - visible in the parameter-analysis output as terms such as `using beer_bottle, and makeup and earings and necklace and high heels`. This caps the quality of every term table and is not fixable in the analyzers. Either make the tokenizer recover at depth zero or drop the unmatched tokens.
 - **Write-only `_start` timers are widespread.** The gallery and maps endpoints no longer have one, but a whole-repo scan on 2026-10-02 finds the same dead local in `core/io/serialization.py` (4), `core/utilities/helpers.py` (2), `domain/vectors/helpers.py` (2), `domain/comparison/algorithm/graph_helpers.py` (2), `infrastructure/ml_models/batch_sizer.py` (6), and one each in `application/services/vector_list.py`, `adapters/server/compressed_image.py`, `infrastructure/persistence/cleanup_orphans.py`, and `infrastructure/persistence/folder_organizer.py`. Decide whether these are timing scaffolding that should be wired to the logger or removed outright, then do it in one pass.
