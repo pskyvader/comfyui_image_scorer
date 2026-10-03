@@ -12,7 +12,7 @@ from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.configuration.settings import config
 from ...core.io.serialization import atomic_write_json, load_json
 from ...core.filesystem.paths import image_root_processed
-from ...domain.comparison.algorithm.graph_helpers import safe_parse_timestamp
+from ...domain.comparison.algorithm.history_collapse import safe_parse_timestamp
 from ...domain.ports.repository import ComparisonRow, ImageRow
 from ..cache.memory_cache import InMemoryCache
 from .images_repository import (

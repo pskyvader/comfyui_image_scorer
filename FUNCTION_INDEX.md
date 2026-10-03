@@ -54,7 +54,7 @@ are implementation details.
 | `domain/comparison/algorithm/history_collapse.py` | `canonicalize_pair` | Canonicalize an unordered image pair into a stable sort key. |
 | `domain/comparison/algorithm/history_collapse.py` | `safe_parse_timestamp` | Parse and normalize timestamps into comparable datetime values for deterministic ordering. |
 | `domain/comparison/algorithm/history_collapse.py` | `collapse_comparison_history` | Collapse comparison history to a deterministic survivor set via missing-node, self-link, same-direction, and contradiction rules. |
-| `domain/comparison/algorithm/graph_helpers.py` | `collapse_comparisons` | Collapse comparison history to a deterministic survivor set via missing-node, self-link, same-direction, and contradiction rules. |
+| `domain/comparison/algorithm/graph_helpers.py` | `stable_seed_pool`, `is_collapsable_pair`, `filter_excluded_images` | Seed-pool selection, collapsibility test, and exclusion filter for the pair-selection strategies. Pair canonicalization, timestamp ordering, and the history collapse are owned by `history_collapse.py`. |
 | `domain/comparison/algorithm/merge_sort_ranker.py` | `select_pair_for_comparison` | Select the next ranking pair. |
 | `domain/ports/graph.py` | `CrystalGraphPort` | Protocol graph/database boundary; `add_link` replaces `add_comparison` and `apply_link` replaces `apply_comparison`. `get_graph_stats` returns `GraphStructure`. |
 | `domain/ports/graph.py` | `GraphStructure` | Typed payload of chain-manager-owned structure counts: `total_nodes`, `total_links`, `total_components`, `total_chains`, `longest_chain_depth`, `top_nodes_count`, `bottom_nodes_count`, and `built_at`. |
@@ -339,10 +339,10 @@ are implementation details.
 | `infrastructure/persistence/database.py` | SQLite connection and schema lifecycle. |
 | `infrastructure/persistence/comparisons_repository.py` | Comparison table operations and history cleanup; uses domain comparison helpers for canonicalization and timestamp parsing. |
 | `infrastructure/persistence/cleanup_orphans.py` | Orphaned-file cleanup. |
-| `infrastructure/persistence/deduplicate_scored.py` | Duplicate scored-file cleanup; uses domain comparison helper for timestamp sorting. Cross-stem matching hashes only files whose byte size is shared, since a unique size cannot be a duplicate. |
+| `infrastructure/persistence/deduplicate_scored.py` | Duplicate scored-file cleanup; sorts merged entries through `domain.comparison.algorithm.history_collapse.safe_parse_timestamp`. Cross-stem matching hashes only files whose byte size is shared, since a unique size cannot be a duplicate. |
 | `infrastructure/persistence/folder_organizer.py` | Ranked-folder organization. |
 | `infrastructure/persistence/images_repository.py` | Image table operations. |
-| `infrastructure/persistence/path_handler.py` | Runtime path, image-file handling, and history sorting using domain comparison helper. |
+| `infrastructure/persistence/path_handler.py` | Runtime path, image-file handling, and history sorting through `domain.comparison.algorithm.history_collapse.safe_parse_timestamp`. |
 | `infrastructure/persistence/file_manager.py` | Concrete filesystem-port implementation. |
 | `infrastructure/external_services/__init__.py` | External-service package marker. |
 | `infrastructure/external_services/mediapipe_models.py` | Explicit MediaPipe model download and location handling. |
@@ -374,7 +374,7 @@ are implementation details.
 | `tests/test_deduplicate_scored.py` | Scored-tree deduplication over temporary directories: same-stem copies, filename conflicts, and cross-stem byte-identical detection across differing sizes. |
 | `tests/test_general.py` | General command, endpoint, and integration contract tests. |
 | `tests/test_graph_facade.py` | CrystalGraph facade behavior tests. |
-| `tests/test_graph_helpers.py` | History-collapse and graph-helper algorithm tests. |
+| `tests/test_history_collapse.py` | History-collapse tests: duplicate two-sided histories, contradictions, self-links, missing nodes, and deterministic survivor ordering. |
 | `tests/test_image_processor.py` | `ImageProcessor` behavior: retained-versus-delegated filesystem operations, plus rebuild-from-ranked coverage (image rebuild, history replay and collapse, prompt tags, JSON sync, and run-to-run determinism). |
 | `infrastructure/ml_models/tests/test_batch_sizer.py` | Batch calibration through the public `get()` with a scripted allocator: marginal-cost acceptance, stale-fit ceiling, and the least-squares fit. |
 

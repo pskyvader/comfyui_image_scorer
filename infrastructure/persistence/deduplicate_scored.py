@@ -24,7 +24,7 @@ from ...core.io.serialization import atomic_write_json, discover_files, load_jso
 from ...core.utilities.concurrency import parallel_for
 from ...core.configuration.settings import config
 from ...core.filesystem.paths import image_root_processed as _img_root
-from ...domain.comparison.algorithm.graph_helpers import safe_parse_timestamp
+from ...domain.comparison.algorithm.history_collapse import safe_parse_timestamp
 
 logger: ModuleLogger = get_logger(__name__)
 JsonDict = dict[str, Any]
