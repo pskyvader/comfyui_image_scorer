@@ -353,15 +353,21 @@ def main() -> int:
 
     elif args.command == "analyze":
         if args.analyze_command == "parameters":
+            from ...application.analysis.inputs import collect_analysis_inputs
             from ...application.analysis.run_parameter_analysis import (
                 run_parameter_analysis,
             )
 
-            return run_parameter_analysis()
+            return run_parameter_analysis(
+                collect_analysis_inputs(deps.graph, deps.training_loader)
+            )
         elif args.analyze_command == "matrix":
+            from ...application.analysis.inputs import collect_analysis_inputs
             from ...application.analysis.run_matrix_analysis import run_matrix_analysis
 
-            return run_matrix_analysis()
+            return run_matrix_analysis(
+                collect_analysis_inputs(deps.graph, deps.training_loader)
+            )
         elif args.analyze_command == "stats":
             from ...application.analysis.run_stats import run_stats
 

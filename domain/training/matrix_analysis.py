@@ -42,7 +42,14 @@ class MatrixAnalyzer:
         text = parts[0]
         weight = 1.0
         if len(parts) > 1:
-            weight = float(parts[-1])
+            # A prompt with unbalanced parentheses leaves a trailing weight marker
+            # such as "sweatdrop, :0.9)" whose tail is not a number. That is one
+            # malformed token, not a reason to abandon the whole matrix, so fall
+            # back to unit weight and keep the term.
+            try:
+                weight = float(parts[-1])
+            except ValueError:
+                weight = 1.0
         normalized_text = " ".join(str(text).split()).lower()
         return normalized_text, weight
 

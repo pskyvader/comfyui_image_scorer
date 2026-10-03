@@ -8,6 +8,7 @@ numbers without walking the graph twice.
 
 from flask import Blueprint, Flask, jsonify
 
+from ....application.analysis.inputs import collect_analysis_inputs
 from ....application.analysis.run_matrix_analysis import run_matrix_analysis
 from ....application.analysis.run_parameter_analysis import run_parameter_analysis
 from ....application.analysis.run_stats import print_stats
@@ -29,15 +30,19 @@ def stats():
 
 @analyze_bp.route("/analyze-parameters", methods=["POST"])
 def analyze_parameters():
+    deps = get_server_deps()
+    inputs = collect_analysis_inputs(deps.graph, deps.training_loader)
     with capture_log_output() as lines:
-        code = run_parameter_analysis()
+        code = run_parameter_analysis(inputs)
     return jsonify({"status": "done", "result": code, "log": lines})
 
 
 @analyze_bp.route("/analyze-matrix", methods=["POST"])
 def analyze_matrix():
+    deps = get_server_deps()
+    inputs = collect_analysis_inputs(deps.graph, deps.training_loader)
     with capture_log_output() as lines:
-        code = run_matrix_analysis()
+        code = run_matrix_analysis(inputs)
     return jsonify({"status": "done", "result": code, "log": lines})
 
 

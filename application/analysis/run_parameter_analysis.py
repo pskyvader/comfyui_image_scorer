@@ -1,20 +1,24 @@
+from ...core.filesystem.paths import text_data_file
 from ...core.io.serialization import load_single_jsonl
-from ...core.filesystem.paths import vectors_file, text_data_file
 from ...core.observability.logger import get_logger
+from .inputs import AnalysisInputs
 from .parameter_analysis import ParameterAnalyzer
 
 logger = get_logger(__name__)
 
 
-def run_parameter_analysis() -> int:
-    vectors = list(load_single_jsonl(vectors_file))
-    text_data = list(load_single_jsonl(text_data_file))
+def _text_rows():
+    """Stream the text sidecar. Never materialized: it holds one object per
+    scored image and each is consumed once per analysis pass."""
+    return iter(load_single_jsonl(text_data_file))
 
-    if not vectors or not text_data:
-        logger.error("vectors.jsonl or text_data.jsonl is empty — run build pipeline first")
+
+def run_parameter_analysis(inputs: AnalysisInputs) -> int:
+    if not inputs.scores:
+        logger.error("No scores found. Run the build pipeline first.")
         return 1
 
-    analyzer = ParameterAnalyzer(vectors, text_data)
+    analyzer = ParameterAnalyzer(inputs, _text_rows)
     analyzer.analyze_all()
     logger.info("Parameter analysis report generated in output/analysis/")
     return 0

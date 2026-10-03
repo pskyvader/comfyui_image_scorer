@@ -198,7 +198,7 @@ are implementation details.
 | `domain/training/calibration.py` | Training calibration helpers. |
 | `domain/training/__init__.py` | Training package marker. |
 | `domain/training/grid.py` | Training grid definitions. |
-| `domain/training/matrix_analysis.py` | Training matrix analysis. Exports cell statistics as JSON Lines via `MatrixAnalyzer.export_to_jsonl`. |
+| `domain/training/matrix_analysis.py` | Training matrix analysis. Exports cell statistics as JSON Lines via `MatrixAnalyzer.export_to_jsonl`. `get_text_weight` falls back to unit weight when a trailing weight marker is not a number, so one malformed prompt token cannot abort a whole run. |
 | `domain/data_transformation/__init__.py` | Transformation package marker. |
 | `domain/data_transformation/data_transformer.py` | Feature transformation pipeline. |
 | `domain/comparison/__init__.py` | Comparison package marker. |
@@ -237,10 +237,13 @@ are implementation details.
 | `application/hyperparameters/hyperparameter_optimizer.py` | Hyperparameter search orchestration. |
 | `application/hyperparameters/__init__.py` | Hyperparameter package marker. |
 | `application/analysis/__init__.py` | Application analysis package marker. |
-| `application/analysis/run_parameter_analysis.py` | Parameter-analysis runner. |
-| `application/analysis/run_matrix_analysis.py` | Matrix-analysis runner. Writes `matrix_analysis.jsonl` under `core.filesystem.paths.analysis_dir`. |
-| `application/analysis/run_stats.py` | Statistics runner. `print_stats` renders a `GraphStats` payload; `run_stats` collects it from the graph and is the CLI entry point. |
-| `application/analysis/parameter_analysis.py` | Parameter-analysis service. Writes its report under `core.filesystem.paths.analysis_dir`. |
+| `application/analysis/inputs.py` | `AnalysisInputs` and `collect_analysis_inputs`. Gathers the filename-keyed scores from the training loader and the prompt tags from the ranked database for both analyzers. Deliberately does not read `vectors.jsonl`, which holds embeddings and no score. |
+| `application/analysis/row_fields.py` | Decoders for the text sidecar's values, which the writer stringifies: numbers arrive as strings and one-hot parameter maps as Python repr strings. Each helper prefers the real type and falls back to parsing. |
+| `application/analysis/run_parameter_analysis.py` | Parameter-analysis runner. Streams the text sidecar per analysis pass and writes to `core.filesystem.paths.analysis_dir`. |
+| `application/analysis/run_matrix_analysis.py` | Matrix-analysis runner. `scored_rows` unpacks the sidecar's `{filename: payload}` rows and keeps only the generation parameters, because the build is quadratic in the parameter count. Writes `matrix_analysis.jsonl` under `analysis_dir`. |
+| `application/analysis/tests/__init__.py` | Analysis test package marker. |
+| `application/analysis/tests/test_analysis.py` | Analyzer schema tests: the sidecar row shape, the filename join, the stringified-column decoders, weighted term output with separated positive/negative groups, the matrix column whitelist, and that no analysis module references `vectors_file`. |
+| `application/analysis/parameter_analysis.py` | Parameter-analysis service. Joins scores to rows by filename, extracts weighted prompt terms through `domain.vectors.terms.extract_terms`, and writes per-parameter, per-term and report artifacts under `core.filesystem.paths.analysis_dir`. |
 
 ## Adapters
 
