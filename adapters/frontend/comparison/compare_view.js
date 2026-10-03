@@ -168,14 +168,14 @@ const CompareView = (() => {
                 // Seed bootstrap: progress toward seed_target comparisons.
                 const remaining = countRemaining(pair.seed_target_comparisons);
                 const ready = countReady(pair.seed_target_comparisons);
-                line = `Bootstrap seed - ${remaining.toLocaleString()} images below ${pair.seed_target_comparisons} comparisons - ${ready.toLocaleString()} at \u2265${pair.seed_target_comparisons} - ${pair.total_images.toLocaleString()} images - ${pair.total_comparisons.toLocaleString()} comparisons`;
+                line = `Bootstrap seed - ${remaining.toLocaleString()} images below ${pair.seed_target_comparisons} comparisons - ${ready.toLocaleString()} at \u2265${pair.seed_target_comparisons} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             }
             case "anchor": {
                 // Anchor insert: integrate low-count images up to insertion_target.
                 const remaining = countRemaining(pair.insertion_target_comparisons + 1); // target is <=n, or <n+1
                 const ready = countReady(pair.insertion_target_comparisons);
-                line = `Anchor insert - ${remaining.toLocaleString()} images below ${pair.insertion_target_comparisons} comparisons - ${ready.toLocaleString()} at \u2265${pair.insertion_target_comparisons} - ${pair.total_images.toLocaleString()} images - ${pair.total_comparisons.toLocaleString()} comparisons`;
+                line = `Anchor insert - ${remaining.toLocaleString()} images below ${pair.insertion_target_comparisons} comparisons - ${ready.toLocaleString()} at \u2265${pair.insertion_target_comparisons} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             }
             case "collapsible": {
@@ -187,21 +187,21 @@ const CompareView = (() => {
                 const top = left._extremes.top;
                 const bottom = left._extremes.bottom;
                 const inProgress = top + bottom;
-                const ready = pair.total_images - inProgress;
-                line = `Collapsible pairs${pair.collapsable ? " (resolving a branch)" : ""} - component ${compId} (${compSize.toLocaleString()} images) - top ${top.toLocaleString()} / bottom ${bottom.toLocaleString()} - ${inProgress.toLocaleString()} in progress / ${ready.toLocaleString()} ready - ${pair.total_images.toLocaleString()} images - ${pair.total_comparisons.toLocaleString()} comparisons`;
+                const ready = pair.total_nodes - inProgress;
+                line = `Collapsible pairs${pair.collapsible ? " (resolving a branch)" : ""} - component ${compId} (${compSize.toLocaleString()} images) - top ${top.toLocaleString()} / bottom ${bottom.toLocaleString()} - ${inProgress.toLocaleString()} in progress / ${ready.toLocaleString()} ready - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             }
             case "single_win_loss":
-                line = `Single win/loss - ${pair.single_win_count.toLocaleString()} with 1 win only - ${pair.single_loss_count.toLocaleString()} with 1 loss only - ${pair.ready_count.toLocaleString()} ready (more than 1 win & 1 loss) - ${pair.total_images.toLocaleString()} images - ${pair.total_comparisons.toLocaleString()} comparisons`;
+                line = `Single win/loss - ${pair.single_win_count.toLocaleString()} with 1 win only - ${pair.single_loss_count.toLocaleString()} with 1 loss only - ${pair.ready_count.toLocaleString()} ready (more than 1 win & 1 loss) - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             case "chain_merge":
-                line = `Chain merge - component ${left.component_id} (${left.component_size.toLocaleString()} images) - ${pair.total_chains.toLocaleString()} chains (target ${pair.target_chains}) - reserve ${pair.reserve_count} - ${pair.total_images.toLocaleString()} images - ${pair.total_comparisons.toLocaleString()} comparisons`;
+                line = `Chain merge - component ${left.component_id} (${left.component_size.toLocaleString()} images) - ${pair.total_chains.toLocaleString()} chains (target ${pair.target_chains}) - reserve ${pair.reserve_count} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             case "refine":
-                line = `Uncertainty refine - ${pair.sigma_above_threshold.toLocaleString()} above \u03c3 threshold (\u2265${pair.sigma_threshold}) / ${pair.sigma_below_threshold.toLocaleString()} ready (\u03c3 < ${pair.sigma_threshold}) - ${pair.total_images.toLocaleString()} images - ${pair.total_comparisons.toLocaleString()} comparisons`;
+                line = `Uncertainty refine - ${pair.sigma_above_threshold.toLocaleString()} above \u03c3 threshold (\u2265${pair.sigma_threshold}) / ${pair.sigma_below_threshold.toLocaleString()} ready (\u03c3 < ${pair.sigma_threshold}) - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             default:
-                line = `Fallback - ${pair.total_images.toLocaleString()} images - ${pair.total_comparisons.toLocaleString()} comparisons`;
+                line = `Fallback - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
         }
         footer.textContent = line;
@@ -261,7 +261,7 @@ const CompareView = (() => {
                     <thead><tr><th colspan="2" class="text-purple-400 border-b border-purple-500/20 pb-2 mb-2 uppercase tracking-widest text-[9px]">Selection Logic</th></tr></thead>
                     <tbody class="text-[10px]">
                         <tr class="h-6"><td class="text-gray-500 pr-4">Phase</td><td class="text-white font-bold">${phaseLabel(pair.phase)}</td></tr>
-                        <tr class="h-6"><td class="text-gray-500 pr-4">Collapsible</td><td class="text-white">${pair.collapsable ? "yes" : "no"}</td></tr>
+                        <tr class="h-6"><td class="text-gray-500 pr-4">Collapsible</td><td class="text-white">${pair.collapsible ? "yes" : "no"}</td></tr>
                         <tr class="h-6"><td class="text-gray-500 pr-4">Same Component</td><td class="text-white">${sameComponent}</td></tr>
                         <tr class="h-6"><td class="text-gray-500 pr-4">${winnerText} / right (${Math.round(probB * 100)}%)</td><td class="text-white text-right">left ${probA.toFixed(4)}</td></tr>
                         <tr class="h-6"><td class="text-gray-500 pr-4">Prediction Accuracy</td><td class="text-white text-right">${accuracyText()}</td></tr>
@@ -276,8 +276,8 @@ const CompareView = (() => {
                 <table class="w-full text-left border-collapse">
                     <thead><tr><th colspan="2" class="text-purple-400 border-b border-purple-500/20 pb-2 mb-2 uppercase tracking-widest text-[9px]">Pair Config</th></tr></thead>
                     <tbody class="text-[10px]">
-                        <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Total Images</td><td class="text-white text-right">${pair.total_images}</td></tr>
-                        <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Total Comparisons</td><td class="text-white text-right">${pair.total_comparisons}</td></tr>
+                        <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Total Images</td><td class="text-white text-right">${pair.total_nodes}</td></tr>
+                        <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Total Comparisons</td><td class="text-white text-right">${pair.total_links}</td></tr>
                         <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Seed Target</td><td class="text-white text-right">${pair.seed_target_comparisons}</td></tr>
                         <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Seed Percentage</td><td class="text-white text-right">${pair.seed_percentage}</td></tr>
                         <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Insertion Target</td><td class="text-white text-right">${pair.insertion_target_comparisons}</td></tr>

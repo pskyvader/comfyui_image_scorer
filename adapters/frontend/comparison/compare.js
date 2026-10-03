@@ -396,8 +396,8 @@ class CompareMode {
             const right = norm(rightData, rightFile);
             const pair = {
                 phase: null,
-                total_images: 0,
-                total_comparisons: 0,
+                total_nodes: 0,
+                total_links: 0,
                 level: {},
                 base_level: 0,
                 collapsable: false,
