@@ -60,7 +60,7 @@ are implementation details.
 | `domain/ports/graph.py` | `GraphStructure` | Typed payload of chain-manager-owned structure counts: `total_nodes`, `total_links`, `total_components`, `total_chains`, `longest_chain_depth`, `top_nodes_count`, `bottom_nodes_count`, and `built_at`. |
 | `domain/ports/repository.py` | `ImageRepository` | Image persistence protocol. |
 | `domain/ports/repository.py` | `ComparisonRepository` | Comparison persistence protocol. |
-| `domain/ports/files.py` | `FilePort` | Filesystem operations protocol: `read_json`, `write_json`, `file_exists`, `list_directory`, `make_directory`, `move_file`, `remove_file`, `ranked_root`, `compute_path`, `sync_metadata`, `clear_folder_cache`, `prewarm_folder_cache`, `deduplicate_scored`, and `cleanup_orphans`. |
+| `domain/ports/files.py` | `FilePort` | Filesystem operations protocol: `read_json`, `write_json`, `file_exists`, `list_directory`, `make_directory`, `move_file`, `remove_file`, `ranked_root`, `compute_path`, `sync_metadata`, `pop_sync_counters`, `clear_folder_cache`, `prewarm_folder_cache`, `deduplicate_scored`, and `cleanup_orphans`. |
 | `domain/ports/loading.py` | `ModelLoader` | Vision, embedding, and attribute model loader protocol. |
 | `application/services/graph_service.py` | `CrystalGraph` | Application graph facade and proxy factory. |
 | `application/services/image_processor.py` | `ImageProcessor` | Ranked-file processing, rebuild, metadata sync, and rating replay service. |
@@ -79,6 +79,8 @@ are implementation details.
 | `adapters/comfyui/nodes/aesthetic_score/node.py` | `calculate_score` | Node execution method returning scored and discarded images. |
 | `adapters/server/main.py` | `main` | Start and initialize the Flask ranking server. |
 | `adapters/cli/main.py` | `main` | Parse CLI arguments and dispatch commands. |
+| `application/analysis/run_stats.py` | `run_stats` | CLI entry point for `scorer.py analyze stats`; collects the payload once and prints it. |
+| `application/analysis/run_stats.py` | `print_stats` | Print an already-collected `GraphStats`; the analyze endpoint calls it so the response log matches the CLI text. |
 | `adapters/cli/commands/database.py` | `rebuild` | Explicitly rebuild the ranking database from ranked files. |
 | `adapters/cli/commands/database.py` | `sync` | Reload the graph and write database state back into ranked companion JSON. |
 | `adapters/cli/commands/database.py` | `recalculate` | Replay existing comparison history into ratings. |
@@ -153,6 +155,7 @@ are implementation details.
 | `config/README.md` | Configuration directory guidance. |
 | `docs/spike_config_schema.md` | Configuration schema investigation notes. |
 | `experiments/depth_comparisons.ipynb` | Experimental depth-comparison notebook. |
+| `experiments/loop_detection.ipynb` | Experimental ranking-loop detection notebook. |
 
 ## Core
 
@@ -177,6 +180,12 @@ are implementation details.
 |---|---|
 | `domain/__init__.py` | Domain package marker and overview. |
 | `domain/graph/__init__.py` | Graph package exports. |
+| `domain/graph/chain_manager.py` | In-memory graph topology: directed edges, chains, components, and the link history that backs the ranking phases. Owns the structural counts every proxy and the graph facade expose. |
+| `domain/graph/node_proxy.py` | Node proxy exposing one node's graph data and navigation. |
+| `domain/graph/link_proxy.py` | `LinkRecord` and the proxy that exposes one comparison edge. |
+| `domain/graph/chain_proxy.py` | Chain proxy exposing one ordering of nodes. |
+| `domain/graph/component_proxy.py` | Component proxy exposing one connected subgraph. |
+| `domain/graph/tests/__init__.py` | Graph test package marker. |
 | `domain/graph/tests/test_chain_manager.py` | Chain-manager behavior tests. |
 | `domain/vectors/__init__.py` | Vector package exports. |
 | `domain/vectors/terms.py` | Prompt and term extraction structures. |
@@ -206,6 +215,7 @@ are implementation details.
 | `domain/comparison/comparison_recorder.py` | Comparison persistence and graph recording port consumer. |
 | `domain/comparison/algorithm/__init__.py` | Ranking algorithm package marker. |
 | `domain/comparison/algorithm/phase_order.py` | Ranking phase ordering. |
+| `domain/comparison/algorithm/history_collapse.py` | Pair canonicalization, sortable timestamp parsing, and the pure history collapse that reduces imported comparisons to a deterministic survivor set. The single owner of all three. |
 | `domain/comparison/algorithm/graph_helpers.py` | Graph-query, candidate-pool, and collapsibility helpers. |
 | `domain/comparison/algorithm/merge_sort_ranker.py` | Pair selection orchestration for merge-sort ranking. |
 | `domain/comparison/algorithm/pair_active.py` | Active pair selection. |
@@ -239,11 +249,12 @@ are implementation details.
 | `application/analysis/__init__.py` | Application analysis package marker. |
 | `application/analysis/inputs.py` | `AnalysisInputs` and `collect_analysis_inputs`. Gathers the filename-keyed scores from the training loader and the prompt tags from the ranked database for both analyzers. Deliberately does not read `vectors.jsonl`, which holds embeddings and no score. |
 | `application/analysis/row_fields.py` | Decoders for the text sidecar's values, which the writer stringifies: numbers arrive as strings and one-hot parameter maps as Python repr strings. Each helper prefers the real type and falls back to parsing. |
+| `application/analysis/run_stats.py` | Ranking-measurement printer. `run_stats` is the `scorer.py analyze stats` entry point and `print_stats` takes an already-collected `GraphStats`, so the analyze endpoint prints the same numbers the CLI does without walking the graph twice. |
 | `application/analysis/run_parameter_analysis.py` | Parameter-analysis runner. Streams the text sidecar per analysis pass and writes to `core.filesystem.paths.analysis_dir`. |
 | `application/analysis/run_matrix_analysis.py` | Matrix-analysis runner. `scored_rows` unpacks the sidecar's `{filename: payload}` rows and keeps only the generation parameters, because the build is quadratic in the parameter count. Writes `matrix_analysis.jsonl` under `analysis_dir`. |
+| `application/analysis/parameter_analysis.py` | Parameter-analysis service. Joins scores to rows by filename, extracts weighted prompt terms through `domain.vectors.terms.extract_terms`, and writes per-parameter, per-term and report artifacts under `core.filesystem.paths.analysis_dir`. |
 | `application/analysis/tests/__init__.py` | Analysis test package marker. |
 | `application/analysis/tests/test_analysis.py` | Analyzer schema tests: the sidecar row shape, the filename join, the stringified-column decoders, weighted term output with separated positive/negative groups, the matrix column whitelist, and that no analysis module references `vectors_file`. |
-| `application/analysis/parameter_analysis.py` | Parameter-analysis service. Joins scores to rows by filename, extracts weighted prompt terms through `domain.vectors.terms.extract_terms`, and writes per-parameter, per-term and report artifacts under `core.filesystem.paths.analysis_dir`. |
 
 ## Adapters
 
@@ -352,6 +363,8 @@ are implementation details.
 | `infrastructure/ml_models/model_loader.py` | `verify_models_present` | Raises when configured models are not downloaded locally. |
 | `infrastructure/ml_models/model_loader.py` | `download_configured_models` | Downloads every configured model in download mode. |
 | `infrastructure/ml_models/__init__.py` | ML-model package marker. |
+| `infrastructure/ml_models/tests/__init__.py` | ML-model test package marker. |
+| `infrastructure/ml_models/tests/test_model_loader.py` | Patcher-wrapper tests: each vision, embedding, and attribute forward runs under `torch.no_grad`, so no autograd graph is retained across a batch. |
 | `infrastructure/ml_models/image_export.py` | Image export implementation. |
 | `infrastructure/ml_models/plot.py` | Training and analysis plotting. |
 | `infrastructure/ml_models/mediapipe_provider.py` | MediaPipe provider implementation. |
