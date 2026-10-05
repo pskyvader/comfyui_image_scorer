@@ -118,9 +118,7 @@ class ImageAnalysis(ImageVector):
         self._face_sizer = batch_sizer_factory(
             self._face_attr.MODEL_KEY, "attribute_models"
         )
-        self._nsfw_sizer = batch_sizer_factory(
-            self._nsfw.MODEL_KEY, "attribute_models"
-        )
+        self._nsfw_sizer = batch_sizer_factory(self._nsfw.MODEL_KEY, "attribute_models")
 
         for data in self.raw_data:
             image_path = data[0]
@@ -351,7 +349,7 @@ class ImageAnalysis(ImageVector):
         sizer: BatchSizer,
         run_pass: Callable[[list[ImageEntry]], list[ImageEntry]],
         desc: str,
-    ) -> None:
+    ) -> list[ImageEntry]:
         """Run one attribute pass in calibrated batches, recovering from OOM.
 
         The vision path already recalculates and retries when CUDA runs out of
@@ -377,9 +375,7 @@ class ImageAnalysis(ImageVector):
                         ) from e
                     failed_size = batch_size
                     torch.cuda.empty_cache()
-                    probe = sizer.get(
-                        0, 0, True, probe_bound_for_failed(failed_size)
-                    )
+                    probe = sizer.get(0, 0, True, probe_bound_for_failed(failed_size))
                     batch_size = max(scaled_batch_size(probe), 1)
                     logger.warning(
                         f"CUDA out of memory in {desc} analysis at batch size "
@@ -393,6 +389,7 @@ class ImageAnalysis(ImageVector):
             f"{desc} done: {len(result)} images in "
             f"{time.perf_counter() - _start:.1f}s"
         )
+        return result
 
     def _run_face_pass(self, entries: list[ImageEntry]) -> list[ImageEntry]:
         indices = [i for i, (_, e, _, _) in enumerate(entries) if "age" not in e]
@@ -443,6 +440,7 @@ class ImageAnalysis(ImageVector):
             entry = self._edge_density(img, entry)
             entry = self._texture_lbp(img, entry)
             entry = self._mediapipe_analysis(img, entry)
+            # entry= self._nsfw_analysis(img, entry)
             entry = self._assemble_analysis_map(entry)
             data_batch[i] = (path, entry, cat, extra)
 

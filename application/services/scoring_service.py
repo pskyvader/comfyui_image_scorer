@@ -68,6 +68,7 @@ class ScoringService:
         sampler: str,
         scheduler: str,
         model_name: str,
+        clip_skip: int,
         lora_name: str,
         lora_strength: float,
         min_images: int = 1,
@@ -88,6 +89,8 @@ class ScoringService:
             raise ValueError("'scheduler' must be a non-empty string.")
         if not model_name.strip():
             raise ValueError("'model_name' must be a non-empty string.")
+        if not (-24 <= clip_skip <= -1):
+            raise ValueError("'clip_skip' must be an integer between -24 and -1.")
 
         entry: dict[str, object] = {
             "steps": steps,
@@ -95,6 +98,7 @@ class ScoringService:
             "sampler": sampler,
             "scheduler": scheduler,
             "model_name": model_name,
+            "clip_skip": clip_skip,
             "lora_name": lora_name,
             "lora_strength": lora_strength,
             "positive_prompt": positive,
@@ -116,7 +120,22 @@ class ScoringService:
             image_batch = images_list[i : i + self._batch_size]
             data_batch = data_list[i : i + self._batch_size]
             data_batch = image_analysis.analyze_image_batch(image_batch, data_batch)
+
             processed_data.extend(data_batch)
+
+        face_result = image_analysis._face_attr.predict_batch(images_list)
+        for idx, r in enumerate(face_result):
+            path, entry, cat, extra = processed_data[idx]
+            entry["age"] = r["age"]
+            entry["gender"] = r["gender"]
+            entry["race"] = r["race"]
+            processed_data[idx] = (path, entry, cat, extra)
+
+        nsfw_result = image_analysis._nsfw.predict_batch(images_list)
+        for idx, r in enumerate(nsfw_result):
+            path, entry, cat, extra = processed_data[idx]
+            entry["nsfw_score"] = r
+            processed_data[idx] = (path, entry, cat, extra)
 
         vector_list = VectorList(
             processed_data,
@@ -147,7 +166,7 @@ class ScoringService:
             rebuild = False
             retry = True
             while retry:
-                result = image_vector.create_vector_list(images_dict, rebuild)
+                result = image_vector.create_vector_list(images_dict, rebuild, bound=1)
                 if result is None:
                     rebuild = True
                     retry = True

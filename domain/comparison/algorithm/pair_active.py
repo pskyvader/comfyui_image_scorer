@@ -99,8 +99,7 @@ def phase_anchor_insert(
     candidates: list[NodeProxy] = [
         node
         for node in candidate_images
-        if node.filename not in seed_pool_set
-        and node.link_count <= insertion_target
+        if node.filename not in seed_pool_set and node.link_count <= insertion_target
     ]
 
     if len(candidates) < 2:
@@ -145,7 +144,7 @@ def phase_anchor_insert(
     if len(nodes) < 2:
         logger.debug(f"no pair found out of {len(nodes)} opponents")
         return None
-    nodes = nodes[:100]
+    # nodes = nodes[:100]
 
     pair_list: list[tuple[NodeProxy, NodeProxy]] = [
         (node_a, nodes[i + 1]) for i in range(len(nodes) - 1)
@@ -353,9 +352,7 @@ def phase_single_win_loss(
 
         if filtered_only and node_a.link_count >= minimum_count:
             filtered_nodes: list[NodeProxy] = [
-                node
-                for node in nodes
-                if node.link_count <= node_a.link_count
+                node for node in nodes if node.link_count <= node_a.link_count
             ]
             if len(filtered_nodes) < reserve_count:
                 # logger.info(

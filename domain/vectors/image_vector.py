@@ -180,9 +180,7 @@ class ImageVector:
         return result
 
     def create_vector_list(
-        self,
-        entries: dict[str, Image.Image],
-        rebuild: bool,
+        self, entries: dict[str, Image.Image], rebuild: bool, bound: int | None = None
     ) -> vectorDict | None:
         if not entries:
             result: vectorDict = {}
@@ -197,7 +195,8 @@ class ImageVector:
         else:
             self.model_input_size = sizeTuple(list(entries.values())[0].size)
         bw, bh = self.model_input_size
-        batch_size: int = scaled_batch_size(self.get_batch_size(bw, bh, rebuild))
+        batch_size: int = scaled_batch_size(self.get_batch_size(bw, bh, rebuild, bound))
+
         logger.debug(
             f"batch size: {batch_size} for image size: {self.model_input_size}"
         )
@@ -285,9 +284,7 @@ class ImageVector:
                 for bucket_idx, (size, items) in enumerate(bucket_list, start=1):
                     num_items: int = len(items)
                     width, height = (
-                        self.model_input_size
-                        if not self.variable_input
-                        else size
+                        self.model_input_size if not self.variable_input else size
                     )
                     max_batch_size = scaled_batch_size(
                         self.get_batch_size(width, height, False)

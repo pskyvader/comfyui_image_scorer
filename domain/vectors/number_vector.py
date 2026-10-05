@@ -5,8 +5,8 @@ def _require_number(value: object, name: str, entry_id: str) -> int | float | st
     """Narrow a raw entry value to the numeric shapes a numeric vector accepts."""
     if not isinstance(value, int | float | str):
         raise TypeError(
-            f"Vector '{name}' for '{entry_id}' expects a number, "
-            f"got {type(value).__name__}"
+            f"Vector '{name}' for id '{entry_id}' expects a number, "
+            f"got {type(value).__name__} ({value})"
         )
     return value
 

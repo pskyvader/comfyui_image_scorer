@@ -177,6 +177,8 @@ class BatchSizer:
         rebuild: bool,
         bound: int | None = None,
     ) -> int:
+        if bound == 1:
+            return 1
         _start = time.perf_counter()
         self._ensure_session_profiled()
         profile = self._active
