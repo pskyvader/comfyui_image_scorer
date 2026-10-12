@@ -245,10 +245,16 @@ def _run_step_on_config(
     combos = list(islice(iter(all_combos), max_combos))
 
     best_cfg = cfg.copy()
-    best_score = cfg["best_score"]
     best_time = cfg["training_time"]
     training_objective = config["training"]["objective"]
     improved = False
+
+    # The incumbent score is only comparable once a metric has been evaluated,
+    # because the starting sentinel has to be worse than any real score in the
+    # direction being searched. A lower-is-better metric needs a high sentinel,
+    # so the first evaluation always seeds it rather than trusting the value
+    # carried in from the previous run.
+    best_score: float | None = None
 
     for i, combo in enumerate(combos):
         logger.info("---" * 10)
@@ -258,9 +264,9 @@ def _run_step_on_config(
         higher_is_better = directions.get(primary_metric, True)
 
         arrow = ""
-        if (higher_is_better and score > best_score) or (
-            not higher_is_better and score < best_score
-        ):
+        if best_score is None or (
+            higher_is_better and score > best_score
+        ) or (not higher_is_better and score < best_score):
             best_score = score
             best_time = t_time
             best_cfg = {**merged, "best_score": score, "training_time": t_time}
@@ -268,11 +274,12 @@ def _run_step_on_config(
             improved = True
 
         logger.info(
-            "      Combo %s/%s: %s=%s  score=%.6f  time=%.2fs%s",
+            "      Combo %s/%s: %s=%s  %s=%.6f  time=%.2fs%s",
             i + 1,
             len(combos),
             chosen_key,
             f"{combo[chosen_key]:.6g}",
+            primary_metric,
             score,
             t_time,
             arrow,
@@ -280,7 +287,10 @@ def _run_step_on_config(
 
     if improved:
         logger.info(
-            "    Config improved: score=%.6f, time=%.2fs", best_score, best_time
+            "    Config improved: %s=%.6f, time=%.2fs",
+            primary_metric,
+            best_score if best_score is not None else float("nan"),
+            best_time,
         )
     else:
         logger.info("    Config unchanged: best score remains %s", best_score)
@@ -347,13 +357,16 @@ def hpo_cycle(
 
     training_objective = config["training"]["objective"]
     directions = model_trainer.METRIC_DIRECTIONS.get(training_objective, {})
-    if directions:
-        higher_is_better = any(bool(v) for v in directions.values())
-    else:
-        higher_is_better = True
+    # Sorting must follow the direction of the metric that is actually being
+    # scored, not a majority vote across every metric in the objective. With
+    # "l1" and "rmse" alongside "r2" the vote lands on higher-is-better, which
+    # would rank the worst MAE first whenever the scored metric is an error.
+    scored_metric = model_trainer.eval_metrics[0] if model_trainer.eval_metrics else ""
+    higher_is_better = directions.get(scored_metric, True)
 
     logger.info(
-        "Sorting configs with higher_is_better=%s (objective=%s)",
+        "Sorting configs by %s (higher_is_better=%s, objective=%s)",
+        scored_metric,
         higher_is_better,
         training_objective,
     )

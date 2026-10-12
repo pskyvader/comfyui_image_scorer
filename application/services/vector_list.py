@@ -441,6 +441,7 @@ class VectorList:
                         raw_vals[obj["id"]] = obj["raw"]
                         vector_data = obj["vector"]
                         vec_vals[obj["id"]] = vector_data
+
                         if v_type == self._INT:
                             int_vec_vals[obj["id"]] = [int(x) for x in vector_data]
                         if v_type in (self._MAP, self._PERSON_MAP):

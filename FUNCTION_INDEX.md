@@ -156,6 +156,7 @@ are implementation details.
 | `docs/spike_config_schema.md` | Configuration schema investigation notes. |
 | `experiments/depth_comparisons.ipynb` | Experimental depth-comparison notebook. |
 | `experiments/loop_detection.ipynb` | Experimental ranking-loop detection notebook. |
+| `experiments/random_order_scores.ipynb` | Experimental notebook measuring how far an image's score moves when the stored comparison history is replayed in random order. Scores every image in the database across `REPLAY_COUNT` random permutations, tracks the public and trueskill score forms side by side, and compares the recalculated production-order replay against the random-order spread. Reads only; writes nothing. |
 
 ## Core
 

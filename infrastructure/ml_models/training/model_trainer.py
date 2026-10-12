@@ -45,6 +45,7 @@ class ModelTrainer:
             "auc": True,
         },
         "regression": {
+            "mae": False,  # lower is better, and the score users act on
             "r2": True,
             "l2": False,
             "rmse": False,
@@ -170,7 +171,12 @@ class ModelTrainer:
         # Regression
         else:
             self.training_model = lgb.LGBMRegressor(**params)
-            self.eval_metrics = ["r2", self.r2_metric, "l2", "rmse", "l1"]
+            # "l1" is LightGBM's name for mean absolute error. It must be spelled
+            # "l1" here: LightGBM accepts "mae" but aliases it to "l1" in
+            # evals_result_, so a "mae" primary_metric is absent from the metric
+            # dict and the score it selects on is never recorded. MAE is first so
+            # it drives primary_metric, early stopping, and the HPO's choice.
+            self.eval_metrics = ["l1", "r2", self.r2_metric, "rmse", "l2"]
 
     def create_callbacks(
         self, progress_bar: Any

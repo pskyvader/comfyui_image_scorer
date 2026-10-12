@@ -263,11 +263,12 @@ class DataTransformer:
         sorted_indices = nonzero_indices[sorted_idx]
 
         cumulative = np.cumsum(sorted_importances)
+        gain_threshold = float(config["training"]["feature_gain_threshold"])
         keep_mask = np.ones(sorted_indices.shape[0], dtype=bool)
         if cumulative.size:
             cumulative = cumulative / cumulative[-1]  # normalize to 1
-            # Keep features until cumulative gain reaches threshold (e.g., 95%)
-            keep_mask = cumulative <= 0.99
+            # Keep features until cumulative gain reaches threshold
+            keep_mask = cumulative <= gain_threshold
             # Always keep at least one feature
             if not np.any(keep_mask):
                 keep_mask[0] = True

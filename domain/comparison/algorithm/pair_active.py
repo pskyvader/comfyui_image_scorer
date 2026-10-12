@@ -95,11 +95,13 @@ def phase_anchor_insert(
     _start: float = time.perf_counter()
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
     # reserve_count: int = config["ranking"]["reserve_count"]
+    seed_target_comparisons = int(config["ranking"]["seed_target_comparisons"])
 
     candidates: list[NodeProxy] = [
         node
         for node in candidate_images
-        if node.filename not in seed_pool_set and node.link_count <= insertion_target
+        # if node.filename not in seed_pool_set and
+        if node.link_count <= insertion_target
     ]
 
     if len(candidates) < 2:
@@ -108,19 +110,30 @@ def phase_anchor_insert(
             start_timer=_start,
         )
         return None
-    candidates.sort(key=lambda node: (node.link_count, node.trueskill_score))
+    candidates.sort(key=lambda node: (node.link_count, node.score))
     node_a: NodeProxy = candidates[0]
 
     pool_nodes: list[NodeProxy] = [
-        node for node in candidate_images if node.filename in seed_pool_set
+        node
+        for node in candidate_images
+        # if node.filename in seed_pool_set
+        if insertion_target < node.link_count <= seed_target_comparisons
     ]
+    lru_size: int = config["ranking"]["lru_size"]
 
     # for threshold in range(insertion_target + 1):
     #     pool_nodes = [node for node in candidates if node.link_count <= threshold]
     #     if len(pool_nodes) >= max(threshold + 2, reserve_count):
     #         break
 
-    pool_nodes.sort(key=lambda node: node.link_count)
+    pool_nodes.sort(key=lambda node: (-node.link_count, abs(node_a.score - node.score)))
+    pool_nodes = pool_nodes[:lru_size]
+    logger.debug(
+        f"first pool node score: {pool_nodes[0].score} (difference: {abs(pool_nodes[0].score - node_a.score)}, link count: {pool_nodes[0].link_count}), "
+        f"\nlast node: {pool_nodes[-1].score} (difference: {abs(pool_nodes[-1].score - node_a.score)}, link count: {pool_nodes[-1].link_count})"
+        f"\n(node a score:{node_a.score})"
+        f"\n(pool size: {len(pool_nodes)})"
+    )
 
     # remaining: list[NodeProxy] = [
     #     node for node in pool_nodes[1:] if node.filename != node_a.filename
@@ -147,7 +160,7 @@ def phase_anchor_insert(
     # nodes = nodes[:100]
 
     pair_list: list[tuple[NodeProxy, NodeProxy]] = [
-        (node_a, nodes[i + 1]) for i in range(len(nodes) - 1)
+        (node_a, nodes[i]) for i in range(len(nodes) - 1)
     ]
     # result = _closest_score_pair(pair_list, closest=True)
     pair_list.sort(key=lambda pair: abs(pair[0].score - pair[1].score))
@@ -443,9 +456,14 @@ def phase_chain_merge(
                 ),
             ]
 
-            pair_list.sort(key=lambda pair: abs(pair[0].score - pair[1].score))
+            # Sorted so the closest-scoring pairs are offered first. The dedupe
+            # has to preserve that order: a set() built here discards it, because
+            # iteration order of a set is hash order rather than insertion order.
+            # dict.fromkeys removes the duplicate pairs and keeps the ranking.
+            deduped_pairs = list(dict.fromkeys(pair_list))
+            deduped_pairs.sort(key=lambda pair: abs(pair[0].score - pair[1].score))
 
-            for node_a, node_b in set(pair_list):
+            for node_a, node_b in deduped_pairs:
                 # if abs(node_a.score - node_b.score) > score_threshold:
                 #     continue
 
