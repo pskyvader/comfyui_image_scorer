@@ -128,12 +128,12 @@ def phase_anchor_insert(
 
     pool_nodes.sort(key=lambda node: (-node.link_count, abs(node_a.score - node.score)))
     pool_nodes = pool_nodes[:lru_size]
-    logger.debug(
-        f"first pool node score: {pool_nodes[0].score} (difference: {abs(pool_nodes[0].score - node_a.score)}, link count: {pool_nodes[0].link_count}), "
-        f"\nlast node: {pool_nodes[-1].score} (difference: {abs(pool_nodes[-1].score - node_a.score)}, link count: {pool_nodes[-1].link_count})"
-        f"\n(node a score:{node_a.score})"
-        f"\n(pool size: {len(pool_nodes)})"
-    )
+    # logger.debug(
+    #     f"first pool node score: {pool_nodes[0].score} (difference: {abs(pool_nodes[0].score - node_a.score)}, link count: {pool_nodes[0].link_count}), "
+    #     f"\nlast node: {pool_nodes[-1].score} (difference: {abs(pool_nodes[-1].score - node_a.score)}, link count: {pool_nodes[-1].link_count})"
+    #     f"\n(node a score:{node_a.score})"
+    #     f"\n(pool size: {len(pool_nodes)})"
+    # )
 
     # remaining: list[NodeProxy] = [
     #     node for node in pool_nodes[1:] if node.filename != node_a.filename
