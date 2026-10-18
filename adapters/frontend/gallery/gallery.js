@@ -74,7 +74,7 @@ class GalleryView {
             modalImage: document.getElementById("modal-image"),
             modalFilename: document.getElementById("modal-filename"),
             modalMetadata: document.getElementById("modal-metadata"),
-            modalClose: this.container?.querySelector(".modal-close"),
+            modalClose: document.getElementById("modal-close"),
             modalPrev: document.getElementById("modal-prev"),
             modalNext: document.getElementById("modal-next"),
             modalHistory: document.getElementById("modal-history"),
@@ -435,7 +435,7 @@ class GalleryView {
             }
 
             // Add click handlers to history items
-            this.container?.querySelectorAll(".history-item")
+            this.els.modalHistory.querySelectorAll(".history-item")
                 .forEach((item) => {
                     item.addEventListener("click", () => {
                         const opponent = decodeURIComponent(item.dataset.opponent);

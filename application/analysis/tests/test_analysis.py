@@ -71,8 +71,25 @@ def _rows(rows: list[dict[str, Any]] | None = None) -> Any:
     return lambda: iter(list(data))
 
 
-def _terms(group: dict[str, Any]) -> set[str]:
-    return {term for term, _ in group["top_terms"]}
+def _terms(summary: parameter_analysis_module.TermCorrelationSummary) -> set[str]:
+    return {str(record["term"]) for record in summary.terms}
+
+
+def _corpus(prefix: str, terms: list[str], count: int) -> list[dict[str, Any]]:
+    """Distinctly named rows that all carry the same terms.
+
+    Filenames have to differ: the analyzers join on filename, so repeated keys
+    would collapse into one scored image.
+    """
+    return [
+        {
+            f"{prefix}{index}.png": {
+                "positive_prompt": ", ".join(terms),
+                "negative_prompt": "",
+            }
+        }
+        for index in range(count)
+    ]
 
 
 def test_rows_are_single_key_filename_objects() -> None:
@@ -148,18 +165,23 @@ def test_parameter_analysis_writes_the_stats_that_were_never_written(
     assert lora["max"] == pytest.approx(0.8)
 
 
-def test_terms_are_weighted_and_groups_are_separate(tmp_path: Path) -> None:
+def test_terms_are_weighted_and_groups_are_separate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Two images cannot clear the production floor, and most terms here appear
+    # once, so this test drops the floor to 1. It checks which terms are
+    # recognised and kept apart, not which ones survive on real data.
+    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 1)
     analyzer = parameter_analysis_module.ParameterAnalyzer(
         _inputs(), _rows(), output_dir=str(tmp_path)
     )
-    analyzer.analyze_term_correlations()
+    summaries = analyzer.analyze_term_correlations()
 
     payload = json.loads((tmp_path / "term_correlations.json").read_text())
-    positive = payload["positive"]
-    negative = payload["negative"]
+    assert payload["min_term_images"] == 1
 
-    positive_terms = _terms(positive)
-    negative_terms = _terms(negative)
+    positive_terms = _terms(summaries["positive"])
+    negative_terms = _terms(summaries["negative"])
 
     # extract_terms strips the weighting syntax, so "hair" survives without the
     # parentheses and colon rather than as the raw "(hair:1.2)" text.
@@ -177,20 +199,125 @@ def test_terms_are_weighted_and_groups_are_separate(tmp_path: Path) -> None:
     assert "smile" in positive_terms
 
     assert payload["rows_analyzed"] == 2
+    assert summaries["positive"].rows_analyzed == 2
 
 
-def test_prompt_tags_take_priority_over_the_sidecar_prompt(tmp_path: Path) -> None:
+def test_prompt_tags_take_priority_over_the_sidecar_prompt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 1)
     inputs = _inputs(prompt_tags={"a.png": "from_database", "b.png": "other_tag"})
     analyzer = parameter_analysis_module.ParameterAnalyzer(
         inputs, _rows(), output_dir=str(tmp_path)
     )
-    analyzer.analyze_term_correlations()
+    summaries = analyzer.analyze_term_correlations()
 
-    payload = json.loads((tmp_path / "term_correlations.json").read_text())
-    terms = _terms(payload["positive"])
+    terms = _terms(summaries["positive"])
     assert "from_database" in terms
     assert "other_tag" in terms
     assert "smile" not in terms
+
+
+def test_terms_below_the_floor_are_counted_not_ranked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 100)
+    analyzer = parameter_analysis_module.ParameterAnalyzer(
+        _inputs(), _rows(), output_dir=str(tmp_path)
+    )
+    summaries = analyzer.analyze_term_correlations()
+
+    positive = summaries["positive"]
+    # The terms exist but two images cannot support a ranking.
+    assert positive.unique_terms > 0
+    assert positive.kept_terms == 0
+    assert positive.dropped_below_floor == positive.unique_terms
+    assert positive.terms == []
+
+
+def test_a_kept_term_reports_both_presence_figures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 3)
+    rows = _corpus("in", ["smile", "hair"], 4) + _corpus("out", ["hair"], 1)
+    scores = {
+        **{f"in{index}.png": 0.9 for index in range(4)},
+        "out0.png": 0.1,
+    }
+    analyzer = parameter_analysis_module.ParameterAnalyzer(
+        _inputs(scores=scores), _rows(rows), output_dir=str(tmp_path)
+    )
+    summaries = analyzer.analyze_term_correlations()
+
+    records = {str(record["term"]): record for record in summaries["positive"].terms}
+    assert set(records) == {"smile", "hair"}
+
+    smile = records["smile"]
+    # The weighted mean is a separate figure from the plain presence mean, so a
+    # term used with an explicit weight cannot masquerade as a strong effect.
+    assert smile["count"] == 4
+    assert smile["avg_score"] == pytest.approx(0.9)
+    assert smile["weighted_avg_score"] == pytest.approx(0.9)
+    assert smile["baseline_avg_score"] == pytest.approx(0.1)
+    assert smile["delta"] == pytest.approx(0.8)
+    assert 0.0 <= smile["p_value"] <= 1.0
+    assert smile["cliffs_delta"] == pytest.approx(1.0)
+
+    # "hair" is in every image, so there is nothing to compare it against and
+    # the baseline falls back to the group's own mean.
+    hair = records["hair"]
+    assert hair["count"] == 5
+    assert hair["delta"] == pytest.approx(0.0)
+
+
+def test_term_records_are_ordered_by_delta_and_corrected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 4)
+    rows = _corpus("good", ["good"], 6) + _corpus("bad", ["bad"], 6)
+    scores = {f"good{index}.png": 0.8 for index in range(6)}
+    scores.update({f"bad{index}.png": 0.2 for index in range(6)})
+    analyzer = parameter_analysis_module.ParameterAnalyzer(
+        _inputs(scores=scores), _rows(rows), output_dir=str(tmp_path)
+    )
+    summaries = analyzer.analyze_term_correlations()
+
+    terms = summaries["positive"].terms
+    assert [str(record["term"]) for record in terms] == ["bad", "good"]
+    assert all(0.0 <= float(record["q_value"]) <= 1.0 for record in terms)
+    # Both terms have the same separation here, so they share a raw p-value. The
+    # largest scaled value is p * 2/1 and the smallest p * 2/2, and the
+    # monotonicity step pulls the smallest down to the largest-rank figure.
+    raw = [float(record["p_value"]) for record in terms]
+    assert raw[0] == pytest.approx(raw[1])
+    assert terms[0]["q_value"] == pytest.approx(raw[0])
+    assert terms[1]["q_value"] == pytest.approx(raw[1])
+    assert all(
+        float(record["q_value"]) >= float(record["p_value"]) for record in terms
+    )
+
+
+def test_negative_prompt_terms_are_reported_separately(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 4)
+    rows = [
+        {
+            f"img{index}.png": {"positive_prompt": "smile", "negative_prompt": "blurry"}
+        }
+        for index in range(5)
+    ]
+    # Distinct filenames per row: the analyzers join on filename, so repeated
+    # keys would collapse into a single scored image.
+    analyzer = parameter_analysis_module.ParameterAnalyzer(
+        _inputs(scores={f"img{index}.png": 0.5 for index in range(5)}),
+        _rows(rows),
+        output_dir=str(tmp_path),
+    )
+    summaries = analyzer.analyze_term_correlations()
+
+    assert _terms(summaries["negative"]) == {"blurry"}
+    assert _terms(summaries["positive"]) == {"smile"}
 
 
 def test_rows_without_a_score_are_skipped(tmp_path: Path) -> None:

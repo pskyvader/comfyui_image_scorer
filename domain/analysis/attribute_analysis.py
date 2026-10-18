@@ -73,9 +73,6 @@ class FaceAttributeAnalyzer:
             self._output_dim = output_dim
             self._processor = processor
 
-    def predict(self, img: Image.Image) -> dict[str, list[dict[str, float]]]:
-        return self.predict_batch([img])[0]
-
     def predict_batch(
         self, imgs: Sequence[Image.Image]
     ) -> list[dict[str, list[dict[str, float]]]]:
@@ -147,9 +144,6 @@ class NSFWAnalyzer:
         self._model = model
         self._output_dim = output_dim
         self._processor = processor
-
-    def predict(self, img: Image.Image) -> float:
-        return self.predict_batch([img])[0]
 
     def predict_batch(self, imgs: Sequence[Image.Image]) -> list[float]:
         self._ensure_loaded()

@@ -88,6 +88,13 @@
             "alias": []
         },
         {
+            "name": "denoise",
+            "type": "float",
+            "max_normalization": null,
+            "slot_size": 1,
+            "alias": []
+        },
+        {
             "name": "nsfw_score",
             "type": "float",
             "max_normalization": null,

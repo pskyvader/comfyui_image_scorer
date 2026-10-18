@@ -6,7 +6,7 @@ import torch
 from tqdm import tqdm
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import cast
 from skimage.feature import local_binary_pattern
 
@@ -335,13 +335,15 @@ class ImageAnalysis(ImageVector):
         entry["analysis"] = analysis
         return entry
 
-    def _nsfw_analysis(
-        self, img: Image.Image, entry: dict[str, object]
-    ) -> dict[str, object]:
-        if "nsfw_score" in entry:
-            return entry
-        entry["nsfw_score"] = self._nsfw.predict(img)
-        return entry
+    def analyze_face_attributes(
+        self, imgs: Sequence[Image.Image]
+    ) -> list[dict[str, list[dict[str, float]]]]:
+        """Perceived age, gender and race for each image, one entry per person."""
+        return self._face_attr.predict_batch(imgs)
+
+    def analyze_nsfw(self, imgs: Sequence[Image.Image]) -> list[float]:
+        """NSFW probability for each image."""
+        return self._nsfw.predict_batch(imgs)
 
     def _run_attribute_pass(
         self,
@@ -440,7 +442,6 @@ class ImageAnalysis(ImageVector):
             entry = self._edge_density(img, entry)
             entry = self._texture_lbp(img, entry)
             entry = self._mediapipe_analysis(img, entry)
-            # entry= self._nsfw_analysis(img, entry)
             entry = self._assemble_analysis_map(entry)
             data_batch[i] = (path, entry, cat, extra)
 

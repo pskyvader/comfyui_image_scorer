@@ -73,6 +73,7 @@ class ScoringService:
         lora_strength: float,
         min_images: int = 1,
         max_images: int = 10,
+        denoise: float = 0.9,
     ) -> tuple[torch.Tensor, torch.Tensor, bool, list[float]]:
         assert len(image) >= 1, "'image' must contain at least one image."
         if not positive.strip():
@@ -83,6 +84,8 @@ class ScoringService:
             raise ValueError("'steps' must be an integer between 1 and 1000.")
         if not (0.0 <= float(cfg) <= 100.0):
             raise ValueError("'cfg' must be a float between 0.0 and 100.0.")
+        if not (0.0 <= float(denoise) <= 1.0):
+            raise ValueError("'denoise' must be a float between 0.0 and 1.0.")
         if not sampler.strip():
             raise ValueError("'sampler' must be a non-empty string.")
         if not scheduler.strip():
@@ -95,6 +98,7 @@ class ScoringService:
         entry: dict[str, object] = {
             "steps": steps,
             "cfg": cfg,
+            "denoise": denoise,
             "sampler": sampler,
             "scheduler": scheduler,
             "model_name": model_name,
@@ -123,7 +127,7 @@ class ScoringService:
 
             processed_data.extend(data_batch)
 
-        face_result = image_analysis._face_attr.predict_batch(images_list)
+        face_result = image_analysis.analyze_face_attributes(images_list)
         for idx, r in enumerate(face_result):
             path, entry, cat, extra = processed_data[idx]
             entry["age"] = r["age"]
@@ -131,7 +135,7 @@ class ScoringService:
             entry["race"] = r["race"]
             processed_data[idx] = (path, entry, cat, extra)
 
-        nsfw_result = image_analysis._nsfw.predict_batch(images_list)
+        nsfw_result = image_analysis.analyze_nsfw(images_list)
         for idx, r in enumerate(nsfw_result):
             path, entry, cat, extra = processed_data[idx]
             entry["nsfw_score"] = r

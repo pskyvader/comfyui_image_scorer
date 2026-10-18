@@ -8,6 +8,7 @@ trusting row order, and the text sidecar is streamed rather than materialized.
 """
 
 import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, cast
 
@@ -15,6 +16,11 @@ import numpy as np
 
 from ...core.filesystem.paths import analysis_dir
 from ...core.observability.logger import get_logger, ModuleLogger
+from ...domain.training.statistics import (
+    benjamini_hochberg,
+    cliffs_delta,
+    mann_whitney_pvalue,
+)
 from ...domain.vectors.terms import extract_terms
 from .inputs import AnalysisInputs
 from .row_fields import as_number, as_weight_map, strongest
@@ -23,6 +29,31 @@ logger: ModuleLogger = get_logger(__name__)
 
 NUMERIC_PARAMS: tuple[str, ...] = ("steps", "cfg")
 CATEGORY_PARAMS: tuple[str, ...] = ("sampler", "scheduler", "model")
+
+# A term seen on a handful of images still yields a mean and a p-value, and this
+# dataset holds over ten thousand distinct terms, so the floor is what keeps the
+# ranking readable and the correction meaningful.
+MIN_TERM_IMAGES: int = 100
+
+
+@dataclass(frozen=True)
+class TermCorrelationSummary:
+    """How the terms of one prompt polarity line up with the score.
+
+    ``terms`` holds one record per term that cleared ``MIN_TERM_IMAGES``, ordered
+    by ``delta`` from lowest to highest. ``p_value`` comes from a Mann-Whitney U
+    test of the images carrying the term against those that do not, ``q_value``
+    is that p-value after Benjamini-Hochberg correction across the kept terms,
+    and ``cliffs_delta`` is the effect size, which stays interpretable when the
+    p-value does not.
+    """
+
+    polarity: str
+    rows_analyzed: int
+    unique_terms: int
+    kept_terms: int
+    dropped_below_floor: int
+    terms: list[dict[str, object]]
 
 
 class ParameterAnalyzer:
@@ -122,65 +153,123 @@ class ParameterAnalyzer:
             return []
         return [(term, weight) for term, weight, _ in extract_terms(text).terms]
 
-    def analyze_term_correlations(self) -> None:
+    def analyze_term_correlations(self) -> dict[str, TermCorrelationSummary]:
+        """Score every weighted prompt term and report the effect of having it.
+
+        Each term is measured twice: an unweighted mean score for the images that
+        carry it, and the older score-times-weight mean, which reflects how
+        prominently the prompt used the term. The weighted figure alone mixes
+        "this term appears" with "this term is weighted up", so it cannot say
+        whether a term helps.
+        """
         logger.info("  - Extracting term correlations...")
-        positive: dict[str, list[float]] = {}
-        negative: dict[str, list[float]] = {}
+        positive: dict[str, list[int]] = {}
+        positive_weights: dict[str, list[float]] = {}
+        negative: dict[str, list[int]] = {}
+        negative_weights: dict[str, list[float]] = {}
+        scores: list[float] = []
         analyzed = 0
 
-        for filename, payload, score in self._iter_scored_rows():
-            for term, weight in self._weighted_terms(
-                self._positive_prompt(filename, payload)
-            ):
-                positive.setdefault(term, []).append(score * weight)
-
-            raw_negative = payload.get("negative_prompt")
-            for term, weight in self._weighted_terms(
-                raw_negative if isinstance(raw_negative, str) else ""
-            ):
-                negative.setdefault(term, []).append(score * weight)
+        for row_index, (filename, payload, score) in enumerate(self._iter_scored_rows()):
+            scores.append(score)
+            for target, weights in ((positive, positive_weights), (negative, negative_weights)):
+                text = (
+                    self._positive_prompt(filename, payload)
+                    if target is positive
+                    else payload.get("negative_prompt")
+                )
+                for term, weight in self._weighted_terms(
+                    text if isinstance(text, str) else ""
+                ):
+                    target.setdefault(term, []).append(row_index)
+                    weights.setdefault(term, []).append(weight)
 
             analyzed += 1
 
-        positive_stats = self._summarize(positive)
-        negative_stats = self._summarize(negative)
+        summaries = {
+            "positive": self._summarize(
+                "positive", positive, positive_weights, scores
+            ),
+            "negative": self._summarize(
+                "negative", negative, negative_weights, scores
+            ),
+        }
         logger.info("  - Analyzed %d scored rows", analyzed)
-        logger.info("  - Found %d unique positive terms", positive_stats["total_unique_terms"])
-        logger.info("  - Found %d unique negative terms", negative_stats["total_unique_terms"])
+        for polarity, summary in summaries.items():
+            logger.info(
+                "  - %s: %d unique terms, %d above the floor of %d, %d dropped",
+                polarity,
+                summary.unique_terms,
+                summary.kept_terms,
+                MIN_TERM_IMAGES,
+                summary.dropped_below_floor,
+            )
 
         with open(self.output_dir / "term_correlations.json", "w") as f:
             json.dump(
                 {
-                    "positive": positive_stats,
-                    "negative": negative_stats,
                     "rows_analyzed": analyzed,
+                    "min_term_images": MIN_TERM_IMAGES,
+                    **{name: asdict(summary) for name, summary in summaries.items()},
                 },
                 f,
                 indent=2,
             )
+        return summaries
 
     @staticmethod
-    def _summarize(scores: dict[str, list[float]]) -> dict[str, Any]:
-        """Rank one term group by mean weighted score, keeping both tails."""
-        stats: dict[str, dict[str, float | int]] = {}
-        for term, values in scores.items():
-            if not values:
+    def _summarize(
+        polarity: str,
+        rows_by_term: dict[str, list[int]],
+        weights: dict[str, list[float]],
+        all_scores: list[float],
+    ) -> TermCorrelationSummary:
+        """Rank one term group by the score gap between carrying and not carrying it."""
+        kept: dict[str, dict[str, float | int]] = {}
+        for term, term_rows in rows_by_term.items():
+            if len(term_rows) < MIN_TERM_IMAGES:
                 continue
-            stats[term] = {
+            values = np.asarray(
+                [all_scores[index] for index in term_rows], dtype=np.float64
+            )
+            present = set(term_rows)
+            rest = np.asarray(
+                [value for index, value in enumerate(all_scores) if index not in present],
+                dtype=np.float64,
+            )
+            baseline = float(np.mean(rest)) if rest.size else float(np.mean(values))
+            kept[term] = {
+                "count": len(term_rows),
                 "avg_score": float(np.mean(values)),
+                "median_score": float(np.median(values)),
                 "std_dev": float(np.std(values)),
-                "count": len(values),
+                "weighted_avg_score": float(
+                    np.mean(np.asarray(weights[term], dtype=np.float64) * values)
+                ),
                 "max_score": float(np.max(values)),
                 "min_score": float(np.min(values)),
+                "baseline_avg_score": baseline,
+                "delta": float(np.mean(values)) - baseline,
+                "p_value": mann_whitney_pvalue(values.tolist(), rest.tolist()),
+                "cliffs_delta": cliffs_delta(values.tolist(), rest.tolist()),
             }
-        ranked = sorted(
-            stats.items(), key=lambda item: item[1]["avg_score"], reverse=True
+
+        ordered = sorted(kept.items(), key=lambda item: item[1]["delta"])
+        corrected = benjamini_hochberg(
+            [float(item[1]["p_value"]) for item in ordered]
         )
-        return {
-            "total_unique_terms": len(stats),
-            "top_terms": ranked[:50],
-            "bottom_terms": ranked[-50:],
-        }
+        records: list[dict[str, object]] = []
+        for (term, stats), q_value in zip(ordered, corrected):
+            records.append({"term": term, **stats, "q_value": float(q_value)})
+
+        return TermCorrelationSummary(
+            polarity=polarity,
+            rows_analyzed=len(all_scores),
+            unique_terms=len(rows_by_term),
+            kept_terms=len(records),
+            dropped_below_floor=len(rows_by_term) - len(records),
+            terms=records,
+        )
 
     def _save_scalar_stats(self, filename: str, values: list[float]) -> None:
         with open(self.output_dir / filename, "w") as f:

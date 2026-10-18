@@ -1,4 +1,4 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 import os
 import time
@@ -8,8 +8,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from matplotlib.colors import Normalize
-from scipy.stats import mannwhitneyu
-
+from PIL import Image
 plt: Any = plt
 from sklearn.metrics import r2_score
 from statistics import mean, stdev
@@ -21,6 +20,7 @@ import math
 from ...domain.ports.loading import TrainingLoader
 from ...core.configuration.settings import config
 from ...domain.training.calibration import apply_score_calibration, extract_score_calibration
+from ...domain.training.statistics import mann_whitney_pvalue
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -755,105 +755,198 @@ class PlotManager:
         plt.show()
 
     @staticmethod
-    def prepare_face_data(
-        text_data: list[dict[str, Any]],
-        scores: Sequence[float],
-    ) -> tuple[
-        pd.DataFrame,
-        pd.DataFrame,
-        list[float],
-        list[float],
-        list[float],
-        list[float],
-        list[float],
-        list[float],
-        int,
-    ]:
-        AGE_LABELS = [
-            "0-2",
-            "3-9",
-            "10-19",
-            "20-29",
-            "30-39",
-            "40-49",
-            "50-59",
-            "60-69",
-            "70+",
-        ]
-        GENDER_LABELS = ["Female", "Male"]
-        RACE_LABELS = [
-            "Black",
-            "East Asian",
-            "Indian",
-            "Latino_Hispanic",
-            "Middle Eastern",
-            "Southeast Asian",
-            "White",
-        ]
+    def plot_correlation_bars(
+        labels: Sequence[str],
+        coefficients: Sequence[float],
+        ci_low: Sequence[float],
+        ci_high: Sequence[float],
+        q_values: Sequence[float] | None = None,
+        value_label: str = "Spearman rho (higher is stronger)",
+        title: str = "Feature correlation with score",
+    ) -> None:
+        """Rank features by correlation with the score, with bootstrap intervals.
 
-        face_logit_rows: list[dict[str, Any]] = []
-        bbox_rows: list[dict[str, Any]] = []
-        pose_score: list[float] = []
-        no_pose_score: list[float] = []
-        lh_score: list[float] = []
-        no_lh_score: list[float] = []
-        rh_score: list[float] = []
-        no_rh_score: list[float] = []
+        A feature whose interval crosses zero has no measurable relationship at
+        this sample size, which the vertical line makes visible across all bars
+        instead of leaving it to be judged one bar at a time.
+        """
+        if not labels:
+            logger.info("No labels to plot")
+            return
 
-        for i in range(len(text_data)):
-            outer = text_data[i]
-            d = outer[next(iter(outer))]
-            s = float(scores[i])
-
-            age_list: list[dict[str, Any]] = d.get("age") or []
-            gender_list: list[dict[str, Any]] = d.get("gender") or []
-            race_list: list[dict[str, Any]] = d.get("race") or []
-            if age_list and gender_list and race_list:
-                age0 = age_list[0]
-                gender0 = gender_list[0]
-                race0 = race_list[0]
-                row = {"score": s}
-                for lbl in AGE_LABELS:
-                    row[f"age_{lbl}"] = float(age0.get(lbl, 0.0))
-                for lbl in GENDER_LABELS:
-                    row[f"gender_{lbl}"] = float(gender0.get(lbl, 0.0))
-                for lbl in RACE_LABELS:
-                    row[f"race_{lbl}"] = float(race0.get(lbl, 0.0))
-                face_logit_rows.append(row)
-
-            bbox: list[dict[str, Any]] = d.get("bbox") or []
-            if bbox:
-                b = bbox[0]
-                bbox_rows.append(
-                    {
-                        "x": b.get("x", 0.0),
-                        "y": b.get("y", 0.0),
-                        "w": b.get("width", 0.0),
-                        "h": b.get("height", 0.0),
-                        "conf": b.get("confidence", 1.0),
-                        "score": s,
-                    }
-                )
-
-            if d.get("nose"):
-                pose_score.append(s)
-            else:
-                no_pose_score.append(s)
-
-        df_face = pd.DataFrame(face_logit_rows)
-        df_bbox = pd.DataFrame(bbox_rows)
-        n = len(text_data)
-        return (
-            df_face,
-            df_bbox,
-            pose_score,
-            no_pose_score,
-            lh_score,
-            no_lh_score,
-            rh_score,
-            no_rh_score,
-            n,
+        pairs = sorted(
+            zip(labels, coefficients, ci_low, ci_high, strict=True),
+            key=lambda item: item[1],
         )
+        ranked_labels = [item[0] for item in pairs]
+        values = [item[1] for item in pairs]
+        lows = [item[2] for item in pairs]
+        highs = [item[3] for item in pairs]
+        errors = [
+            [max(0.0, value - low) for value, low in zip(values, lows, strict=True)],
+            [max(0.0, high - value) for value, high in zip(values, highs, strict=True)],
+        ]
+
+        axis = plt.subplots(figsize=(11, max(4.0, 0.32 * len(pairs))))[1]
+        positions = np.arange(len(pairs))
+        axis.barh(positions, values, xerr=errors, color="steelblue", alpha=0.75)
+        axis.axvline(0.0, color="black", linewidth=1.5, linestyle="-")
+        axis.set_yticks(positions)
+        axis.set_yticklabels(ranked_labels, fontsize=8)
+        axis.set_xlabel(value_label)
+        axis.set_title(title)
+        axis.grid(axis="x", linestyle=":", alpha=0.5)
+
+        if q_values is not None:
+            significant = sum(1 for value in q_values if value <= 0.05)
+            axis.text(
+                0.99,
+                0.02,
+                f"{significant}/{len(q_values)} features survive FDR q <= 0.05",
+                transform=axis.transAxes,
+                ha="right",
+                fontsize=8,
+                color="dimgray",
+            )
+
+        plt.tight_layout()
+        plt.show()
+
+    @staticmethod
+    def plot_correlation_heatmap(
+        matrix: np.ndarray, labels: Sequence[str], title: str = "Feature redundancy"
+    ) -> None:
+        """Show one correlation matrix as an annotated grid.
+
+        A full feature-by-feature table is unreadable at this scale, so this is
+        meant for the handful of features that actually track the score.
+        """
+        size = len(labels)
+        if size == 0 or matrix.shape != (size, size):
+            logger.info("Heatmap needs a square matrix matching the labels")
+            return
+
+        fig, ax = plt.subplots(figsize=(1.1 * size + 3.0, 0.9 * size + 2.0))
+        image = ax.imshow(matrix, cmap="coolwarm", vmin=-1.0, vmax=1.0)
+        ax.set_xticks(np.arange(size))
+        ax.set_yticks(np.arange(size))
+        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+        ax.set_yticklabels(labels, fontsize=8)
+        ax.set_title(title)
+        for row in range(size):
+            for column in range(size):
+                value = matrix[row, column]
+                ax.text(
+                    column,
+                    row,
+                    f"{value:.2f}",
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    color="white" if abs(value) > 0.55 else "black",
+                )
+        fig.colorbar(image, ax=ax, shrink=0.8, label="correlation")
+        plt.tight_layout()
+        plt.show()
+
+    @staticmethod
+    def plot_image_grid(
+        filenames: Sequence[str],
+        titles: Sequence[str],
+        path_for: Callable[[str], str | None],
+        columns: int = 4,
+        title: str = "",
+    ) -> None:
+        """Show scored images side by side, resolved through the caller's path lookup.
+
+        `path_for` is supplied rather than imported so this stays a plotting
+        concern: the caller owns where images live on disk, and a filename it
+        cannot resolve is skipped rather than plotted as an empty panel.
+        """
+        images: list[np.ndarray] = []
+        captions: list[str] = []
+        for position, filename in enumerate(filenames):
+            path = path_for(filename)
+            if path is None:
+                logger.info("no path resolved for %s", filename)
+                continue
+            with Image.open(path) as handle:
+                images.append(np.asarray(handle.convert("RGB")))
+            captions.append(titles[position] if position < len(titles) else filename)
+
+        if not images:
+            logger.info("No images resolved for the grid")
+            return
+
+        rows = (len(images) + columns - 1) // columns
+        fig, axes = plt.subplots(
+            rows, columns, figsize=(columns * 3.2, rows * 3.6), squeeze=False
+        )
+        for index, axis in enumerate(axes.flat):
+            if index < len(images):
+                axis.imshow(images[index])
+                axis.set_title(captions[index], fontsize=7)
+                axis.axis("off")
+            else:
+                axis.axis("off")
+        if title:
+            fig.suptitle(title, fontsize=12)
+        plt.tight_layout()
+        plt.show()
+
+    @staticmethod
+    def plot_detection_presence(
+        pose_score: list[float],
+        no_pose_score: list[float],
+        lh_score: list[float],
+        no_lh_score: list[float],
+        rh_score: list[float],
+        no_rh_score: list[float],
+        visibility_threshold: float = 0.5,
+    ) -> None:
+        """Boxplot the score of detected against undetected images per detector.
+
+        The left/right panels were once driven by whole-image `left_hand` and
+        `right_hand` booleans that no longer exist; the caller now derives those
+        splits from landmark visibility and passes the lists in. A split with an
+        empty side is reported as such rather than plotted, because a boxplot of
+        one group would read as a real comparison.
+        """
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
+        detect_pairs = [
+            ("Body Pose", pose_score, no_pose_score),
+            ("Left Hand", lh_score, no_lh_score),
+            ("Right Hand", rh_score, no_rh_score),
+        ]
+        for ax, (name, detected, undetected) in zip(axes, detect_pairs):
+            if not detected or not undetected:
+                ax.set_title(
+                    f"{name}\\nnot comparable: {len(detected)} detected / "
+                    f"{len(undetected)} not"
+                )
+                ax.axis("off")
+                continue
+            bp = ax.boxplot(
+                [detected, undetected],
+                labels=[f"Detected\\n(n={len(detected):,})", f"Not detected\\n(n={len(undetected):,})"],
+                patch_artist=True,
+            )
+            bp["boxes"][0].set_facecolor("steelblue")
+            bp["boxes"][1].set_facecolor("lightcoral")
+            # The shared helper owns the test and the minimum group size, so the
+            # panel label and the module agree on what counts as comparable.
+            ax.set_title(
+                f"{name}\\nMann-Whitney p = "
+                f"{mann_whitney_pvalue(detected, undetected):.3g}"
+            )
+            ax.grid(axis="y", linestyle=":", alpha=0.4)
+        axes[0].set_ylabel("Score (public score, 0-1)")
+        fig.suptitle(
+            f"Score by detection presence (landmark visibility > {visibility_threshold})",
+            fontsize=13,
+        )
+        plt.tight_layout()
+        plt.show()
 
     @staticmethod
     def plot_face_bbox(df_bbox: pd.DataFrame) -> None:
@@ -979,47 +1072,6 @@ class PlotManager:
         for j in range(n_pos, rows * cols):
             axes.flat[j].axis("off")
         fig.suptitle(group_name, fontsize=14)
-        plt.tight_layout()
-        plt.show()
-
-    @staticmethod
-    def plot_detection_presence(
-        pose_score: list[float],
-        no_pose_score: list[float],
-        lh_score: list[float],
-        no_lh_score: list[float],
-        rh_score: list[float],
-        no_rh_score: list[float],
-    ) -> None:
-        fig, axes = plt.subplots(1, 3, figsize=(14, 5), sharey=True)
-        detect_pairs = [
-            ("Body Pose", pose_score, no_pose_score),
-            ("Left Hand", lh_score, no_lh_score),
-            ("Right Hand", rh_score, no_rh_score),
-        ]
-        for ax, (name, yes, no) in zip(axes, detect_pairs):
-            bp = ax.boxplot(
-                [yes, no],
-                labels=[f"Detected\n(n={len(yes)})", f"Not\n(n={len(no)})"],
-                patch_artist=True,
-            )
-            bp["boxes"][0].set_facecolor("steelblue")
-            bp["boxes"][1].set_facecolor("lightcoral")
-            ax.set_title(f"{name}")
-            ax.axhline(0, color="gray", ls=":", alpha=0.3)
-            if len(yes) > 0 and len(no) > 0:
-                _, p = mannwhitneyu(yes, no, alternative="two-sided")
-                ax.text(
-                    0.5,
-                    0.95,
-                    f"MW p={p:.4f}",
-                    transform=ax.transAxes,
-                    ha="center",
-                    fontsize=9,
-                    style="italic",
-                )
-        axes[0].set_ylabel("Score")
-        fig.suptitle("Detection Presence vs Score")
         plt.tight_layout()
         plt.show()
 

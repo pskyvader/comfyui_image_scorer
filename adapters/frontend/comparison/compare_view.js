@@ -90,9 +90,9 @@ const CompareView = (() => {
             }
         }
         if (phase && phase.show_mu_sigma) {
+            lines.push(`TS: ${node.trueskill_score.toFixed(2)}`);
             lines.push(`μ: ${node.rating_mu.toFixed(2)}`);
             lines.push(`σ: ${node.rating_sigma.toFixed(2)}`);
-            lines.push(`TS: ${node.trueskill_score.toFixed(2)}`);
         }
         if (phase && phase.show_wins_losses) {
             const wins = node.wins ?? 0;

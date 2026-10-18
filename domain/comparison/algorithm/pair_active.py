@@ -94,39 +94,36 @@ def phase_anchor_insert(
 ) -> tuple[NodeProxy, NodeProxy] | None:
     _start: float = time.perf_counter()
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
-    # reserve_count: int = config["ranking"]["reserve_count"]
-    seed_target_comparisons = int(config["ranking"]["seed_target_comparisons"])
 
     candidates: list[NodeProxy] = [
         node
         for node in candidate_images
-        # if node.filename not in seed_pool_set and
         if node.link_count <= insertion_target
     ]
 
-    if len(candidates) < 2:
+    # A single new image is a valid node_a: opponents come from the seed pool,
+    # not from the other candidates, so only an empty lane means "no work".
+    if not candidates:
         logger.warning(
-            f"pool too small ({len(candidates)} < {2})",
+            "pool too small (0 images at or below the insertion target)",
             start_timer=_start,
         )
         return None
     candidates.sort(key=lambda node: (node.link_count, node.score))
     node_a: NodeProxy = candidates[0]
 
+    # Opponents are drawn from the seed pool so a newcomer is tested against
+    # the reference set instead of against other newcomers. Sorting by lowest
+    # link_count first spreads comparisons evenly across the pool; score
+    # distance only breaks ties, so it cannot concentrate traffic.
     pool_nodes: list[NodeProxy] = [
         node
         for node in candidate_images
-        # if node.filename in seed_pool_set
-        if insertion_target < node.link_count <= seed_target_comparisons
+        if node.filename in seed_pool_set and node.filename != node_a.filename
     ]
     lru_size: int = config["ranking"]["lru_size"]
 
-    # for threshold in range(insertion_target + 1):
-    #     pool_nodes = [node for node in candidates if node.link_count <= threshold]
-    #     if len(pool_nodes) >= max(threshold + 2, reserve_count):
-    #         break
-
-    pool_nodes.sort(key=lambda node: (-node.link_count, abs(node_a.score - node.score)))
+    pool_nodes.sort(key=lambda node: (node.link_count, abs(node_a.score - node.score)))
     pool_nodes = pool_nodes[:lru_size]
     # logger.debug(
     #     f"first pool node score: {pool_nodes[0].score} (difference: {abs(pool_nodes[0].score - node_a.score)}, link count: {pool_nodes[0].link_count}), "
@@ -154,16 +151,21 @@ def phase_anchor_insert(
         if canonicalize_pair(node_a.filename, node.filename) not in existing_pair_set
         # and not cg.are_in_same_path(node_a.filename, node.filename)
     ]
-    if len(nodes) < 2:
-        logger.debug(f"no pair found out of {len(nodes)} opponents")
+    # One surviving opponent is enough: the pair is (node_a, opponent). Requiring
+    # two discarded a valid comparison whenever the pool was small or most of
+    # its members had already been played.
+    if not nodes:
+        logger.debug("no pair found, every pool opponent was already compared")
         return None
     # nodes = nodes[:100]
 
     pair_list: list[tuple[NodeProxy, NodeProxy]] = [
-        (node_a, nodes[i]) for i in range(len(nodes) - 1)
+        (node_a, nodes[i]) for i in range(len(nodes))
     ]
     # result = _closest_score_pair(pair_list, closest=True)
-    pair_list.sort(key=lambda pair: abs(pair[0].score - pair[1].score))
+    pair_list.sort(
+        key=lambda pair: (pair[1].link_count, abs(pair[0].score - pair[1].score))
+    )
     result: tuple[NodeProxy, NodeProxy] = pair_list[0]
 
     # result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
@@ -497,43 +499,44 @@ def phase_uncertainty_refine(
     _start: float = time.perf_counter()
 
     min_sigma_threshold = float(config["ranking"]["sigma_threshold"])
-
-    # seed_nodes: list[NodeProxy] = stable_seed_pool(candidate_images)
-    seed_pool: list[NodeProxy] = []
-    node_a: NodeProxy | None = None
+    lru_size: int = config["ranking"]["lru_size"]
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
 
+    # Who needs refining: past the insertion target, still above the sigma
+    # threshold, and not already part of the reference pool.
     candidate_nodes: list[NodeProxy] = [
         node
         for node in candidate_images
         if node.link_count > insertion_target
         and node.sigma_uncertainty >= min_sigma_threshold
     ]
-
     candidate_nodes.sort(key=lambda node: node.sigma_uncertainty, reverse=True)
 
-    # logger.debug(
-    #     f"sorted {len(candidate_nodes)} candidate nodes by sigma_uncertainty",
-    #     start_timer=_start,
-    # )
-    # steps = 0
-    for node in candidate_nodes:
-        # steps += 1
-        if node.filename in seed_pool_set:
-            seed_pool.append(node)
-        elif not node_a:
-            node_a = node
-        elif len(seed_pool) < 10 and node.link_count > node_a.link_count:
-            seed_pool.append(node)
-        # limit pool to the 100 most uncertain nodes to avoid long processing times
-        if node_a and len(seed_pool) > 100:
-            break
+    node_a: NodeProxy | None = next(
+        (node for node in candidate_nodes if node.filename not in seed_pool_set),
+        None,
+    )
 
-    # logger.debug(
-    #     f"seed pool: {len(seed_pool)}/{len(candidate_images)}"
-    #     f"steps:{steps}, node_a={node_a.filename if node_a else None}",
-    #     start_timer=_start,
-    # )
+    # Opponents come from every seed pool member. Applying the sigma threshold
+    # to them as well left only 3% of the pool usable and piled all refinement
+    # traffic onto those few images.
+    seed_pool: list[NodeProxy] = []
+    if node_a is not None:
+        seed_pool = [
+            node
+            for node in candidate_images
+            if node.filename in seed_pool_set
+        ]
+        # Least-compared first spreads traffic over the whole pool, with the
+        # score gap only breaking ties. Trimming afterwards keeps the per
+        # selection graph work bounded.
+        seed_pool.sort(
+            key=lambda node: (
+                node.link_count,
+                abs(node_a.trueskill_score - node.trueskill_score),
+            )
+        )
+        seed_pool = seed_pool[:lru_size]
 
     if not node_a or not seed_pool:
         logger.debug(
@@ -542,10 +545,6 @@ def phase_uncertainty_refine(
         )
         return None
 
-    # best_pair: tuple[NodeProxy, NodeProxy] | None = None
-    # closest_ranking_mu: float = 100
-
-    # logger.debug("Creating pair list...", start_timer=_start)
     pair_list: list[tuple[NodeProxy, NodeProxy]] = []
     with tqdm(total=len(seed_pool), desc="Creating pair list", delay=3.0) as pbar:
         for node_b in seed_pool:
@@ -560,25 +559,10 @@ def phase_uncertainty_refine(
             pair_list.append((node_a, node_b))
             pbar.update(1)
 
-    # logger.debug(f"Pair list length: {len(pair_list)}", start_timer=_start)
-
-    # pair_list: list[tuple[NodeProxy, NodeProxy]] = sorted(
-    #     pair_list,
-    #     key=lambda pair: abs(pair[0].mu_skill - pair[1].mu_skill),
-    # )
-
-    result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
-        pair_list, closest=False
-    )
-
-    # for node_a, node_b in pair_list:
-    #     if canonicalize_pair(node_a.filename, node_b.filename) in pair_set:
-    #         continue
-    #     if cg.are_in_same_path(node_a.filename, node_b.filename):
-    #         continue
-    #     closest_ranking_mu = abs(node_a.mu_skill - node_b.mu_skill)
-    #     best_pair = (node_a, node_b)
-    #     break
+    # seed_pool is already least-compared-first, so the head of the list is the
+    # right opponent. Re-sorting by score gap here would concentrate traffic on
+    # whichever pool members happen to sit far from node_a.
+    result: tuple[NodeProxy, NodeProxy] | None = pair_list[0] if pair_list else None
 
     if result:
         logger.debug(

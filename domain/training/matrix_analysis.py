@@ -10,7 +10,6 @@ from collections import defaultdict
 from tqdm import tqdm
 import polars as pl
 
-from ...core.io.serialization import write_single_jsonl
 from ...core.observability.logger import get_logger, ModuleLogger
 
 
@@ -232,9 +231,14 @@ class MatrixAnalyzer:
                 self.cell_stats[(p2, p1)] = stats
         return self.cell_stats
 
-    def export_to_jsonl(self, output_path: str) -> None:
+    def export_records(self) -> list[dict[str, object]]:
+        """One record per surviving cell pair, upper triangle only.
+
+        The caller owns persistence, so an analysis notebook can chart the same
+        rows the JSONL artifact is written from.
+        """
         export_data_list: list[dict[str, object]] = []
-        with tqdm(total=len(self.cell_stats), desc="Exporting to JSONL", unit=" cells", delay=3.0) as pbar:
+        with tqdm(total=len(self.cell_stats), desc="Collecting cell records", unit=" cells", delay=3.0) as pbar:
             for (p1_id, p2_id), stats in self.cell_stats.items():
                 if p1_id > p2_id:
                     pbar.update(1)
@@ -243,5 +247,5 @@ class MatrixAnalyzer:
                 p2_param = self.param_list[p2_id] if p2_id < len(self.param_list) else str(p2_id)
                 export_data_list.append({"parameters": f"{p1_param}|{p2_param}", **stats})
                 pbar.update(1)
-        write_single_jsonl(output_path, export_data_list)
+        return export_data_list
         logger.info("Exported %d cell statistics to %s", len(export_data_list), output_path)

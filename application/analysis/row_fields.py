@@ -52,6 +52,25 @@ def as_weight_map(value: Any) -> dict[str, float]:
     }
 
 
+def as_object_list(value: Any) -> list[dict[str, Any]]:
+    """Return a list of dicts, or an empty list when the cell is not one.
+
+    Covers the bbox, pose landmark and person-attribute columns, which the
+    writer stores as Python repr strings (``"[{'x': 0.34, ...}]"``) rather than
+    JSON.
+    """
+    parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            return []
+    if not isinstance(parsed, list):
+        return []
+    raw_map = cast("list[Any]", parsed)
+    return [cast("dict[str, Any]", item) for item in raw_map if isinstance(item, dict)]
+
+
 def strongest(weights: dict[str, float]) -> tuple[str, float]:
     """Return the highest-weighted key of a one-hot map, defaulting to empty."""
     if not weights:

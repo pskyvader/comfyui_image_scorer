@@ -118,7 +118,7 @@ class ComparisonRecorder:
             filename=winner_filename,
             score=float(winner_data.get("score", 0.0)),
             rating_mu=float(winner_data.get("rating_mu", 0.0)),
-            rating_sigma=float(loser_data.get("rating_sigma", 0.0)),
+            rating_sigma=float(winner_data.get("rating_sigma", 0.0)),
             comparison_count=int(winner_data.get("comparison_count", 0)),
             all_comparisons=all_comparisons,
         )

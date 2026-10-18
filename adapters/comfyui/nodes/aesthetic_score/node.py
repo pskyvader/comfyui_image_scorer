@@ -35,6 +35,13 @@ class AestheticScoreNode:
                 "lora_strength": ("FLOAT", {"default": 0.0}),
                 "min_images": ("INT", {"default": 1, "min": 0, "max": 100}),
                 "max_images": ("INT", {"default": 10, "min": 0, "max": 100}),
+                # Appended, not grouped with the other sampler settings: ComfyUI
+                # restores saved widget values by position, so inserting here
+                # would shift every value behind it in existing workflows.
+                "denoise": (
+                    "FLOAT",
+                    {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.01},
+                ),
             }
         }
 
@@ -64,6 +71,7 @@ class AestheticScoreNode:
         lora_strength: float,
         min_images: int = 1,
         max_images: int = 10,
+        denoise: float = 0.9,
     ) -> tuple[torch.Tensor, torch.Tensor, bool, list[float]]:
         verify_models_present()
         return self._scoring_service.score(
@@ -81,4 +89,5 @@ class AestheticScoreNode:
             lora_strength=lora_strength,
             min_images=min_images,
             max_images=max_images,
+            denoise=denoise,
         )
