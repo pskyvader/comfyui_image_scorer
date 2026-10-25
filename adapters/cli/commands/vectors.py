@@ -1,4 +1,5 @@
 """Build commands: split-vectors, full-vectors, scores, and all."""
+
 from ....application.data_transform.prepare_data import (
     build_full_files,
     build_split_files,
@@ -70,7 +71,9 @@ def run_split_vectors(limit: int, batch: bool, deps: CLIDeps) -> int:
             training_model,
         )
     else:
-        logger.info("Prepare found no new images; no split files written, no caches removed.")
+        logger.info(
+            "Prepare found no new images; no split files written, no caches removed."
+        )
     return 0
 
 
@@ -86,17 +89,17 @@ def run_full_vectors(deps: CLIDeps) -> int:
     return 0
 
 
-def run_scores(deps: CLIDeps) -> int:
+def run_scores(deps: CLIDeps, mode: str) -> int:
     logger.info("Building scores + comparisons...")
-    result = run_rebuild_scores_only(graph=deps.graph)
+    result = run_rebuild_scores_only(graph=deps.graph, mode=mode)
     logger.info("Scores done: %s", result)
     return 0
 
 
-def run_all(limit: int, batch: bool, deps: CLIDeps) -> int:
+def run_all(limit: int, batch: bool, mode: str, deps: CLIDeps) -> int:
     logger.info("Running full build pipeline (limit=%s, batch=%s)...", limit, batch)
     run_split_vectors(limit=limit, batch=batch, deps=deps)
     run_full_vectors(deps=deps)
-    run_scores(deps=deps)
+    run_scores(deps=deps, mode=mode)
     logger.info("Full pipeline done.")
     return 0

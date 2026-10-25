@@ -19,7 +19,11 @@ from ...core.io.serialization import (
 )
 from ...core.configuration.settings import config
 from ...domain.analysis.image_analysis import ImageAnalysis
-from ...domain.analysis.trueskill import replay_ratings, public_score_from_rating
+from ...domain.analysis.trueskill import (
+    replay_ratings,
+    public_score_from_rating,
+    trueskill_score_from_rating,
+)
 from ...domain.ports.loading import BatchSizerFactory, MapsProvider, ModelLoader
 from ...domain.ports.cache import CacheProvider
 from ...domain.ports.ml_providers import MediaPipePort
@@ -186,7 +190,7 @@ def build_full_files(
     }
 
 
-def run_rebuild_scores_only(graph: Any) -> dict[str, Any]:
+def run_rebuild_scores_only(graph: Any, mode: str = "public") -> dict[str, Any]:
     graph.rebuild_from_database()
     rows = [link.data for link in graph.get_all_links()]
     # logger.debug(f"links: {len(rows)}")
@@ -204,9 +208,12 @@ def run_rebuild_scores_only(graph: Any) -> dict[str, Any]:
     write_single_jsonl(comparisons_file, comparisons)
 
     replayed = replay_ratings(rows, order="default")
+
+    score_function = (
+        public_score_from_rating if mode == "public" else trueskill_score_from_rating
+    )
     scores = [
-        {fid: public_score_from_rating(rating)}
-        for fid, (rating, _count) in replayed.items()
+        {fid: score_function(rating)} for fid, (rating, _count) in replayed.items()
     ]
     write_single_jsonl(scores_file, scores)
 

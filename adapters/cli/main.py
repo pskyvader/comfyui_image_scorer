@@ -2,6 +2,7 @@
 
 The only module allowed lazy inline imports (parser-dispatch pattern).
 """
+
 import argparse
 import logging
 import sys
@@ -274,14 +275,25 @@ def main() -> int:
             run_all,
         )
 
+        # ensure mode is only public or trueskill,
+        # default to public if not specified or throw error if invalid
+
+        mode = args.mode if hasattr(args, "mode") else "public"
+        # validate
+        if mode not in ["public", "trueskill"]:
+            logger.error(
+                "Invalid mode specified: %s. Must be 'public' or 'trueskill'.", mode
+            )
+            return 1
+
         if args.build_command == "split-vectors":
             return run_split_vectors(limit=args.limit, batch=args.batch, deps=deps)
         elif args.build_command == "full-vectors":
             return run_full_vectors(deps=deps)
         elif args.build_command == "scores":
-            return run_scores(deps=deps)
+            return run_scores(deps=deps, mode=mode)
         elif args.build_command == "all":
-            return run_all(limit=args.limit, batch=args.batch, deps=deps)
+            return run_all(limit=args.limit, batch=args.batch, mode=mode, deps=deps)
         else:
             build_parser.print_help()
             return 1

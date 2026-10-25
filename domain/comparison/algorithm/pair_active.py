@@ -96,9 +96,7 @@ def phase_anchor_insert(
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
 
     candidates: list[NodeProxy] = [
-        node
-        for node in candidate_images
-        if node.link_count <= insertion_target
+        node for node in candidate_images if node.link_count <= insertion_target
     ]
 
     # A single new image is a valid node_a: opponents come from the seed pool,
@@ -162,11 +160,13 @@ def phase_anchor_insert(
     pair_list: list[tuple[NodeProxy, NodeProxy]] = [
         (node_a, nodes[i]) for i in range(len(nodes))
     ]
-    # result = _closest_score_pair(pair_list, closest=True)
-    pair_list.sort(
-        key=lambda pair: (pair[1].link_count, abs(pair[0].score - pair[1].score))
+    result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
+        pair_list, closest=False
     )
-    result: tuple[NodeProxy, NodeProxy] = pair_list[0]
+    # pair_list.sort(
+    #     key=lambda pair: (pair[1].link_count, abs(pair[0].score - pair[1].score))
+    # )
+    # result: tuple[NodeProxy, NodeProxy] = pair_list[0]
 
     # result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
     #     pair_list, closest=True
@@ -523,9 +523,7 @@ def phase_uncertainty_refine(
     seed_pool: list[NodeProxy] = []
     if node_a is not None:
         seed_pool = [
-            node
-            for node in candidate_images
-            if node.filename in seed_pool_set
+            node for node in candidate_images if node.filename in seed_pool_set
         ]
         # Least-compared first spreads traffic over the whole pool, with the
         # score gap only breaking ties. Trimming afterwards keeps the per
