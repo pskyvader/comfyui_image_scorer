@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import time
+from typing import cast
 from tqdm import tqdm
+
+from comfy_api_nodes.apis import reve
 
 from ....core.observability.logger import get_logger, ModuleLogger
 from ...graph.chain_proxy import ChainProxy
@@ -110,63 +115,25 @@ def phase_anchor_insert(
     candidates.sort(key=lambda node: (node.link_count, node.score))
     node_a: NodeProxy = candidates[0]
 
-    # Opponents are drawn from the seed pool so a newcomer is tested against
-    # the reference set instead of against other newcomers. Sorting by lowest
-    # link_count first spreads comparisons evenly across the pool; score
-    # distance only breaks ties, so it cannot concentrate traffic.
-    pool_nodes: list[NodeProxy] = [
-        node
-        for node in candidate_images
-        if node.filename in seed_pool_set and node.filename != node_a.filename
+    seed_target_comparisons = int(config["ranking"]["seed_target_comparisons"])
+    seed_candidates: list[NodeProxy] = [
+        node for node in candidate_images if node.link_count <= seed_target_comparisons
     ]
+
+    seed_candidates.sort(key=lambda node: node.link_count, reverse=True)
     lru_size: int = config["ranking"]["lru_size"]
-
-    pool_nodes.sort(key=lambda node: (node.link_count, abs(node_a.score - node.score)))
-    pool_nodes = pool_nodes[:lru_size]
-    # logger.debug(
-    #     f"first pool node score: {pool_nodes[0].score} (difference: {abs(pool_nodes[0].score - node_a.score)}, link count: {pool_nodes[0].link_count}), "
-    #     f"\nlast node: {pool_nodes[-1].score} (difference: {abs(pool_nodes[-1].score - node_a.score)}, link count: {pool_nodes[-1].link_count})"
-    #     f"\n(node a score:{node_a.score})"
-    #     f"\n(pool size: {len(pool_nodes)})"
-    # )
-
-    # remaining: list[NodeProxy] = [
-    #     node for node in pool_nodes[1:] if node.filename != node_a.filename
-    # ]
-    # remaining.sort(key=lambda opp: abs(opp.mu_skill - node_a.mu_skill))
-
-    # seen_opponents = 0
-    # for opponent in pool_nodes:
-    #     if canonicalize_pair(node_a.filename, opponent.filename) in existing_pair_set:
-    #         continue
-    #     seen_opponents += 1
-    #     if cg.are_in_same_path(node_a.filename, opponent.filename):
-    #         continue
-    #     return node_a, opponent
-    nodes: list[NodeProxy] = [
-        node
-        for node in pool_nodes
-        if canonicalize_pair(node_a.filename, node.filename) not in existing_pair_set
-        # and not cg.are_in_same_path(node_a.filename, node.filename)
-    ]
-    # One surviving opponent is enough: the pair is (node_a, opponent). Requiring
-    # two discarded a valid comparison whenever the pool was small or most of
-    # its members had already been played.
-    if not nodes:
-        logger.debug("no pair found, every pool opponent was already compared")
-        return None
-    # nodes = nodes[:100]
+    seed_candidates = seed_candidates[:lru_size]
 
     pair_list: list[tuple[NodeProxy, NodeProxy]] = [
-        (node_a, nodes[i]) for i in range(len(nodes))
+        (node_a, node_b)
+        for node_b in seed_candidates
+        if canonicalize_pair(node_a.filename, node_b.filename) not in existing_pair_set
     ]
-    result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
-        pair_list, closest=False
+
+    pair_list.sort(
+        key=lambda pair: (pair[1].link_count, abs(pair[0].score - pair[1].score))
     )
-    # pair_list.sort(
-    #     key=lambda pair: (pair[1].link_count, abs(pair[0].score - pair[1].score))
-    # )
-    # result: tuple[NodeProxy, NodeProxy] = pair_list[0]
+    result: tuple[NodeProxy, NodeProxy] | None = pair_list[0] if pair_list else None
 
     # result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
     #     pair_list, closest=True
@@ -573,6 +540,95 @@ def phase_uncertainty_refine(
 
     logger.debug("Uncertainty refine no pair found", start_timer=_start)
     return None
+
+
+def phase_chain_middle(
+    candidate_images: list[NodeProxy],
+    existing_pair_set: set[tuple[str, str]],
+    cg: CrystalGraphPort,
+) -> tuple[NodeProxy, NodeProxy] | None:
+    """Compare mid-chain nodes to resolve the global middle ordering."""
+    _start: float = time.perf_counter()
+
+    candidate_names: set[str] = {node.filename for node in candidate_images}
+
+    chains: list[ChainProxy] = cg.get_all_chains(min_length=1, sort_order="asc")
+
+    nodes: list[NodeProxy] = _collect_chain_midpoints(chains, candidate_names, cg)
+
+    if len(nodes) < 2:
+        logger.debug(
+            f"chain middle: only {len(nodes)} midpoint candidates", start_timer=_start
+        )
+        return None
+
+    nodes.sort(key=lambda node: node.trueskill_score)
+
+    pair_list: list[tuple[NodeProxy, NodeProxy]] = [
+        (nodes[i], nodes[i + 1]) for i in range(len(nodes) - 1)
+    ]
+
+    node_a: NodeProxy = nodes[0]
+
+    pair_list: list[tuple[NodeProxy, NodeProxy]] = [
+        (node_a, node_b)
+        for node_b in nodes
+        if canonicalize_pair(node_a.filename, node_b.filename) not in existing_pair_set
+        and node_a.get_chain()[0].id != node_b.get_chain()[0].id
+        and not cg.are_in_same_path(node_a.filename, node_b.filename)
+    ]
+
+    pair_list.sort(
+        key=lambda pair: abs(pair[0].trueskill_score - pair[1].trueskill_score)
+    )
+    result = _closest_score_pair(pair_list)
+
+    # result: tuple[NodeProxy, NodeProxy] | None = pair_list[0] if pair_list else None
+
+    if result:
+        logger.debug(
+            f"chain middle selected pair: {result[0].filename} vs {result[1].filename}",
+            start_timer=_start,
+        )
+        return result
+    logger.debug("chain middle: no valid pair found", start_timer=_start)
+    return None
+
+
+def _collect_chain_midpoints(
+    chains: list[ChainProxy],
+    candidate_names: set[str],
+    cg: CrystalGraphPort,
+) -> list[NodeProxy]:
+    """Return up to 100 midpoint nodes from the given chains."""
+    nodes: list[NodeProxy] = []
+    seen: set[str] = set()
+
+    for raw_chain in chains:
+        indexed_nodes: list[NodeProxy] = raw_chain.nodes
+        midpoint: NodeProxy = indexed_nodes[len(indexed_nodes) // 2]
+
+        filename: str = midpoint.filename
+        if filename in seen:
+            continue
+        if candidate_names and filename not in candidate_names:
+            continue
+
+        node: NodeProxy | None = cg.get_node(filename)
+        if node is None:
+            continue
+
+        seen.add(filename)
+        nodes.append(node)
+
+    nodes.sort(key=lambda node: node.link_count)
+    return nodes[:100]
+
+
+phase_middle_chain = phase_chain_middle
+phase_chain_midpoint = phase_chain_middle
+phase_middle_chains = phase_chain_middle
+phase_chain_midpoints = phase_chain_middle
 
 
 def phase_fallback(

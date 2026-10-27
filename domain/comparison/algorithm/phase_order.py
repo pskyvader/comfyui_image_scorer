@@ -19,6 +19,7 @@ from .pair_active import (
     phase_seed_coverage,
     phase_anchor_insert,
     phase_collapsible_pairs,
+    phase_chain_middle,
     phase_single_win_loss,
     phase_chain_merge,
     phase_uncertainty_refine,
@@ -74,6 +75,15 @@ PHASES: tuple[dict[str, object], ...] = (
         "color": "#22d3ee",
         "description": "compares images with exactly one win (highest score first) or exactly one loss (lowest score first), picking the closest-score adjacent pair until one image remains in each group",
         "show_chain_info": False,
+        "show_mu_sigma": False,
+        "show_wins_losses": True,
+    },
+    {
+        "chain_middle": phase_chain_middle,
+        "phase_label": "Phase 4b / Chain Middle",
+        "color": "#f472b6",
+        "description": "compares mid-chain nodes to resolve the global middle ordering",
+        "show_chain_info": True,
         "show_mu_sigma": False,
         "show_wins_losses": True,
     },
@@ -197,6 +207,8 @@ def select_pair(
             result = fn(candidate_nodes, cg)
         elif name == "single_win_loss":
             result = fn(candidate_nodes, existing_pairs_set)
+        elif name == "chain_middle":
+            result = fn(candidate_nodes, existing_pairs_set, cg)
         elif name == "refine":
             result = fn(candidate_nodes, seed_pool_set, existing_pairs_set, cg)
         elif name == "chain_merge":

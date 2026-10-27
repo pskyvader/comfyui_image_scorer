@@ -9,7 +9,7 @@
  *     pair:  describe_pair(node_a, node_b, phase_index)
  *   }
  * The phase index is an int (0=seed, 1=anchor, 2=collapsible,
- * 3=single_win_loss, 4=refine, 5=chain_merge, 6=fallback); its human label
+ * 3=single_win_loss, 4=chain_middle, 5=refine, 6=chain_merge, 7=fallback); its human label
  * is mapped below.
  */
 
@@ -193,6 +193,9 @@ const CompareView = (() => {
             }
             case "single_win_loss":
                 line = `Single win/loss - ${pair.single_win_count.toLocaleString()} with 1 win only - ${pair.single_loss_count.toLocaleString()} with 1 loss only - ${pair.ready_count.toLocaleString()} ready (more than 1 win & 1 loss) - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
+                break;
+            case "chain_middle":
+                line = `Chain middle - component ${left.component_id} (${left.component_size.toLocaleString()} images) - ${pair.total_chains.toLocaleString()} chains (target ${pair.target_chains}) - reserve ${pair.reserve_count} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             case "chain_merge":
                 line = `Chain merge - component ${left.component_id} (${left.component_size.toLocaleString()} images) - ${pair.total_chains.toLocaleString()} chains (target ${pair.target_chains}) - reserve ${pair.reserve_count} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;

@@ -5,9 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from bisect import bisect_right
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Protocol
+from typing import Callable, Protocol, overload
 
 import numpy as np
 from tqdm import tqdm
@@ -19,6 +22,85 @@ from ...core.observability.logger import ModuleLogger, get_logger
 from ...core.utilities.concurrency import parallel_for
 
 logger: ModuleLogger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class SparseCombinationLevel:
+    """Memory-mapped combinations and their variable-length matching image IDs."""
+
+    combinations: np.ndarray
+    offsets: np.ndarray
+    image_ids: np.ndarray
+
+
+class SparseCombinationResults(Sequence[tuple[int, ...]]):
+    """Indexable combination results backed by per-level sparse NumPy arrays."""
+
+    def __init__(
+        self, levels: list[SparseCombinationLevel], cache_directory: Path | None = None
+    ) -> None:
+        self.levels = levels
+        self.cache_directory = Path(cache_directory) if cache_directory is not None else None
+        self._level_starts: list[int] = []
+        total = 1
+        for level in levels:
+            self._level_starts.append(total)
+            total += len(level.combinations)
+        self._length = total
+
+    def __len__(self) -> int:
+        return self._length
+
+    @overload
+    def __getitem__(self, index: int) -> tuple[int, ...]: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> list[tuple[int, ...]]: ...
+
+    def __getitem__(
+        self, index: int | slice
+    ) -> tuple[int, ...] | list[tuple[int, ...]]:
+        if isinstance(index, slice):
+            return [
+                self.combination_at(item) for item in range(*index.indices(len(self)))
+            ]
+        if index < 0:
+            index += len(self)
+        if index == 0:
+            return ()
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        level_index = bisect_right(self._level_starts, index) - 1
+        row = index - self._level_starts[level_index]
+        return tuple(int(value) for value in self.levels[level_index].combinations[row])
+
+    def combination_at(self, index: int) -> tuple[int, ...]:
+        """Return one combination without materializing other cached tuples."""
+        result = self[index]
+        if not isinstance(result, tuple):
+            raise TypeError("Combination index must be an integer.")
+        return result
+
+    def image_rows_at(self, index: int) -> np.ndarray:
+        """Return the saved image-row IDs for a combination index."""
+        if index == 0:
+            return np.empty(0, dtype=np.int64)
+        if index < 0:
+            index += len(self)
+        if index < 1 or index >= len(self):
+            raise IndexError(index)
+        level_index = bisect_right(self._level_starts, index) - 1
+        row = index - self._level_starts[level_index]
+        level = self.levels[level_index]
+        return level.image_ids[level.offsets[row] : level.offsets[row + 1]]
+
+    def image_match_arrays(self) -> list[tuple[np.ndarray, np.ndarray]]:
+        """Return each level's offsets and flat image-row IDs without copying them."""
+        return [(level.offsets, level.image_ids) for level in self.levels]
+
+    def __iter__(self) -> Iterator[tuple[int, ...]]:
+        for index in range(len(self)):
+            yield self.combination_at(index)
 
 
 def _worker_count() -> int:
@@ -37,6 +119,7 @@ class CombinationFinder(Protocol):
         current_combinations: list[tuple[int, ...]],
         property_columns: np.ndarray,
         minimum_matching_images: int,
+        maximum_matching_images: int,
         parent_combinations_per_batch: int,
         combination_depth: int,
         multiplied_matrix_cache_path: Path | None = None,
@@ -81,17 +164,21 @@ def _cache_directory(
     image_property_matrix: np.ndarray,
     image_row_ids: np.ndarray,
     minimum_matching_images: int,
+    maximum_matching_images: int,
 ) -> Path:
     fingerprint = hashlib.blake2b(digest_size=16)
     fingerprint.update(b"frequent-combinations-v1")
     fingerprint.update(repr(image_property_matrix.shape).encode())
-    fingerprint.update(memoryview(np.ascontiguousarray(image_property_matrix)).cast("B"))
+    fingerprint.update(
+        memoryview(np.ascontiguousarray(image_property_matrix)).cast("B")
+    )
     encoded_image_ids = json.dumps(
         [_json_scalar(image_id) for image_id in image_row_ids],
         separators=(",", ":"),
     )
     fingerprint.update(encoded_image_ids.encode())
     fingerprint.update(str(minimum_matching_images).encode())
+    fingerprint.update(str(maximum_matching_images).encode())
     # Finder strategies may differ on excluded columns, but agree on eligible extensions.
     directory = Path(analysis_dir) / "frequent_combinations" / fingerprint.hexdigest()
     directory.mkdir(parents=True, exist_ok=True)
@@ -103,7 +190,9 @@ def _json_scalar(value: object) -> str | int | float | bool | None:
         value = value.item()
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    raise TypeError(f"image IDs must be JSON-compatible scalars, got {type(value).__name__}.")
+    raise TypeError(
+        f"image IDs must be JSON-compatible scalars, got {type(value).__name__}."
+    )
 
 
 def _level_cache_paths(cache_directory: Path, level: int) -> tuple[Path, Path, Path]:
@@ -133,7 +222,9 @@ def _load_multiplication_cache(
     if multiplied_matrix.shape != expected_shape or (
         expected_dtype is not None and multiplied_matrix.dtype != expected_dtype
     ):
-        raise ValueError(f"Cached multiplication matrix has an unexpected shape or dtype: {cache_path}")
+        raise ValueError(
+            f"Cached multiplication matrix has an unexpected shape or dtype: {cache_path}"
+        )
     logger.info("loaded multiplied matrix from %s", cache_path)
     return multiplied_matrix
 
@@ -161,9 +252,13 @@ def _load_level_cache(
 
     with maps_path.open("r", encoding="utf-8") as source:
         maps = json.load(source)
-    combinations = [tuple(map(int, combination)) for combination in maps["combinations"]]
+    combinations = [
+        tuple(map(int, combination)) for combination in maps["combinations"]
+    ]
     image_row_ids = np.asarray(maps["image_ids"], dtype=source_image_row_ids.dtype)
-    source_positions = {image_id: row for row, image_id in enumerate(source_image_row_ids)}
+    source_positions = {
+        image_id: row for row, image_id in enumerate(source_image_row_ids)
+    }
     image_rows = np.fromiter(
         (source_positions[image_id] for image_id in image_row_ids),
         dtype=np.intp,
@@ -173,9 +268,13 @@ def _load_level_cache(
     if len(image_row_ids) == 0 or len(combinations) == 0:
         intersected_matrix = np.load(intersected_path, allow_pickle=False)
     else:
-        intersected_matrix = np.load(intersected_path, mmap_mode="r", allow_pickle=False)
+        intersected_matrix = np.load(
+            intersected_path, mmap_mode="r", allow_pickle=False
+        )
     if intersected_matrix.shape != (len(image_row_ids), len(combinations)):
-        raise ValueError(f"Cached level matrix and maps do not align: {intersected_path}")
+        raise ValueError(
+            f"Cached level matrix and maps do not align: {intersected_path}"
+        )
     logger.info("loaded cached level output from %s", intersected_path.parent)
     return intersected_matrix, combinations, image_property_matrix, image_row_ids
 
@@ -195,7 +294,11 @@ def _load_or_create_multiplication_matrix(
 
     temporary_path = None
     if cache_path is None:
-        multiplied_matrix = np.zeros(shape, dtype=dtype) if initialize_zero else np.empty(shape, dtype=dtype)
+        multiplied_matrix = (
+            np.zeros(shape, dtype=dtype)
+            if initialize_zero
+            else np.empty(shape, dtype=dtype)
+        )
     else:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = cache_path.with_name(cache_path.name + ".tmp")
@@ -243,9 +346,13 @@ def create_qualifying_extension_mask(
     last_property_by_parent: np.ndarray,
     property_columns: np.ndarray,
     minimum_matching_images: int,
+    maximum_matching_images: int,
 ) -> np.ndarray:
     """Keep parent/property pairs meeting the image-count and ordering rules."""
-    qualifying_extensions = shared_image_counts >= minimum_matching_images
+    qualifying_extensions = (
+        shared_image_counts >= minimum_matching_images
+        and shared_image_counts <= maximum_matching_images
+    )
     qualifying_extensions &= (
         property_columns[None, :] > last_property_by_parent[:, None]
     )
@@ -257,6 +364,7 @@ def _find_qualifying_extensions(
     current_combinations: list[tuple[int, ...]],
     property_columns: np.ndarray,
     minimum_matching_images: int,
+    maximum_matching_images: int,
     parent_combinations_per_batch: int,
     combination_depth: int,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -283,6 +391,7 @@ def _find_qualifying_extensions(
             last_property_by_parent,
             property_columns,
             minimum_matching_images,
+            maximum_matching_images,
         )
         local_parent_columns, added_property_columns = np.nonzero(qualifying_extensions)
         return local_parent_columns + start, added_property_columns
@@ -295,7 +404,9 @@ def _find_qualifying_extensions(
         unit="batch",
     )
     surviving_parents = [parents for parents, _ in batch_results if parents.size]
-    surviving_properties = [properties for parents, properties in batch_results if parents.size]
+    surviving_properties = [
+        properties for parents, properties in batch_results if parents.size
+    ]
     if not surviving_parents:
         return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
     return np.concatenate(surviving_parents), np.concatenate(surviving_properties)
@@ -308,6 +419,7 @@ def find_qualifying_combinations(
     current_combinations: list[tuple[int, ...]],
     property_columns: np.ndarray,
     minimum_matching_images: int,
+    maximum_matching_images: int,
     parent_combinations_per_batch: int,
     combination_depth: int,
     multiplied_matrix_cache_path: Path | None = None,
@@ -376,6 +488,7 @@ def find_qualifying_combinations(
         current_combinations,
         property_columns,
         minimum_matching_images,
+        maximum_matching_images,
         parent_combinations_per_batch,
         combination_depth,
     )
@@ -388,6 +501,7 @@ def find_qualifying_combinations_blocked(
     current_combinations: list[tuple[int, ...]],
     property_columns: np.ndarray,
     minimum_matching_images: int,
+    maximum_matching_images: int,
     parent_combinations_per_batch: int,
     combination_depth: int,
     property_block_size: int,
@@ -405,7 +519,9 @@ def find_qualifying_combinations_blocked(
 
     parent_groups = [
         (block_start, np.asarray(parent_columns, dtype=np.int64))
-        for block_start, parent_columns in sorted(parents_by_last_property_block.items())
+        for block_start, parent_columns in sorted(
+            parents_by_last_property_block.items()
+        )
     ]
     total_batches = sum(
         (len(parent_columns) + parent_combinations_per_batch - 1)
@@ -444,9 +560,7 @@ def find_qualifying_combinations_blocked(
     ) -> None:
         block_stop = min(block_start + property_block_size, len(property_columns))
         if image_row_indices is None:
-            parent_image_masks = current_combination_image_masks[
-                :, parent_column_batch
-            ]
+            parent_image_masks = current_combination_image_masks[:, parent_column_batch]
         else:
             parent_image_masks = current_combination_image_masks[
                 np.ix_(image_row_indices, parent_column_batch)
@@ -505,6 +619,7 @@ def find_qualifying_combinations_blocked(
         current_combinations,
         property_columns,
         minimum_matching_images,
+        maximum_matching_images,
         parent_combinations_per_batch,
         combination_depth,
     )
@@ -529,8 +644,7 @@ def create_possible_image_mask(
             parent_columns_by_last_property[last_property].append(parent_column)
 
     expandable_parent_count = sum(
-        len(parent_columns)
-        for parent_columns in parent_columns_by_last_property
+        len(parent_columns) for parent_columns in parent_columns_by_last_property
     )
     logger.info(
         "level %d prefilter: checking %s expandable parents across %s properties",
@@ -767,7 +881,8 @@ def generate_combinations(
     max_combination_size: int,
     combination_finder: CombinationFinder,
     *,
-    minimum_matching_images: int = 2,
+    minimum_matching_images: int,
+    maximum_matching_images: int,
     memory_budget_gb: float = 4.0,
     property_labels: np.ndarray | None = None,
 ) -> tuple[list[tuple[object, ...]], list[np.ndarray]]:
@@ -818,6 +933,7 @@ def generate_combinations(
         source_image_property_matrix,
         source_image_row_ids,
         minimum_matching_images,
+        maximum_matching_images,
     )
     logger.info("combination cache: %s", cache_directory)
     (
@@ -850,13 +966,14 @@ def generate_combinations(
         if level_one_multiplication is not None:
             image_counts_by_property = level_one_multiplication[0]
         else:
-            image_counts_by_property = np.count_nonzero(
-                image_property_matrix, axis=0
-            )[None, :]
+            image_counts_by_property = np.count_nonzero(image_property_matrix, axis=0)[
+                None, :
+            ]
             _save_matrix_cache(level_one_multiplied_path, image_counts_by_property)
             image_counts_by_property = image_counts_by_property[0]
         active_property_columns = np.flatnonzero(
             image_counts_by_property >= minimum_matching_images
+            and image_counts_by_property <= maximum_matching_images
         )
         current_combination_image_masks = image_property_matrix[
             :, active_property_columns
@@ -1043,6 +1160,7 @@ def generate_combinations(
             current_combinations,
             property_columns,
             minimum_matching_images,
+            maximum_matching_images,
             batch_item_capacity,
             next_level,
             multiplied_matrix_cache_path=multiplied_path,
@@ -1065,7 +1183,9 @@ def generate_combinations(
         candidate_batch_count = (
             surviving_combination_count + candidate_pairs_per_batch - 1
         ) // candidate_pairs_per_batch
-        intersection_cell_count = image_property_matrix.shape[0] * surviving_combination_count
+        intersection_cell_count = (
+            image_property_matrix.shape[0] * surviving_combination_count
+        )
         intersection_bytes = intersection_cell_count * np.dtype(np.bool_).itemsize
         if surviving_combination_count:
             logger.info(
@@ -1112,3 +1232,543 @@ def generate_combinations(
         logger.info("saved level %d intersection and maps", next_level)
 
     return all_combinations, all_matching_image_rows
+
+
+def _sparse_level_paths(
+    cache_directory: Path, level: int
+) -> tuple[Path, Path, Path, Path]:
+    stem = f"sparse_level_{level:02d}"
+    return (
+        cache_directory / f"{stem}_combinations.npy",
+        cache_directory / f"{stem}_offsets.npy",
+        cache_directory / f"{stem}_image_ids.npy",
+        cache_directory / f"{stem}_complete.json",
+    )
+
+
+def _load_sparse_level(
+    cache_directory: Path, level: int
+) -> SparseCombinationLevel | None:
+    combinations_path, offsets_path, image_ids_path, complete_path = (
+        _sparse_level_paths(cache_directory, level)
+    )
+    if not complete_path.is_file():
+        return None
+    combinations = np.load(combinations_path, mmap_mode="r", allow_pickle=False)
+    offsets = np.load(offsets_path, mmap_mode="r", allow_pickle=False)
+    image_ids = np.load(image_ids_path, mmap_mode="r", allow_pickle=False)
+    if (
+        offsets.shape != (len(combinations) + 1,)
+        or offsets[0] != 0
+        or offsets[-1] != len(image_ids)
+    ):
+        raise ValueError(
+            f"Sparse combination cache arrays do not align for level {level}."
+        )
+    return SparseCombinationLevel(combinations, offsets, image_ids)
+
+
+def _save_sparse_shard(
+    shard_path: Path,
+    start: int,
+    stop: int,
+    combinations: np.ndarray,
+    offsets: np.ndarray,
+    image_ids: np.ndarray,
+) -> None:
+    temporary_path = shard_path.with_name(shard_path.name + ".tmp")
+    with temporary_path.open("wb") as output:
+        np.savez(
+            output,
+            bounds=np.asarray([start, stop], dtype=np.int64),
+            combinations=combinations,
+            offsets=offsets,
+            image_ids=image_ids,
+        )
+    os.replace(temporary_path, shard_path)
+
+
+def _sparse_shard_matches(shard_path: Path, start: int, stop: int) -> bool:
+    if not shard_path.is_file():
+        return False
+    with np.load(shard_path, allow_pickle=False) as shard:
+        return bool(np.array_equal(shard["bounds"], [start, stop]))
+
+
+def _merge_sparse_shards(
+    cache_directory: Path,
+    level: int,
+    shard_paths: list[Path],
+    combination_depth: int,
+    image_id_dtype: np.dtype,
+) -> SparseCombinationLevel:
+    combinations_path, offsets_path, image_ids_path, complete_path = (
+        _sparse_level_paths(cache_directory, level)
+    )
+    complete_path.unlink(missing_ok=True)
+    combination_count = 0
+    image_id_count = 0
+    for shard_path in shard_paths:
+        with np.load(shard_path, allow_pickle=False) as shard:
+            combination_count += len(shard["combinations"])
+            image_id_count += len(shard["image_ids"])
+
+    temporary_paths = [
+        path.with_name(path.name + ".tmp")
+        for path in (combinations_path, offsets_path, image_ids_path)
+    ]
+    if combination_count:
+        combinations_out = np.lib.format.open_memmap(
+            temporary_paths[0],
+            mode="w+",
+            dtype=np.int32,
+            shape=(combination_count, combination_depth),
+        )
+    else:
+        combinations_out = np.empty((0, combination_depth), dtype=np.int32)
+    offsets_out = np.lib.format.open_memmap(
+        temporary_paths[1], mode="w+", dtype=np.int64, shape=(combination_count + 1,)
+    )
+    offsets_out[0] = 0
+    if image_id_count:
+        image_ids_out = np.lib.format.open_memmap(
+            temporary_paths[2],
+            mode="w+",
+            dtype=image_id_dtype,
+            shape=(image_id_count,),
+        )
+    else:
+        image_ids_out = np.empty((0,), dtype=image_id_dtype)
+
+    combination_cursor = 0
+    image_id_cursor = 0
+    logger.info(
+        "sparse level %d merging %s batch shards into %s combinations and %s image IDs",
+        level,
+        f"{len(shard_paths):,}",
+        f"{combination_count:,}",
+        f"{image_id_count:,}",
+    )
+    for shard_path in tqdm(
+        shard_paths,
+        total=len(shard_paths),
+        desc=f"sparse level {level} merge batches",
+        unit="batch",
+    ):
+        with np.load(shard_path, allow_pickle=False) as shard:
+            shard_combinations = shard["combinations"]
+            shard_offsets = shard["offsets"]
+            shard_image_ids = shard["image_ids"]
+            combination_stop = combination_cursor + len(shard_combinations)
+            image_id_stop = image_id_cursor + len(shard_image_ids)
+            combinations_out[combination_cursor:combination_stop] = shard_combinations
+            image_ids_out[image_id_cursor:image_id_stop] = shard_image_ids
+            offsets_out[combination_cursor + 1 : combination_stop + 1] = (
+                shard_offsets[1:] + image_id_cursor
+            )
+            combination_cursor = combination_stop
+            image_id_cursor = image_id_stop
+
+    for output in (combinations_out, offsets_out, image_ids_out):
+        if isinstance(output, np.memmap):
+            output.flush()
+    del output
+    del combinations_out, offsets_out, image_ids_out
+    if combination_count == 0:
+        with temporary_paths[0].open("wb") as output:
+            np.save(
+                output,
+                np.empty((0, combination_depth), dtype=np.int32),
+                allow_pickle=False,
+            )
+    if image_id_count == 0:
+        with temporary_paths[2].open("wb") as output:
+            np.save(output, np.empty((0,), dtype=image_id_dtype), allow_pickle=False)
+    for temporary_path, final_path in zip(
+        temporary_paths,
+        (combinations_path, offsets_path, image_ids_path),
+    ):
+        os.replace(temporary_path, final_path)
+    atomic_write_json(
+        str(complete_path),
+        {
+            "combination_count": combination_count,
+            "image_id_count": image_id_count,
+            "depth": combination_depth,
+        },
+        indent=None,
+    )
+    level_data = _load_sparse_level(cache_directory, level)
+    if level_data is None:
+        raise RuntimeError(f"Failed to save sparse combination level {level}.")
+    for shard_path in shard_paths:
+        shard_path.unlink(missing_ok=True)
+    return level_data
+
+
+def _seed_sparse_level(
+    image_property_matrix: np.ndarray,
+    image_row_ids: np.ndarray,
+    minimum_matching_images: int,
+    maximum_matching_images: int,
+    cache_directory: Path,
+) -> SparseCombinationLevel:
+    cached = _load_sparse_level(cache_directory, 1)
+    if cached is not None:
+        return cached
+
+    image_counts = np.count_nonzero(image_property_matrix, axis=0)
+
+    # todo: fix with the correct logical operator for numpy arrays
+    active_properties = np.flatnonzero(
+        (image_counts >= minimum_matching_images)
+        & (image_counts <= maximum_matching_images)
+    )
+    support_counts = image_counts[active_properties]
+    offsets = np.empty(len(active_properties) + 1, dtype=np.int64)
+    offsets[0] = 0
+    np.cumsum(support_counts, out=offsets[1:])
+    combinations = active_properties.astype(np.int32, copy=False)[:, None]
+    combinations_path, offsets_path, image_ids_path, complete_path = (
+        _sparse_level_paths(cache_directory, 1)
+    )
+    complete_path.unlink(missing_ok=True)
+    temporary_paths = [
+        path.with_name(path.name + ".tmp")
+        for path in (combinations_path, offsets_path, image_ids_path)
+    ]
+    with temporary_paths[0].open("wb") as output:
+        np.save(output, combinations, allow_pickle=False)
+    with temporary_paths[1].open("wb") as output:
+        np.save(output, offsets, allow_pickle=False)
+    if offsets[-1]:
+        matching_ids = np.lib.format.open_memmap(
+            temporary_paths[2],
+            mode="w+",
+            dtype=image_row_ids.dtype,
+            shape=(int(offsets[-1]),),
+        )
+    else:
+        matching_ids = np.empty((0,), dtype=image_row_ids.dtype)
+    for column, property_column in enumerate(active_properties):
+        matching_ids[offsets[column] : offsets[column + 1]] = image_row_ids[
+            image_property_matrix[:, property_column]
+        ]
+    if isinstance(matching_ids, np.memmap):
+        matching_ids.flush()
+    del matching_ids
+    if not offsets[-1]:
+        with temporary_paths[2].open("wb") as output:
+            np.save(
+                output, np.empty((0,), dtype=image_row_ids.dtype), allow_pickle=False
+            )
+    for temporary_path, final_path in zip(
+        temporary_paths, (combinations_path, offsets_path, image_ids_path)
+    ):
+        os.replace(temporary_path, final_path)
+    atomic_write_json(
+        str(complete_path),
+        {
+            "combination_count": len(combinations),
+            "image_id_count": int(offsets[-1]),
+            "depth": 1,
+        },
+        indent=None,
+    )
+    saved_level = _load_sparse_level(cache_directory, 1)
+    if saved_level is None:
+        raise RuntimeError("Failed to save sparse combination level 1.")
+    return saved_level
+
+
+def _find_sparse_extensions(
+    parent_image_masks: np.ndarray,
+    property_image_masks: np.ndarray,
+    parent_combinations: list[tuple[int, ...]],
+    count_dtype: np.dtype[np.generic],
+    minimum_matching_images: int,
+    maximum_matching_images: int,
+    property_block_size: int | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Count valid parent/property pairs without creating nested worker pools."""
+    property_count = property_image_masks.shape[1]
+    property_columns = np.arange(property_count, dtype=np.int64)
+    if property_block_size is None:
+        shared_image_counts = np.matmul(
+            parent_image_masks.T,
+            property_image_masks,
+            dtype=count_dtype,
+        )
+        last_properties = np.fromiter(
+            (combination[-1] for combination in parent_combinations),
+            dtype=np.int64,
+            count=len(parent_combinations),
+        )
+        qualifying = (
+            shared_image_counts >= minimum_matching_images
+            and shared_image_counts <= maximum_matching_images
+        )
+        qualifying &= property_columns[None, :] > last_properties[:, None]
+        parent_columns, property_columns = np.nonzero(qualifying)
+        return parent_columns.astype(np.int64), property_columns.astype(np.int64)
+
+    if property_block_size < 1:
+        raise ValueError("property_block_size must be at least 1.")
+    parents_by_block: dict[int, list[int]] = {}
+    for parent_column, combination in enumerate(parent_combinations):
+        block_start = (combination[-1] // property_block_size) * property_block_size
+        parents_by_block.setdefault(block_start, []).append(parent_column)
+
+    qualifying_parents: list[np.ndarray] = []
+    qualifying_properties: list[np.ndarray] = []
+    for block_start, parent_columns in sorted(parents_by_block.items()):
+        parent_indices = np.asarray(parent_columns, dtype=np.int64)
+        block_stop = min(block_start + property_block_size, property_count)
+        parent_masks = parent_image_masks[:, parent_indices]
+        if block_stop < property_count:
+            later_counts = np.matmul(
+                parent_masks.T,
+                property_image_masks[:, block_stop:],
+                dtype=count_dtype,
+            )
+            local_parents, local_properties = np.nonzero(
+                (later_counts >= minimum_matching_images)
+                & (later_counts <= maximum_matching_images)
+            )
+            if local_parents.size:
+                qualifying_parents.append(parent_indices[local_parents])
+                qualifying_properties.append(local_properties + block_stop)
+
+        block_counts = np.matmul(
+            parent_masks.T,
+            property_image_masks[:, block_start:block_stop],
+            dtype=count_dtype,
+        )
+        last_properties = np.fromiter(
+            (parent_combinations[parent][-1] for parent in parent_columns),
+            dtype=np.int64,
+            count=len(parent_columns),
+        )
+        block_qualifying = (block_counts >= minimum_matching_images) & (
+            block_counts <= maximum_matching_images
+        )
+        block_qualifying &= (
+            property_columns[block_start:block_stop][None, :] > last_properties[:, None]
+        )
+        local_parents, local_properties = np.nonzero(block_qualifying)
+        if local_parents.size:
+            qualifying_parents.append(parent_indices[local_parents])
+            qualifying_properties.append(local_properties + block_start)
+
+    if not qualifying_parents:
+        empty = np.empty(0, dtype=np.int64)
+        return empty, empty.copy()
+    return np.concatenate(qualifying_parents), np.concatenate(qualifying_properties)
+
+
+def generate_combinations_sparse(
+    image_property_matrix: np.ndarray,
+    image_row_ids: np.ndarray,
+    max_combination_size: int,
+    *,
+    minimum_matching_images: int,
+    maximum_matching_images: int,
+    memory_budget_gb: float = 4.0,
+    property_block_size: int | None = None,
+) -> SparseCombinationResults:
+    """Enumerate combinations while storing each match set as sparse image-row IDs.
+
+    Each level is cached as aligned combination, offset, and flat image-ID arrays.
+    Workers receive ranges into those arrays, reconstruct only their batch matrices,
+    and write one temporary sparse shard for the merger.
+    """
+    image_property_matrix = np.asarray(image_property_matrix, dtype=bool)
+    image_row_ids = np.asarray(image_row_ids)
+    image_count, property_count = image_property_matrix.shape
+    if len(image_row_ids) != image_count:
+        raise ValueError("image_row_ids must have one ID for each image row.")
+    if max_combination_size < 1:
+        return SparseCombinationResults([], None)
+    if minimum_matching_images < 1:
+        raise ValueError("minimum_matching_images must be at least 1.")
+    if memory_budget_gb <= 0:
+        raise ValueError("memory_budget_gb must be greater than 0.")
+    if property_block_size is not None and property_block_size < 1:
+        raise ValueError("property_block_size must be at least 1.")
+    cache_directory = _cache_directory(
+        image_property_matrix,
+        image_row_ids,
+        minimum_matching_images,
+        maximum_matching_images,
+    )
+    memory_budget_bytes = int(memory_budget_gb * 1e9)
+    row_sort_order = np.argsort(image_row_ids)
+    sorted_image_ids = image_row_ids[row_sort_order]
+    count_dtype = np.min_scalar_type(image_count)
+    property_columns = np.arange(property_count, dtype=np.int64)
+    level_results = [
+        _seed_sparse_level(
+            image_property_matrix,
+            image_row_ids,
+            minimum_matching_images,
+            maximum_matching_images,
+            cache_directory,
+        )
+    ]
+
+    for depth in range(2, max_combination_size + 1):
+        cached_level = _load_sparse_level(cache_directory, depth)
+        if cached_level is not None:
+            logger.info(
+                "sparse level %d cache hit: %s combinations, %s matching image IDs",
+                depth,
+                f"{len(cached_level.combinations):,}",
+                f"{len(cached_level.image_ids):,}",
+            )
+            level_results.append(cached_level)
+            if len(cached_level.combinations) == 0:
+                break
+            continue
+
+        parent_level = level_results[-1]
+        parent_count = len(parent_level.combinations)
+        if parent_count == 0:
+            break
+        batch_capacity = calculate_batch_capacity(
+            image_property_matrix, memory_budget_bytes
+        )
+        batch_ranges = [
+            (batch_index, start, min(start + batch_capacity, parent_count))
+            for batch_index, start in enumerate(range(0, parent_count, batch_capacity))
+        ]
+        logger.info(
+            "sparse level %d | initial matrix %s bool (%s bytes) | %s parents | "
+            "batch size %s | %s batches | %s workers",
+            depth,
+            image_property_matrix.shape,
+            f"{image_property_matrix.nbytes:,}",
+            f"{parent_count:,}",
+            f"{batch_capacity:,}",
+            f"{len(batch_ranges):,}",
+            f"{min(_worker_count(), len(batch_ranges)):,}",
+        )
+        shard_directory = cache_directory / f"sparse_level_{depth:02d}_shards"
+        shard_directory.mkdir(parents=True, exist_ok=True)
+
+        def process_parent_batch(
+            batch_index: int,
+            start: int,
+            stop: int,
+        ) -> Path:
+            shard_path = shard_directory / f"batch_{batch_index:08d}.npz"
+            if _sparse_shard_matches(shard_path, start, stop):
+                return shard_path
+
+            flat_start = int(parent_level.offsets[start])
+            flat_stop = int(parent_level.offsets[stop])
+            batch_flat_ids = parent_level.image_ids[flat_start:flat_stop]
+            local_offsets = parent_level.offsets[start : stop + 1] - flat_start
+            batch_image_ids, inverse_rows = np.unique(
+                batch_flat_ids, return_inverse=True
+            )
+            source_rows = row_sort_order[
+                np.searchsorted(sorted_image_ids, batch_image_ids)
+            ]
+            local_parent_masks = np.zeros(
+                (len(batch_image_ids), stop - start), dtype=bool
+            )
+            local_columns = np.repeat(
+                np.arange(stop - start, dtype=np.intp),
+                np.diff(local_offsets),
+            )
+            local_parent_masks[inverse_rows, local_columns] = True
+            local_property_masks = image_property_matrix[source_rows]
+            local_combinations = [
+                tuple(int(value) for value in row)
+                for row in parent_level.combinations[start:stop]
+            ]
+            parent_columns, added_properties = _find_sparse_extensions(
+                local_parent_masks,
+                local_property_masks,
+                local_combinations,
+                count_dtype,
+                minimum_matching_images,
+                maximum_matching_images,
+                property_block_size,
+            )
+
+            candidate_count = len(parent_columns)
+            next_combinations = np.empty((candidate_count, depth), dtype=np.int32)
+            for row, (parent_column, property_column) in enumerate(
+                zip(parent_columns, added_properties)
+            ):
+                next_combinations[row, :-1] = local_combinations[parent_column]
+                next_combinations[row, -1] = property_column
+
+            matching_by_candidate: list[np.ndarray] = []
+            for candidate_start in range(0, candidate_count, batch_capacity):
+                candidate_stop = min(candidate_start + batch_capacity, candidate_count)
+                intersections = np.logical_and(
+                    local_parent_masks[
+                        :, parent_columns[candidate_start:candidate_stop]
+                    ],
+                    local_property_masks[
+                        :, added_properties[candidate_start:candidate_stop]
+                    ],
+                )
+                matching_by_candidate.extend(
+                    batch_image_ids[intersections[:, column]]
+                    for column in range(intersections.shape[1])
+                )
+            match_counts = np.fromiter(
+                (len(rows) for rows in matching_by_candidate),
+                dtype=np.int64,
+                count=candidate_count,
+            )
+            next_offsets = np.empty(candidate_count + 1, dtype=np.int64)
+            next_offsets[0] = 0
+            np.cumsum(match_counts, out=next_offsets[1:])
+            if next_offsets[-1]:
+                next_image_ids = np.concatenate(matching_by_candidate)
+            else:
+                next_image_ids = np.empty(0, dtype=image_row_ids.dtype)
+            _save_sparse_shard(
+                shard_path,
+                start,
+                stop,
+                next_combinations,
+                next_offsets,
+                next_image_ids,
+            )
+            return shard_path
+
+        shard_paths = parallel_for(
+            process_parent_batch,
+            batch_ranges,
+            max_workers=_worker_count(),
+            batch_size=1,
+            desc=f"sparse level {depth} batches",
+            unit="batch",
+        )
+        next_level = _merge_sparse_shards(
+            cache_directory,
+            depth,
+            shard_paths,
+            depth,
+            image_row_ids.dtype,
+        )
+        for stale_shard in shard_directory.iterdir():
+            if stale_shard.is_file():
+                stale_shard.unlink()
+        shard_directory.rmdir()
+        logger.info(
+            "sparse level %d complete: %s combinations, %s matching image IDs",
+            depth,
+            f"{len(next_level.combinations):,}",
+            f"{len(next_level.image_ids):,}",
+        )
+        level_results.append(next_level)
+        if len(next_level.combinations) == 0:
+            break
+
+    return SparseCombinationResults(level_results, cache_directory)

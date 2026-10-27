@@ -265,7 +265,7 @@ def describe_pair(
     """Return phase-specific pair context built from the two nodes and config.
 
     ``phase_index`` is an int (0=seed, 1=anchor, 2=collapsible,
-    3=single_win_loss, 4=refine, 5=chain_merge, 6=fallback). The int->label
+    3=single_win_loss, 4=chain_middle, 5=refine, 6=chain_merge, 7=fallback). The int->label
     mapping lives on the frontend.
     """
     ranking_conf = config["ranking"]
