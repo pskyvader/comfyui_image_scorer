@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from ....core.configuration.settings import config
 from ..derived_features import (
     HAND_LANDMARKS,
-    POSE_VISIBILITY_THRESHOLD,
     dominant_category,
     face_geometry,
     mean_visibility,
@@ -227,4 +227,4 @@ def test_prompt_features_mean_position_is_normalised() -> None:
 
 
 def test_presence_threshold_default_is_documented() -> None:
-    assert POSE_VISIBILITY_THRESHOLD == 0.5
+    assert float(config["training"]["analysis_pose_visibility_threshold"]) == 0.5

@@ -12,7 +12,6 @@ from typing import Any, TypedDict
 from ....core.configuration.settings import config
 from ...graph.node_proxy import NodeProxy
 from ...analysis.trueskill import expected_win_probability, Rating
-from ..constants import MIN_CHAIN_THRESHOLD
 from . import graph_helpers
 
 from ....domain.ports.graph import CrystalGraphPort, GraphStructure
@@ -65,10 +64,6 @@ class GraphStats(TypedDict):
     top: list[RankedExtremes]
     bottom: list[RankedExtremes]
     structure: GraphStructure
-
-
-DEFAULT_BUCKET_COUNT = 10
-DEFAULT_EXTREMES_COUNT = 10
 
 
 def _bucket_edges(values: list[float], bucket_count: int) -> list[tuple[float, float]]:
@@ -164,11 +159,7 @@ def describe_image(node: NodeProxy, cg: CrystalGraphPort) -> dict[str, Any]:
     return _describe_one(node, cg)
 
 
-def describe_graph(
-    cg: CrystalGraphPort,
-    bucket_count: int = DEFAULT_BUCKET_COUNT,
-    extremes_count: int = DEFAULT_EXTREMES_COUNT,
-) -> GraphStats:
+def describe_graph(cg: CrystalGraphPort) -> GraphStats:
     """Return whole-graph ranking measurements.
 
     Promoted out of ``describe_pair`` so the analyze page can serialize the same
@@ -177,6 +168,8 @@ def describe_graph(
     """
     ranking_conf = config["ranking"]
     sigma_threshold = float(ranking_conf["sigma_threshold"])
+    bucket_count = int(ranking_conf["analysis_histogram_bucket_count"])
+    extremes_count = int(ranking_conf["analysis_top_bottom_display_rows"])
 
     structure: GraphStructure = cg.get_graph_stats()
     all_nodes = cg.get_all_nodes()
@@ -295,7 +288,7 @@ def describe_pair(
         "total_nodes": stats["total_nodes"],
         "total_links": structure["total_links"],
         "total_chains": structure["total_chains"],
-        "target_chains": MIN_CHAIN_THRESHOLD,
+        "target_chains": int(ranking_conf["minimum_chains_for_pairing"]),
         "level": stats["link_level"],
         "base_level": base_level,
         "collapsible": graph_helpers.is_collapsable_pair(

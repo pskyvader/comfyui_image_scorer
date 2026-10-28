@@ -8,6 +8,12 @@
     "min_comparisons_threshold": 4,
     "feature_gain_threshold": 0.8,
     "verbosity": 1,
+    "analysis_bootstrap_resamples": 1000,
+    "analysis_confidence_level": 0.95,
+    "analysis_min_images_per_term": 100,
+    "analysis_pose_visibility_threshold": 0.5,
+    "feature_filter_steps": 1000,
+    "hpo_configs_per_cycle": 5,
     "top1": {
         "best_score": 0.16446580050452372,
         "training_time": 13.924520254135132,

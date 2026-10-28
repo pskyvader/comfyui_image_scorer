@@ -26,8 +26,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy.stats import mannwhitneyu, pearsonr, spearmanr
 
-BOOTSTRAP_ITERATIONS: int = 1000
-DEFAULT_CONFIDENCE: float = 0.95
+from ...core.configuration.settings import config
 
 
 @dataclass(frozen=True)
@@ -80,10 +79,11 @@ class MaxStatisticResult:
 def max_statistic_bootstrap(
     indicators: npt.NDArray[np.bool_],
     values: npt.NDArray[np.float64],
-    confidence: float = DEFAULT_CONFIDENCE,
-    iterations: int = BOOTSTRAP_ITERATIONS,
+    *,
     seed: int = 0,
     progress: Callable[[int], None] | None = None,
+    iterations: int | None = None,
+    confidence: float | None = None,
 ) -> MaxStatisticResult:
     """Correct a whole family of binary-condition effects for multiplicity at once.
 
@@ -103,7 +103,16 @@ def max_statistic_bootstrap(
     Every column must have images on both sides. A condition carried by nearly
     every image has no comparison group, and its effect is just the mean of the
     values, which the resampling reproduces exactly and therefore never rejects.
+
+    `iterations` and `confidence` fall back to the ``analysis_bootstrap_resamples``
+    and ``analysis_confidence_level`` training settings when not supplied.
     """
+    training_conf = config["training"]
+    if iterations is None:
+        iterations = int(training_conf["analysis_bootstrap_resamples"])
+    if confidence is None:
+        confidence = float(training_conf["analysis_confidence_level"])
+
     present = indicators.astype(np.float64)
     row_count = len(values)
     with_count = present.sum(axis=0)
@@ -187,16 +196,25 @@ def correlation_with_ci(
     x: Sequence[float],
     y: Sequence[float],
     method: str,
-    iterations: int = BOOTSTRAP_ITERATIONS,
-    confidence: float = DEFAULT_CONFIDENCE,
+    *,
     seed: int = 0,
+    iterations: int | None = None,
+    confidence: float | None = None,
 ) -> CorrelationResult:
     """Correlate two samples and bootstrap a percentile interval for the coefficient.
 
     ``method`` is ``"pearson"`` or ``"spearman"``. The interval resamples whole
     image pairs, so it answers "how stable is this coefficient under resampling"
     rather than assuming a parametric shape.
+
+    `iterations` and `confidence` fall back to the ``analysis_bootstrap_resamples``
+    and ``analysis_confidence_level`` training settings when not supplied.
     """
+    if iterations is None:
+        iterations = int(config["training"]["analysis_bootstrap_resamples"])
+    if confidence is None:
+        confidence = float(config["training"]["analysis_confidence_level"])
+
     first = np.asarray(x, dtype=np.float64)
     second = np.asarray(y, dtype=np.float64)
     if first.shape != second.shape:

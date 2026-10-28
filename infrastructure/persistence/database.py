@@ -9,11 +9,9 @@ from pathlib import Path
 
 from ...core.filesystem.paths import cache_file
 from ...core.observability.logger import ModuleLogger, get_logger
+from ...domain.analysis.trueskill import INITIAL_MEAN, INITIAL_UNCERTAINTY
 
 logger: ModuleLogger = get_logger(__name__)
-
-MU0 = 25.0
-SIGMA0 = MU0 / 3.0
 
 _MY_MODULE_ROOT = Path(__file__).resolve().parents[2]
 _PROXY_ENTRY_WHITELIST = (
@@ -71,8 +69,8 @@ def _ensure_images_table(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS images (
             filename TEXT PRIMARY KEY,
             score REAL DEFAULT 0.5,
-            rating_mu REAL DEFAULT {MU0},
-            rating_sigma REAL DEFAULT {SIGMA0},
+            rating_mu REAL DEFAULT {INITIAL_MEAN},
+            rating_sigma REAL DEFAULT {INITIAL_UNCERTAINTY},
             comparison_count INTEGER DEFAULT 0,
             last_compared_at TEXT,
             ranking_generation INTEGER DEFAULT 0,
@@ -86,10 +84,12 @@ def _ensure_images_table(conn: sqlite3.Connection) -> None:
         if row["name"]
     }
     if "rating_mu" not in existing:
-        conn.execute(f"ALTER TABLE images ADD COLUMN rating_mu REAL DEFAULT {MU0}")
+        conn.execute(
+            f"ALTER TABLE images ADD COLUMN rating_mu REAL DEFAULT {INITIAL_MEAN}"
+        )
     if "rating_sigma" not in existing:
         conn.execute(
-            f"ALTER TABLE images ADD COLUMN rating_sigma REAL DEFAULT {SIGMA0}"
+            f"ALTER TABLE images ADD COLUMN rating_sigma REAL DEFAULT {INITIAL_UNCERTAINTY}"
         )
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_images_score ON images(score)")

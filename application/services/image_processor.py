@@ -14,7 +14,7 @@ from typing import cast
 from tqdm import tqdm
 
 from ...core.observability.logger import get_logger, ModuleLogger
-from ...core.configuration.settings import config, DB_BULK_CHUNK
+from ...core.configuration.settings import config
 from ...core.io.serialization import (
     clean_json_metadata,
     CollectedFile,
@@ -332,6 +332,7 @@ class ImageProcessor:
         dir_file_pairs = discover_files(str(ranked_root))
 
         prepare_conf = config["prepare"]
+        chunk_rows = int(prepare_conf["database_bulk_chunk_rows"])
         all_entries = collect_valid_files(
             dir_file_pairs,
             max_workers=int(prepare_conf["max_workers"]),
@@ -362,14 +363,14 @@ class ImageProcessor:
                 }
             )
         for chunk_start in tqdm(
-            range(0, len(image_rows), DB_BULK_CHUNK),
+            range(0, len(image_rows), chunk_rows),
             desc="Adding images",
             unit="chunk",
             delay=3.0,
             position=0,
         ):
             self._graph.add_images_bulk(
-                image_rows[chunk_start : chunk_start + DB_BULK_CHUNK]
+                image_rows[chunk_start : chunk_start + chunk_rows]
             )
 
         self._graph.rebuild_from_database()
@@ -445,14 +446,14 @@ class ImageProcessor:
             valid_filenames,
         )
         for chunk_start in tqdm(
-            range(0, len(survivors), DB_BULK_CHUNK),
+            range(0, len(survivors), chunk_rows),
             desc="Adding survivors to database",
             unit="chunk",
             delay=3.0,
             position=0,
         ):
             self._graph.add_comparisons_bulk(
-                survivors[chunk_start : chunk_start + DB_BULK_CHUNK]
+                survivors[chunk_start : chunk_start + chunk_rows]
             )
 
         logger.debug(
@@ -570,15 +571,16 @@ class ImageProcessor:
             for filename, (rating, count) in replayed.items()
         ]
         updated = 0
+        chunk_rows = int(config["prepare"]["database_bulk_chunk_rows"])
         for chunk_start in tqdm(
-            range(0, len(rating_updates), DB_BULK_CHUNK),
+            range(0, len(rating_updates), chunk_rows),
             desc="Updating scores",
             unit="chunk",
             leave=False,
             delay=3.0,
         ):
             updated += self._graph.update_image_rating_states_bulk(
-                rating_updates[chunk_start : chunk_start + DB_BULK_CHUNK]
+                rating_updates[chunk_start : chunk_start + chunk_rows]
             )
 
         return updated

@@ -9,6 +9,7 @@ from PIL import Image
 import time
 
 
+from ...core.configuration.settings import config
 from ...core.observability.logger import (
     get_logger,
     ModuleLogger,
@@ -17,11 +18,10 @@ from ...domain.ports.cache import CacheProvider
 
 logger: ModuleLogger = get_logger(__name__)
 
-WEBP_QUALITY = 90
-WEBP_METHOD = 0
-
 
 def compressed_image_response(src: Path, fname: str, cache: CacheProvider) -> Response:
+    webp_quality = int(config["ranking"]["webp_quality"])
+    webp_effort = int(config["ranking"]["webp_effort"])
     _start: float = time.perf_counter()
     st: stat_result = src.stat()
     key: str = f"{fname}:{st.st_mtime_ns}:{st.st_size}"
@@ -31,7 +31,7 @@ def compressed_image_response(src: Path, fname: str, cache: CacheProvider) -> Re
     if data is None:
         with Image.open(src) as im:
             buf = io.BytesIO()
-            im.save(buf, "WEBP", quality=WEBP_QUALITY, method=WEBP_METHOD)
+            im.save(buf, "WEBP", quality=webp_quality, method=webp_effort)
         data = buf.getvalue()
         cache.set(key, data)
 

@@ -16,8 +16,6 @@ from ...graph.node_proxy import NodeProxy
 
 from ....core.configuration.settings import config
 
-from ..constants import MIN_CHAIN_THRESHOLD
-
 from ...comparison.algorithm.history_collapse import canonicalize_pair
 
 from ....domain.ports.graph import CrystalGraphPort
@@ -367,11 +365,12 @@ def phase_chain_merge(
     candidate_images: list[NodeProxy],
     cg: CrystalGraphPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
+    min_chains = int(config["ranking"]["minimum_chains_for_pairing"])
     min_comparisons = int(config["ranking"]["insertion_target_comparisons"])
 
     last_chains_index: list[int] = cg.get_recent_chain_ids()
-    if len(last_chains_index) > MIN_CHAIN_THRESHOLD:
-        last_chains_index = last_chains_index[MIN_CHAIN_THRESHOLD // 2 :]
+    if len(last_chains_index) > min_chains:
+        last_chains_index = last_chains_index[min_chains // 2 :]
         cg.set_recent_chain_ids(last_chains_index)
 
     _start = time.perf_counter()
@@ -382,14 +381,14 @@ def phase_chain_merge(
         for chain_proxy in cg.get_all_chains(min_length=1, sort_order="asc")
     ]
 
-    if len(chains) < MIN_CHAIN_THRESHOLD:
+    if len(chains) < min_chains:
         logger.info(
-            f"skipping phase 4: <{MIN_CHAIN_THRESHOLD} chains", start_timer=_start
+            f"skipping phase 4: <{min_chains} chains", start_timer=_start
         )
         return None
 
     logger.debug(f"shortest chain: {len(chains[0])}, longest: {len(chains[-1])}")
-    top_n: int = min(MIN_CHAIN_THRESHOLD * 10, len(chains))
+    top_n: int = min(min_chains * 10, len(chains))
 
     for i in range(top_n - 1):
         if i in last_chains_index:
@@ -450,7 +449,7 @@ def phase_chain_merge(
 
                 return node_a, node_b
     logger.warning(
-        f"skipping phase 4: no valid pair found in shorter {MIN_CHAIN_THRESHOLD*10} chains",
+        f"skipping phase 4: no valid pair found in shorter {min_chains*10} chains",
         start_timer=_start,
     )
 
@@ -556,7 +555,9 @@ def phase_chain_middle(
 
     nodes: list[NodeProxy] = _collect_chain_midpoints(chains, candidate_names, cg)
 
-    if len(nodes) < 2:
+    min_chains = int(config["ranking"]["minimum_chains_for_pairing"])
+
+    if len(nodes) < min_chains:
         logger.debug(
             f"chain middle: only {len(nodes)} midpoint candidates", start_timer=_start
         )

@@ -20,6 +20,7 @@ from .. import parameter_analysis as parameter_analysis_module
 from .. import run_matrix_analysis, run_parameter_analysis
 from ..inputs import AnalysisInputs, collect_analysis_inputs
 from ..row_fields import as_number, as_pairs, as_weight_map, strongest
+from ....core.configuration.settings import config
 from ....domain.ports.graph import CrystalGraphPort
 from ....domain.ports.loading import TrainingLoader
 
@@ -90,6 +91,30 @@ def _corpus(prefix: str, terms: list[str], count: int) -> list[dict[str, Any]]:
         }
         for index in range(count)
     ]
+
+
+class _ConfigOverride:
+    """Reads the real sections, replacing training fields in memory only."""
+
+    def __init__(self, updates: dict[str, dict[str, Any]]) -> None:
+        self._updates = updates
+
+    def __getitem__(self, section: str):
+        base = config[section]
+        if section in self._updates:
+            return base.model_copy(update=self._updates[section])
+        return base
+
+
+def _min_term_images(
+    monkeypatch: pytest.MonkeyPatch, value: int
+) -> None:
+    """Set the term floor for one test without touching the config file."""
+    monkeypatch.setattr(
+        parameter_analysis_module,
+        "config",
+        _ConfigOverride({"training": {"analysis_min_images_per_term": value}}),
+    )
 
 
 def test_rows_are_single_key_filename_objects() -> None:
@@ -171,7 +196,7 @@ def test_terms_are_weighted_and_groups_are_separate(
     # Two images cannot clear the production floor, and most terms here appear
     # once, so this test drops the floor to 1. It checks which terms are
     # recognised and kept apart, not which ones survive on real data.
-    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 1)
+    _min_term_images(monkeypatch, 1)
     analyzer = parameter_analysis_module.ParameterAnalyzer(
         _inputs(), _rows(), output_dir=str(tmp_path)
     )
@@ -205,7 +230,7 @@ def test_terms_are_weighted_and_groups_are_separate(
 def test_prompt_tags_take_priority_over_the_sidecar_prompt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 1)
+    _min_term_images(monkeypatch, 1)
     inputs = _inputs(prompt_tags={"a.png": "from_database", "b.png": "other_tag"})
     analyzer = parameter_analysis_module.ParameterAnalyzer(
         inputs, _rows(), output_dir=str(tmp_path)
@@ -221,7 +246,7 @@ def test_prompt_tags_take_priority_over_the_sidecar_prompt(
 def test_terms_below_the_floor_are_counted_not_ranked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 100)
+    _min_term_images(monkeypatch, 100)
     analyzer = parameter_analysis_module.ParameterAnalyzer(
         _inputs(), _rows(), output_dir=str(tmp_path)
     )
@@ -238,7 +263,7 @@ def test_terms_below_the_floor_are_counted_not_ranked(
 def test_a_kept_term_reports_both_presence_figures(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 3)
+    _min_term_images(monkeypatch, 3)
     rows = _corpus("in", ["smile", "hair"], 4) + _corpus("out", ["hair"], 1)
     scores = {
         **{f"in{index}.png": 0.9 for index in range(4)},
@@ -273,7 +298,7 @@ def test_a_kept_term_reports_both_presence_figures(
 def test_term_records_are_ordered_by_delta_and_corrected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 4)
+    _min_term_images(monkeypatch, 4)
     rows = _corpus("good", ["good"], 6) + _corpus("bad", ["bad"], 6)
     scores = {f"good{index}.png": 0.8 for index in range(6)}
     scores.update({f"bad{index}.png": 0.2 for index in range(6)})
@@ -300,7 +325,7 @@ def test_term_records_are_ordered_by_delta_and_corrected(
 def test_negative_prompt_terms_are_reported_separately(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(parameter_analysis_module, "MIN_TERM_IMAGES", 4)
+    _min_term_images(monkeypatch, 4)
     rows = [
         {
             f"img{index}.png": {"positive_prompt": "smile", "negative_prompt": "blurry"}

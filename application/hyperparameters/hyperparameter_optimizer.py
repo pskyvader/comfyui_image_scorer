@@ -19,7 +19,10 @@ from ...infrastructure.ml_models.training.model_trainer import ModelTrainer
 
 logger: ModuleLogger = get_logger(__name__)
 
-NUM_CONFIGS = 5
+
+def _num_configs() -> int:
+    """Number of candidate configs (top1..topN) walked each HPO cycle."""
+    return int(config["training"]["hpo_configs_per_cycle"])
 
 
 class HpoState(TypedDict):
@@ -95,8 +98,9 @@ def crossover_config(cfg1: dict[str, float | int], cfg2: dict[str, float | int])
 
 def _load_state() -> HpoState:
     training_config = config["training"]
+    num_configs = _num_configs()
     configs: list[dict[str, float | int]] = [
-        dict(training_config[f"top{i}"]) for i in range(1, NUM_CONFIGS + 1)
+        dict(training_config[f"top{i}"]) for i in range(1, num_configs + 1)
     ]
     return {
         "configs": configs,
@@ -110,20 +114,24 @@ def _load_state() -> HpoState:
 
 def _save_state(state: HpoState) -> None:
     data = config.section_data("training")
-    for i in range(NUM_CONFIGS):
+    for i in range(_num_configs()):
         data[f"top{i + 1}"] = state["configs"][i]
     data["used_keys"] = state["used_keys"]
     config.save_section("training", data)
 
 
 def reset_hyperparameters() -> HpoState:
-    configs = [
+    seeds = [
         generate_random_config(),
         generate_random_config(),
         generate_slowest_setup(),
         generate_fastest_setup(),
         generate_random_config(),
     ]
+    num_configs = _num_configs()
+    while len(seeds) < num_configs:
+        seeds.append(generate_random_config())
+    configs = seeds[:num_configs]
     state: HpoState = {"configs": configs, "step": 0, "cycle": 0, "used_keys": []}
     _save_state(state)
     return state
@@ -147,7 +155,7 @@ def load_training_data(
         n_features_total,
     )
 
-    filter_steps = 1000
+    filter_steps = int(config["training"]["feature_filter_steps"])
     logger.info("filtering unused features after %s steps...", filter_steps)
     kept_feature_idx = transformer.filter_unused_features(
         vectors_keyed, scores_keyed, steps=filter_steps
@@ -311,10 +319,11 @@ def hpo_cycle(
     cycle: int,
 ) -> HpoState:
     state = _load_state()
+    num_configs = _num_configs()
     if (
         not state
         or "configs" not in state
-        or len(state.get("configs", [])) != NUM_CONFIGS
+        or len(state.get("configs", [])) != num_configs
     ):
         raise RuntimeError(
             "HPO state missing or invalid. Call reset_hyperparameters() to initialize."
@@ -333,7 +342,7 @@ def hpo_cycle(
     )
 
     for i in range(step_start, optimization_steps):
-        idx = i % NUM_CONFIGS
+        idx = i % num_configs
         logger.info("\n" + "---" * 25)
         logger.info("Step %s/%s  —  Config %s", i + 1, optimization_steps, idx + 1)
         cfg = configs[idx]
@@ -416,7 +425,7 @@ def run_hpo_cycles(
     model_trainer: ModelTrainer,
 ) -> list[HpoState]:
     """Run multiple HPO cycles. Each cycle runs optimization_steps steps
-    over the top1..top5 configs and breeds the next generation."""
+    over the top1..topN configs and breeds the next generation."""
     training_config = config["training"]
     if cycles is None:
         cycles = int(training_config["cycles"])

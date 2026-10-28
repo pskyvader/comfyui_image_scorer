@@ -16,6 +16,7 @@ import numpy as np
 
 from ...core.filesystem.paths import analysis_dir
 from ...core.observability.logger import get_logger, ModuleLogger
+from ...core.configuration.settings import config
 from ...domain.training.statistics import (
     benjamini_hochberg,
     cliffs_delta,
@@ -30,17 +31,12 @@ logger: ModuleLogger = get_logger(__name__)
 NUMERIC_PARAMS: tuple[str, ...] = ("steps", "cfg")
 CATEGORY_PARAMS: tuple[str, ...] = ("sampler", "scheduler", "model")
 
-# A term seen on a handful of images still yields a mean and a p-value, and this
-# dataset holds over ten thousand distinct terms, so the floor is what keeps the
-# ranking readable and the correction meaningful.
-MIN_TERM_IMAGES: int = 100
-
 
 @dataclass(frozen=True)
 class TermCorrelationSummary:
     """How the terms of one prompt polarity line up with the score.
 
-    ``terms`` holds one record per term that cleared ``MIN_TERM_IMAGES``, ordered
+    ``terms`` holds one record per term that cleared ``min_images``, ordered
     by ``delta`` from lowest to highest. ``p_value`` comes from a Mann-Whitney U
     test of the images carrying the term against those that do not, ``q_value``
     is that p-value after Benjamini-Hochberg correction across the kept terms,
@@ -163,6 +159,7 @@ class ParameterAnalyzer:
         whether a term helps.
         """
         logger.info("  - Extracting term correlations...")
+        min_images = int(config["training"]["analysis_min_images_per_term"])
         positive: dict[str, list[int]] = {}
         positive_weights: dict[str, list[float]] = {}
         negative: dict[str, list[int]] = {}
@@ -188,10 +185,10 @@ class ParameterAnalyzer:
 
         summaries = {
             "positive": self._summarize(
-                "positive", positive, positive_weights, scores
+                "positive", positive, positive_weights, scores, min_images
             ),
             "negative": self._summarize(
-                "negative", negative, negative_weights, scores
+                "negative", negative, negative_weights, scores, min_images
             ),
         }
         logger.info("  - Analyzed %d scored rows", analyzed)
@@ -201,7 +198,7 @@ class ParameterAnalyzer:
                 polarity,
                 summary.unique_terms,
                 summary.kept_terms,
-                MIN_TERM_IMAGES,
+                min_images,
                 summary.dropped_below_floor,
             )
 
@@ -209,7 +206,7 @@ class ParameterAnalyzer:
             json.dump(
                 {
                     "rows_analyzed": analyzed,
-                    "min_term_images": MIN_TERM_IMAGES,
+                    "min_term_images": min_images,
                     **{name: asdict(summary) for name, summary in summaries.items()},
                 },
                 f,
@@ -223,11 +220,12 @@ class ParameterAnalyzer:
         rows_by_term: dict[str, list[int]],
         weights: dict[str, list[float]],
         all_scores: list[float],
+        min_images: int,
     ) -> TermCorrelationSummary:
         """Rank one term group by the score gap between carrying and not carrying it."""
         kept: dict[str, dict[str, float | int]] = {}
         for term, term_rows in rows_by_term.items():
-            if len(term_rows) < MIN_TERM_IMAGES:
+            if len(term_rows) < min_images:
                 continue
             values = np.asarray(
                 [all_scores[index] for index in term_rows], dtype=np.float64

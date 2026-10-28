@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import cast
 
 from ...core.observability.logger import ModuleLogger, get_logger
+from ...domain.analysis.trueskill import INITIAL_MEAN, INITIAL_UNCERTAINTY
 from ...domain.ports.repository import (
     ImageRow,
     ImageRowForInsert,
@@ -187,15 +188,13 @@ def clear_all_images() -> int:
 
 
 def reset_all_image_ratings(score: float) -> bool:
-    MU0 = 25.0
-    SIGMA0 = MU0 / 3.0
     with get_db_connection() as conn:
         conn.execute(
             """
             UPDATE images
             SET score=?, rating_mu=?, rating_sigma=?, comparison_count=0, last_compared_at=NULL
             """,
-            (float(score), MU0, SIGMA0),
+            (float(score), INITIAL_MEAN, INITIAL_UNCERTAINTY),
         )
         conn.commit()
     return True

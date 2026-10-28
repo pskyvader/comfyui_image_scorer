@@ -11,7 +11,6 @@ from ...domain.ports.loading import (
     TrainingLoader,
 )
 from ...domain.ports.cache import CacheProvider
-from ...domain.comparison.constants import IMAGES_CACHE_TTL
 from ...application.services.graph_service import CrystalGraph
 from ...application.hyperparameters.hyperparameter_optimizer import HpoRunner
 from ...infrastructure.ml_models.plot import PlotManager
@@ -79,7 +78,9 @@ def build_cli_deps() -> CLIDeps:
     graph = CrystalGraph(
         image_repo=SQLiteImagesRepository(),
         comparison_repo=SQLiteComparisonsRepository(),
-        cache=InMemoryCache(default_ttl=IMAGES_CACHE_TTL),
+        cache=InMemoryCache(
+            default_ttl=int(config["ranking"]["image_cache_ttl_seconds"])
+        ),
         file_port=FileManager(),
     )
 

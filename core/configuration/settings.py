@@ -18,10 +18,6 @@ from ..io.serialization import load_json
 PathLike = str | Path
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 CONFIG_FILE: Path = PROJECT_ROOT.joinpath("config", "config.json")
-# Rows per database transaction during bulk writes. Large enough that the
-# per-transaction cost amortizes, small enough to bound memory and show
-# progress on very large rebuilds.
-DB_BULK_CHUNK: int = 5000
 SUB_CONFIG_MAPPING: dict[str, str] = {
     "prepare": "prepare_config",
     "training": "training_config",
@@ -48,6 +44,7 @@ class PrepareSection(SectionModel):
     max_workers: int
     batch_size: int
     memory_usage: float
+    database_bulk_chunk_rows: int
 
 
 class RankingSection(SectionModel):
@@ -65,6 +62,12 @@ class RankingSection(SectionModel):
     insertion_target_comparisons: int
     score_steepness: float
     sigma_threshold: float
+    webp_quality: int
+    webp_effort: int
+    image_cache_ttl_seconds: int
+    minimum_chains_for_pairing: int
+    analysis_histogram_bucket_count: int
+    analysis_top_bottom_display_rows: int
 
 
 class TrainingSection(SectionModel):
@@ -77,11 +80,20 @@ class TrainingSection(SectionModel):
     device: str
     objective: str
     min_comparisons_threshold: int
+    feature_gain_threshold: float
     verbosity: int
+    analysis_bootstrap_resamples: int
+    analysis_confidence_level: float
+    analysis_min_images_per_term: int
+    analysis_pose_visibility_threshold: float
+    feature_filter_steps: int
+    hpo_configs_per_cycle: int
 
 
 class VectorSection(SectionModel):
     """vector_config.json; the vectors list rides as an extra."""
+
+    implicit_parentheses_multiplier: float
 
 
 class VectorEntry(TypedDict):

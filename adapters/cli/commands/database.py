@@ -3,7 +3,7 @@
 import time
 
 from tqdm import tqdm
-from ....core.configuration.settings import config, DB_BULK_CHUNK
+from ....core.configuration.settings import config
 from ....core.observability.logger import get_logger
 from ....domain.analysis.trueskill import replay_ratings, public_score_from_rating
 from ....domain.ports.repository import RatingStateUpdate
@@ -63,14 +63,15 @@ def recalculate(deps: CLIDeps) -> int:
         for filename, (rating, count) in replayed.items()
     ]
     updated = 0
+    chunk_rows = int(config["prepare"]["database_bulk_chunk_rows"])
     for chunk_start in tqdm(
-        range(0, len(rating_updates), DB_BULK_CHUNK),
+        range(0, len(rating_updates), chunk_rows),
         desc="Updating ratings",
         unit="chunk",
         delay=3.0,
     ):
         updated += deps.graph.update_image_rating_states_bulk(
-            rating_updates[chunk_start : chunk_start + DB_BULK_CHUNK]
+            rating_updates[chunk_start : chunk_start + chunk_rows]
         )
     logger.info(f"Recalculated ratings for {updated} images", start_timer=_start)
     return 0

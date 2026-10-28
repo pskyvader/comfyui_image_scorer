@@ -1,4 +1,5 @@
 {
+    "implicit_parentheses_multiplier": 1.1,
     "vectors": [
         {
             "name": "image",

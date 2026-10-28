@@ -65,7 +65,6 @@ from ...infrastructure.external_services.mediapipe_models import (
 from ...infrastructure.ml_models.batch_sizer import BatchSizer
 from ...infrastructure.cache.memory_cache import InMemoryCache
 from ...infrastructure.ml_models.mediapipe_provider import MediaPipeProvider
-from ...domain.comparison.constants import IMAGES_CACHE_TTL
 from ...domain.ports.repository import ComparisonRow
 from ...infrastructure.loading.training_loader import training_loader
 from ...infrastructure.ml_models.training.model_trainer import model_trainer
@@ -78,7 +77,9 @@ comparison_repo = SQLiteComparisonsRepository()
 graph = CrystalGraph(
     image_repo=image_repo,
     comparison_repo=comparison_repo,
-    cache=InMemoryCache(default_ttl=IMAGES_CACHE_TTL),
+    cache=InMemoryCache(
+        default_ttl=int(config["ranking"]["image_cache_ttl_seconds"])
+    ),
     file_port=FileManager(),
 )
 

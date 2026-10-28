@@ -11,5 +11,11 @@
     "insertion_target_comparisons": 3,
     "score_steepness": 1.6,
     "sigma_threshold": 3.5,
-    "compress_images": false
+    "compress_images": false,
+    "webp_quality": 90,
+    "webp_effort": 0,
+    "image_cache_ttl_seconds": 10,
+    "minimum_chains_for_pairing": 20,
+    "analysis_top_bottom_display_rows": 10,
+    "analysis_histogram_bucket_count": 10
 }

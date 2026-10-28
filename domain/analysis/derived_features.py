@@ -15,11 +15,10 @@ from collections.abc import Mapping, Sequence
 from math import hypot, isclose
 import re
 
+from ...core.configuration.settings import config
 from .mediapipe_analysis import POSE_LANDMARK_NAMES
-from ..vectors.terms import ExtractionResult
+from ..vectors.terms import ExtractionResult, implicit_parentheses_multiplier
 
-POSE_VISIBILITY_THRESHOLD: float = 0.5
-IMPLICIT_PAREN_WEIGHT: float = 1.1
 CONNECTOR_TOKENS: tuple[str, ...] = ("and", "or", "but", "not")
 _CONNECTOR_PATTERN: re.Pattern[str] = re.compile(
     r"\b(?:" + "|".join(CONNECTOR_TOKENS) + r")\b", re.IGNORECASE
@@ -29,17 +28,19 @@ _CONNECTOR_PATTERN: re.Pattern[str] = re.compile(
 def _is_hand_weighted(weight: float) -> bool:
     """Whether a term weight came from the prompt rather than from nesting.
 
-    `extract_terms` multiplies every implicit group by ``IMPLICIT_PAREN_WEIGHT``,
-    so nested groups produce 1.1, 1.21, 1.331 and so on. A weight outside that
-    sequence was written by hand as ``term:1.2``.
+    `extract_terms` multiplies every implicit group by the
+    ``implicit_parentheses_multiplier`` vector setting, so nested groups
+    produce 1.1, 1.21, 1.331 and so on. A weight outside that sequence was
+    written by hand as ``term:1.2``.
     """
+    multiplier = implicit_parentheses_multiplier()
     level = 0
     candidate = 1.0
     while candidate <= weight + 1e-9:
         if isclose(candidate, weight, rel_tol=1e-6):
             return False
         level += 1
-        candidate = IMPLICIT_PAREN_WEIGHT**level
+        candidate = multiplier**level
     return True
 
 LandmarkPoints = Sequence[Mapping[str, float]]
@@ -95,10 +96,7 @@ def mean_visibility(landmarks: LandmarkTable, names: Sequence[str]) -> float:
     return sum(values) / len(values)
 
 
-def presence(
-    landmarks: LandmarkTable,
-    threshold: float = POSE_VISIBILITY_THRESHOLD,
-) -> dict[str, bool]:
+def presence(landmarks: LandmarkTable) -> dict[str, bool]:
     """Whether a pose, a left hand and a right hand were actually detected.
 
     Presence is a visibility question rather than an existence question:
@@ -106,6 +104,7 @@ def presence(
     detections would put every image in the "pose" group. `plot_detection_presence`
     compares the scores of the images on both sides of each split.
     """
+    threshold = float(config["training"]["analysis_pose_visibility_threshold"])
     return {
         "pose": mean_visibility(landmarks, POSE_LANDMARK_NAMES) > threshold,
         "left_hand": mean_visibility(landmarks, HAND_LANDMARKS["left_hand"])
@@ -224,8 +223,9 @@ def prompt_features(text: str, extraction: ExtractionResult) -> dict[str, float]
     """Structure of one prompt: size, weighting, nesting and ordering.
 
     The term weights come from `extract_terms`, which multiplies them through
-    nested parentheses and marks an implicit group with 1.1, so a term weighted
-    anything other than 1.0 or 1.1 was weighted by hand.
+    nested parentheses and marks an implicit group with the
+    ``implicit_parentheses_multiplier`` vector setting, so a term weighted
+    anything other than 1.0 or that sequence root was weighted by hand.
     """
     terms = extraction.terms
     term_count = len(terms)

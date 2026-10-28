@@ -2,7 +2,14 @@ import re
 from dataclasses import dataclass, field
 from typing import cast
 
+from ...core.configuration.settings import config
+
 WeightedTerm = tuple[str, float, int]
+
+
+def implicit_parentheses_multiplier() -> float:
+    """Weight extract_terms applies to every implicit-parentheses level."""
+    return float(config["vector"]["implicit_parentheses_multiplier"])
 
 
 @dataclass
@@ -17,7 +24,7 @@ class ExtractionResult:
 def extract_weight_from_paren(text: str) -> tuple[str, float]:
     """
     Extracts content and weight from (term:weight) or (term).
-    Implicit parentheses multiply the weight by 1.1.
+    Implicit parentheses multiply the weight by ``implicit_parentheses_multiplier``.
     """
     s: str = text.strip()
 
@@ -28,7 +35,7 @@ def extract_weight_from_paren(text: str) -> tuple[str, float]:
 
     # Matches simple (content)
     if s.startswith("(") and s.endswith(")"):
-        return (s[1:-1].strip(), 1.1)
+        return (s[1:-1].strip(), implicit_parentheses_multiplier())
 
     return (s, 1.0)
 
