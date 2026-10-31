@@ -7,7 +7,7 @@ import json
 import os
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 import time
 from typing import Any, Protocol, runtime_checkable
@@ -225,8 +225,14 @@ def save_score_influence_cache(
     cache_directory: Path,
     cache: ScoreInfluenceCache,
     params: ScoreInfluenceCacheParams,
+    condition_names: Sequence[str],
 ) -> None:
-    """Write cached statistics as an NPZ array bundle plus JSON metadata."""
+    """Write cached statistics as an NPZ array bundle plus JSON metadata.
+
+    The NPZ stores `combination_index`, which maps every result row to its
+    position in the combination source, and `condition_names`, which resolves
+    every combination ID through the level-one combinations.
+    """
     cache_directory.mkdir(parents=True, exist_ok=True)
     npz_path, json_path = score_influence_cache_paths(cache_directory, params)
     fold_results = np.array(
@@ -248,6 +254,11 @@ def save_score_influence_cache(
     with temporary_path.open("wb") as output:
         np.savez(
             output,
+            combination_index=np.arange(
+                cache.combination_influence.matching_image_counts.size,
+                dtype=np.int64,
+            ),
+            condition_names=np.asarray(list(condition_names)),
             lift_sum=cache.combination_influence.lift_sum,
             lift_count=cache.combination_influence.lift_count,
             matching_image_counts=cache.combination_influence.matching_image_counts,
@@ -261,7 +272,9 @@ def save_score_influence_cache(
         )
     os.replace(temporary_path, npz_path)
     atomic_write_json(
-        str(json_path), {"cache_key": params.cache_key()}, indent=None
+        str(json_path),
+        {"cache_key": params.cache_key(), "params": asdict(params)},
+        indent=None,
     )
 
 
@@ -269,7 +282,6 @@ def read_condition_elements(
     scored: Mapping[str, float],
     rows: Iterable[Mapping[str, Any]],
     minimum_matching_images: int,
-    maximum_matching_images: int,
     numeric_bins: int,
 ) -> dict[str, list[Condition]]:
     """Extract prompt, categorical, and binned numeric conditions by image."""
@@ -316,10 +328,9 @@ def read_condition_elements(
             [numeric[name][family] for name in elements if family in numeric[name]],
             dtype=np.float64,
         )
-        if (
-            values.size < minimum_matching_images
-            or values.size > maximum_matching_images
-        ):
+        # Family-level: the measurable unit is an individual bin label, not the
+        # family's total record count, so only a floor is applied here.
+        if values.size < minimum_matching_images:
             continue
         edges_by_family[family] = [
             float(edge)
@@ -350,17 +361,22 @@ def build_condition_data(
     elements_by_image: Mapping[str, Sequence[Condition]],
     scores: Mapping[str, float],
     minimum_matching_images: int,
-    maximum_matching_images: int,
 ) -> ConditionData:
-    """Build ordered condition IDs, image scores, and packed image masks."""
+    """Build ordered condition IDs, image scores, and packed image masks.
+
+    Conditions are kept when their recorded image count reaches the minimum and
+    they do not cover every analyzed image; identical image masks keep only the
+    lexicographically first label.
+    """
     condition_counts: Counter[Condition] = Counter()
     for carried in elements_by_image.values():
         condition_counts.update(carried)
 
+    carrier_count = len(elements_by_image)
     surviving_conditions = sorted(
         condition
         for condition, count in condition_counts.items()
-        if minimum_matching_images <= count <= maximum_matching_images
+        if minimum_matching_images <= count < carrier_count
     )
     condition_names = [f"{family}: {value}" for family, value in surviving_conditions]
     condition_indices = {
@@ -377,6 +393,20 @@ def build_condition_data(
             condition_index = condition_indices.get(condition)
             if condition_index is not None:
                 property_image_bitmasks[condition_index] |= row_bit
+
+    kept_masks: set[int] = set()
+    kept_indices: list[int] = []
+    for index, mask in enumerate(property_image_bitmasks):
+        if mask not in kept_masks:
+            kept_masks.add(mask)
+            kept_indices.append(index)
+    if len(kept_indices) < len(surviving_conditions):
+        logger.info(
+            "dropped %d conditions matching the same images as an earlier condition",
+            len(surviving_conditions) - len(kept_indices),
+        )
+    condition_names = [condition_names[index] for index in kept_indices]
+    property_image_bitmasks = [property_image_bitmasks[index] for index in kept_indices]
 
     return ConditionData(
         condition_names=condition_names,
@@ -414,12 +444,11 @@ def _leave_one_fold_lifts(
     for fold in range(fold_count):
         fold_image_count = int(image_counts_by_fold[fold])
         other_image_count = total_image_count - fold_image_count
+        # Both fold sizes stay under the maximum: each is at most the total,
+        # which the early return already bounded.
         if (
             fold_image_count < minimum_matching_images
             or other_image_count < minimum_matching_images
-        ) or (
-            fold_image_count > maximum_matching_images
-            or other_image_count > maximum_matching_images
         ):
             continue
         observed = float(score_sums_by_fold[fold] / fold_image_count)

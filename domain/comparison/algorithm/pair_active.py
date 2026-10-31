@@ -97,6 +97,7 @@ def phase_anchor_insert(
 ) -> tuple[NodeProxy, NodeProxy] | None:
     _start: float = time.perf_counter()
     insertion_target = int(config["ranking"]["insertion_target_comparisons"])
+    score_type = "position_score"  # score,trueskill_score,position_score
 
     candidates: list[NodeProxy] = [
         node for node in candidate_images if node.link_count <= insertion_target
@@ -110,7 +111,9 @@ def phase_anchor_insert(
             start_timer=_start,
         )
         return None
-    candidates.sort(key=lambda node: (node.link_count, node.score))
+    candidates.sort(
+        key=lambda node: (node.link_count, node.__getattribute__(score_type))
+    )
     node_a: NodeProxy = candidates[0]
 
     seed_target_comparisons = int(config["ranking"]["seed_target_comparisons"])
@@ -129,7 +132,13 @@ def phase_anchor_insert(
     ]
 
     pair_list.sort(
-        key=lambda pair: (pair[1].link_count, abs(pair[0].score - pair[1].score))
+        key=lambda pair: (
+            pair[1].link_count,
+            abs(
+                pair[0].__getattribute__(score_type)
+                - pair[1].__getattribute__(score_type)
+            ),
+        )
     )
     result: tuple[NodeProxy, NodeProxy] | None = pair_list[0] if pair_list else None
 
@@ -138,7 +147,8 @@ def phase_anchor_insert(
     # )
     if result:
         logger.debug(
-            f"returning pair {result[0].filename}({result[0].link_count}) vs {result[1].filename}({result[1].link_count})",
+            f"returning pair {result[0].filename[10:]}({result[0].link_count}) vs "
+            f"{result[1].filename[10:]}({result[1].link_count})",
             start_timer=_start,
         )
         return result
@@ -382,9 +392,7 @@ def phase_chain_merge(
     ]
 
     if len(chains) < min_chains:
-        logger.info(
-            f"skipping phase 4: <{min_chains} chains", start_timer=_start
-        )
+        logger.info(f"skipping phase 4: <{min_chains} chains", start_timer=_start)
         return None
 
     logger.debug(f"shortest chain: {len(chains[0])}, longest: {len(chains[-1])}")
@@ -563,7 +571,8 @@ def phase_chain_middle(
         )
         return None
 
-    nodes.sort(key=lambda node: node.trueskill_score)
+    # nodes.sort(key=lambda node: node.trueskill_score)
+    nodes.sort(key=lambda node: node.link_count)
 
     pair_list: list[tuple[NodeProxy, NodeProxy]] = [
         (nodes[i], nodes[i + 1]) for i in range(len(nodes) - 1)
@@ -617,6 +626,8 @@ def _collect_chain_midpoints(
 
         node: NodeProxy | None = cg.get_node(filename)
         if node is None:
+            continue
+        if node.get_chain()[0].id != raw_chain.id:
             continue
 
         seen.add(filename)

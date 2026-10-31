@@ -53,6 +53,22 @@ class NodeProxy:
         )
 
     @property
+    def position_score(self) -> int:
+        """score based on position on its main chain, int from 0 to 100"""
+        chain: _chain_proxy.ChainProxy = self.get_chain(only_main=True)[0]
+        # get position of this node within chain
+        position: int | None = chain.get_position(self)
+        if position is None:
+            raise ValueError(f"Node {self._node_id} is not part of its main chain.")
+
+        # calculate score based on position in chain, scaled to 0-100, the higher, the better (0=bottom, 100=top)
+        # if chain.length == 1, return 50 (middle)
+        score: int = (
+            int((1 - position / (chain.length - 1)) * 100) if chain.length > 1 else 50
+        )
+        return score
+
+    @property
     def link_count(self) -> int:
         return self._image_data.get("comparison_count", 0)
 

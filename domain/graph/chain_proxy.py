@@ -33,6 +33,12 @@ class ChainProxy:
     def length(self) -> int:
         return len(self._nodes)
 
+    def get_position(self, node: NodeProxy) -> int | None:
+        """Get the position of a node within the chain, 0-based index."""
+        if node.id not in self._nodes:
+            return None
+        return self._nodes.index(node.id)
+
     @property
     def is_main(self) -> bool:
         for node_id in self._nodes:

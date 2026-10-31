@@ -167,7 +167,7 @@ def _cache_directory(
     maximum_matching_images: int,
 ) -> Path:
     fingerprint = hashlib.blake2b(digest_size=16)
-    fingerprint.update(b"frequent-combinations-v1")
+    fingerprint.update(b"frequent-combinations-v2")
     fingerprint.update(repr(image_property_matrix.shape).encode())
     fingerprint.update(
         memoryview(np.ascontiguousarray(image_property_matrix)).cast("B")
@@ -351,8 +351,7 @@ def create_qualifying_extension_mask(
     """Keep parent/property pairs meeting the image-count and ordering rules."""
     qualifying_extensions = (
         shared_image_counts >= minimum_matching_images
-        and shared_image_counts <= maximum_matching_images
-    )
+    ) & (shared_image_counts <= maximum_matching_images)
     qualifying_extensions &= (
         property_columns[None, :] > last_property_by_parent[:, None]
     )
@@ -935,6 +934,14 @@ def generate_combinations(
         minimum_matching_images,
         maximum_matching_images,
     )
+    # A full-coverage column reproduces every combination it joins; zeroing it
+    # keeps column indices stable while removing it from candidacy everywhere.
+    full_coverage_columns = (
+        np.count_nonzero(source_image_property_matrix, axis=0) == image_count
+    )
+    if full_coverage_columns.any():
+        image_property_matrix = source_image_property_matrix.copy()
+        image_property_matrix[:, full_coverage_columns] = False
     logger.info("combination cache: %s", cache_directory)
     (
         level_one_multiplied_path,
@@ -972,8 +979,8 @@ def generate_combinations(
             _save_matrix_cache(level_one_multiplied_path, image_counts_by_property)
             image_counts_by_property = image_counts_by_property[0]
         active_property_columns = np.flatnonzero(
-            image_counts_by_property >= minimum_matching_images
-            and image_counts_by_property <= maximum_matching_images
+            (image_counts_by_property >= minimum_matching_images)
+            & (image_counts_by_property < image_count)
         )
         current_combination_image_masks = image_property_matrix[
             :, active_property_columns
@@ -1306,12 +1313,44 @@ def _merge_sparse_shards(
         _sparse_level_paths(cache_directory, level)
     )
     complete_path.unlink(missing_ok=True)
+    # Shards may hold different condition tuples whose matching image sets are
+    # identical; keep the first occurrence in merge order and drop the rest.
+    seen_sets: set[bytes] = set()
+    kept_rows: list[np.ndarray] = []
     combination_count = 0
     image_id_count = 0
+    duplicate_count = 0
+    logger.info(
+        "sparse level %d merging %s batch shards",
+        level,
+        f"{len(shard_paths):,}",
+    )
     for shard_path in shard_paths:
         with np.load(shard_path, allow_pickle=False) as shard:
-            combination_count += len(shard["combinations"])
-            image_id_count += len(shard["image_ids"])
+            combinations = shard["combinations"]
+            offsets = shard["offsets"]
+            image_ids = shard["image_ids"]
+            starts = offsets[:-1].tolist()
+            stops = offsets[1:].tolist()
+            keep = np.empty(len(combinations), dtype=bool)
+            for row, (start, stop) in enumerate(zip(starts, stops)):
+                digest = hashlib.blake2b(
+                    image_ids[start:stop].tobytes(), digest_size=16
+                ).digest()
+                keep[row] = digest not in seen_sets
+                if keep[row]:
+                    seen_sets.add(digest)
+            kept_rows.append(keep)
+            combination_count += int(keep.sum())
+            duplicate_count += int(keep.size - keep.sum())
+            image_source_total = np.diff(np.asarray(offsets))[keep]
+            image_id_count += int(image_source_total.sum())
+    if duplicate_count:
+        logger.info(
+            "sparse level %d dropped %s combinations with identical matching images",
+            level,
+            f"{duplicate_count:,}",
+        )
 
     temporary_paths = [
         path.with_name(path.name + ".tmp")
@@ -1342,32 +1381,37 @@ def _merge_sparse_shards(
 
     combination_cursor = 0
     image_id_cursor = 0
-    logger.info(
-        "sparse level %d merging %s batch shards into %s combinations and %s image IDs",
-        level,
-        f"{len(shard_paths):,}",
-        f"{combination_count:,}",
-        f"{image_id_count:,}",
-    )
-    for shard_path in tqdm(
+    for shard_path, keep in zip(
         shard_paths,
-        total=len(shard_paths),
-        desc=f"sparse level {level} merge batches",
-        unit="batch",
+        tqdm(
+            kept_rows,
+            total=len(kept_rows),
+            desc=f"sparse level {level} merge batches",
+            unit="batch",
+        ),
     ):
         with np.load(shard_path, allow_pickle=False) as shard:
             shard_combinations = shard["combinations"]
             shard_offsets = shard["offsets"]
             shard_image_ids = shard["image_ids"]
-            combination_stop = combination_cursor + len(shard_combinations)
-            image_id_stop = image_id_cursor + len(shard_image_ids)
-            combinations_out[combination_cursor:combination_stop] = shard_combinations
-            image_ids_out[image_id_cursor:image_id_stop] = shard_image_ids
-            offsets_out[combination_cursor + 1 : combination_stop + 1] = (
-                shard_offsets[1:] + image_id_cursor
+            row_counts = np.diff(np.asarray(shard_offsets))
+            kept_positions = np.flatnonzero(keep)
+            kept_count = kept_positions.size
+            if kept_count == 0:
+                continue
+            combinations_out[combination_cursor : combination_cursor + kept_count] = (
+                shard_combinations[kept_positions]
             )
-            combination_cursor = combination_stop
-            image_id_cursor = image_id_stop
+            kept_counts = row_counts[kept_positions]
+            offsets_out[combination_cursor + 1 : combination_cursor + kept_count + 1] = (
+                image_id_cursor + np.cumsum(kept_counts)
+            )
+            kept_ids = shard_image_ids[
+                keep[np.repeat(np.arange(len(shard_combinations)), row_counts)]
+            ]
+            image_ids_out[image_id_cursor : image_id_cursor + kept_ids.size] = kept_ids
+            combination_cursor += kept_count
+            image_id_cursor += kept_ids.size
 
     for output in (combinations_out, offsets_out, image_ids_out):
         if isinstance(output, np.memmap):
@@ -1410,7 +1454,6 @@ def _seed_sparse_level(
     image_property_matrix: np.ndarray,
     image_row_ids: np.ndarray,
     minimum_matching_images: int,
-    maximum_matching_images: int,
     cache_directory: Path,
 ) -> SparseCombinationLevel:
     cached = _load_sparse_level(cache_directory, 1)
@@ -1418,12 +1461,7 @@ def _seed_sparse_level(
         return cached
 
     image_counts = np.count_nonzero(image_property_matrix, axis=0)
-
-    # todo: fix with the correct logical operator for numpy arrays
-    active_properties = np.flatnonzero(
-        (image_counts >= minimum_matching_images)
-        & (image_counts <= maximum_matching_images)
-    )
+    active_properties = np.flatnonzero(image_counts >= minimum_matching_images)
     support_counts = image_counts[active_properties]
     offsets = np.empty(len(active_properties) + 1, dtype=np.int64)
     offsets[0] = 0
@@ -1506,8 +1544,7 @@ def _find_sparse_extensions(
         )
         qualifying = (
             shared_image_counts >= minimum_matching_images
-            and shared_image_counts <= maximum_matching_images
-        )
+        ) & (shared_image_counts <= maximum_matching_images)
         qualifying &= property_columns[None, :] > last_properties[:, None]
         parent_columns, property_columns = np.nonzero(qualifying)
         return parent_columns.astype(np.int64), property_columns.astype(np.int64)
@@ -1601,6 +1638,14 @@ def generate_combinations_sparse(
         minimum_matching_images,
         maximum_matching_images,
     )
+    # A full-coverage column reproduces every combination it joins; zeroing it
+    # keeps column indices stable while removing it from candidacy everywhere.
+    full_coverage_columns = (
+        np.count_nonzero(image_property_matrix, axis=0) == image_count
+    )
+    if full_coverage_columns.any():
+        image_property_matrix = image_property_matrix.copy()
+        image_property_matrix[:, full_coverage_columns] = False
     memory_budget_bytes = int(memory_budget_gb * 1e9)
     row_sort_order = np.argsort(image_row_ids)
     sorted_image_ids = image_row_ids[row_sort_order]
@@ -1611,7 +1656,6 @@ def generate_combinations_sparse(
             image_property_matrix,
             image_row_ids,
             minimum_matching_images,
-            maximum_matching_images,
             cache_directory,
         )
     ]

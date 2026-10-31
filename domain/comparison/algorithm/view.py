@@ -93,7 +93,9 @@ def _distribution(values: list[float], bucket_count: int) -> Distribution:
     }
 
 
-def _extremes(nodes: list[NodeProxy], limit: int, *, highest_first: bool) -> list[RankedExtremes]:
+def _extremes(
+    nodes: list[NodeProxy], limit: int, *, highest_first: bool
+) -> list[RankedExtremes]:
     ordered = sorted(nodes, key=lambda n: float(n.score), reverse=highest_first)
     return [
         {
@@ -107,7 +109,6 @@ def _extremes(nodes: list[NodeProxy], limit: int, *, highest_first: bool) -> lis
     ]
 
 
-
 def _describe_one(node: NodeProxy, cg: CrystalGraphPort) -> dict[str, Any]:
     """Build the per-image payload from a NodeProxy.
 
@@ -118,9 +119,7 @@ def _describe_one(node: NodeProxy, cg: CrystalGraphPort) -> dict[str, Any]:
     chain_length = chain[0].length if chain else 0
     chain_id = chain[0].id if chain else None
     chain_main_members = (
-        cg.get_main_chain_member_count(chain_id)
-        if chain_id is not None
-        else 0
+        cg.get_main_chain_member_count(chain_id) if chain_id is not None else 0
     )
 
     seed_target = int(config["ranking"]["seed_target_comparisons"])
@@ -139,6 +138,7 @@ def _describe_one(node: NodeProxy, cg: CrystalGraphPort) -> dict[str, Any]:
         "rating_mu": round(float(node.mu_skill), 4),
         "rating_sigma": round(float(node.sigma_uncertainty), 4),
         "trueskill_score": round(float(node.trueskill_score), 4),
+        "position_score": int(node.position_score),
         "link_count": int(node.link_count),
         "wins": len(node.get_links(worse_than=True)),
         "losses": len(node.get_links(better_than=True)),
@@ -271,8 +271,12 @@ def describe_pair(
     stats = describe_graph(cg)
     structure = stats["structure"]
 
-    rating_a = Rating(mu_skill=node_a.mu_skill, sigma_uncertainty=node_a.sigma_uncertainty)
-    rating_b = Rating(mu_skill=node_b.mu_skill, sigma_uncertainty=node_b.sigma_uncertainty)
+    rating_a = Rating(
+        mu_skill=node_a.mu_skill, sigma_uncertainty=node_a.sigma_uncertainty
+    )
+    rating_b = Rating(
+        mu_skill=node_b.mu_skill, sigma_uncertainty=node_b.sigma_uncertainty
+    )
     probability_a_beats_b = expected_win_probability(rating_a, rating_b)
 
     component_a = node_a.get_component()
