@@ -13,6 +13,7 @@ from ....core.configuration.settings import config
 from ...graph.node_proxy import NodeProxy
 from ...analysis.trueskill import expected_win_probability, Rating
 from . import graph_helpers
+from .phase_order import get_phase_name
 
 from ....domain.ports.graph import CrystalGraphPort, GraphStructure
 
@@ -257,9 +258,9 @@ def describe_pair(
 ) -> dict[str, Any]:
     """Return phase-specific pair context built from the two nodes and config.
 
-    ``phase_index`` is an int (0=seed, 1=anchor, 2=collapsible,
-    3=single_win_loss, 4=chain_middle, 5=refine, 6=chain_merge, 7=fallback). The int->label
-    mapping lives on the frontend.
+    ``phase_index`` is a PHASES list index owned by phase_order; resolve the
+    selected phase through its name there, never a hardcoded index. The
+    int->label mapping lives on the frontend.
     """
     ranking_conf = config["ranking"]
 
@@ -287,12 +288,22 @@ def describe_pair(
         and component_a.id == component_b.id
     )
 
+    # Chain middle targets every chain whose main length has reached the
+    # configured minimum; the merge phase instead targets a minimum chain count.
+    target_chains = int(ranking_conf["minimum_chains_for_pairing"])
+    if get_phase_name(phase_index) == "chain_middle":
+        min_chain_length = int(ranking_conf["chain_middle_min_chain_length"])
+        target_chains = sum(
+            1
+            for chain in cg.get_all_chains()
+            if chain.main_length >= min_chain_length
+        )
     return {
         "phase": phase_index,
         "total_nodes": stats["total_nodes"],
         "total_links": structure["total_links"],
         "total_chains": structure["total_chains"],
-        "target_chains": int(ranking_conf["minimum_chains_for_pairing"]),
+        "target_chains": target_chains,
         "level": stats["link_level"],
         "base_level": base_level,
         "collapsible": graph_helpers.is_collapsable_pair(

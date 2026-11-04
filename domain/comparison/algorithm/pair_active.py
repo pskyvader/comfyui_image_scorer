@@ -131,20 +131,20 @@ def phase_anchor_insert(
         if canonicalize_pair(node_a.filename, node_b.filename) not in existing_pair_set
     ]
 
-    pair_list.sort(
-        key=lambda pair: (
-            pair[1].link_count,
-            abs(
-                pair[0].__getattribute__(score_type)
-                - pair[1].__getattribute__(score_type)
-            ),
-        )
-    )
-    result: tuple[NodeProxy, NodeProxy] | None = pair_list[0] if pair_list else None
-
-    # result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
-    #     pair_list, closest=True
+    # pair_list.sort(
+    #     key=lambda pair: (
+    #         pair[1].link_count,
+    #         abs(
+    #             pair[0].__getattribute__(score_type)
+    #             - pair[1].__getattribute__(score_type)
+    #         ),
+    #     )
     # )
+    # result: tuple[NodeProxy, NodeProxy] | None = pair_list[0] if pair_list else None
+
+    result: tuple[NodeProxy, NodeProxy] | None = _closest_score_pair(
+        pair_list, closest=True
+    )
     if result:
         logger.debug(
             f"returning pair {result[0].filename[10:]}({result[0].link_count}) vs "
@@ -213,22 +213,27 @@ def _collect_chain_extremes(
 def _closest_score_pair(
     pair_list: list[tuple[NodeProxy, NodeProxy]], closest: bool = False
 ) -> tuple[NodeProxy, NodeProxy] | None:
+    """Only return a pair if the score gap is within the sigma uncertainty of the first node."""
+    sigma_range_multiplier: float = config["ranking"]["sigma_range_multiplier"]
+
     if not pair_list:
         return None
     pair_list.sort(
         key=lambda pair: abs(pair[0].trueskill_score - pair[1].trueskill_score)
     )
     selected: tuple[NodeProxy, NodeProxy] = pair_list[0]
-    if closest:
-        return selected
-
     best_difference: float = abs(
         selected[0].trueskill_score - selected[1].trueskill_score
     )
+    if best_difference > selected[0].sigma_uncertainty * sigma_range_multiplier:
+        return None
+    if closest:
+        return selected
+
     for pair in pair_list:
         difference: float = abs(pair[0].trueskill_score - pair[1].trueskill_score)
 
-        if difference > selected[0].sigma_uncertainty:
+        if difference > selected[0].sigma_uncertainty * sigma_range_multiplier:
             break
         if difference > best_difference:
             best_difference = difference
@@ -559,24 +564,41 @@ def phase_chain_middle(
 
     candidate_names: set[str] = {node.filename for node in candidate_images}
 
-    chains: list[ChainProxy] = cg.get_all_chains(min_length=1, sort_order="asc")
+    min_chain_length = int(config["ranking"]["chain_middle_min_chain_length"])
+    chains: list[ChainProxy] = cg.get_all_chains(sort_order="asc")
+    qualifying_chains: list[ChainProxy] = [
+        chain for chain in chains if chain.main_length < min_chain_length
+    ]
 
-    nodes: list[NodeProxy] = _collect_chain_midpoints(chains, candidate_names, cg)
-
-    min_chains = int(config["ranking"]["minimum_chains_for_pairing"])
-
-    if len(nodes) < min_chains:
+    if not qualifying_chains:
         logger.debug(
-            f"chain middle: only {len(nodes)} midpoint candidates", start_timer=_start
+            f"chain middle: every chain reached {min_chain_length} nodes",
+            start_timer=_start,
         )
         return None
+    logger.debug(
+        f"chains {len(qualifying_chains)} ",
+        start_timer=_start,
+    )
+
+    nodes: list[NodeProxy] = _collect_chain_midpoints(
+        qualifying_chains, candidate_names, cg
+    )
+
+    if not nodes:
+        logger.debug(
+            f"chain middle: no midpoint candidates (limit {min_chain_length})",
+            start_timer=_start,
+        )
+        return None
+    logger.debug(f"nodes:{len(nodes)}", start_timer=_start)
 
     # nodes.sort(key=lambda node: node.trueskill_score)
-    nodes.sort(key=lambda node: node.link_count)
+    # nodes.sort(key=lambda node: node.link_count)
 
-    pair_list: list[tuple[NodeProxy, NodeProxy]] = [
-        (nodes[i], nodes[i + 1]) for i in range(len(nodes) - 1)
-    ]
+    # pair_list: list[tuple[NodeProxy, NodeProxy]] = [
+    #     (nodes[i], nodes[i + 1]) for i in range(len(nodes) - 1)
+    # ]
 
     node_a: NodeProxy = nodes[0]
 
@@ -591,9 +613,8 @@ def phase_chain_middle(
     pair_list.sort(
         key=lambda pair: abs(pair[0].trueskill_score - pair[1].trueskill_score)
     )
+    logger.debug(f"pair_list:{len(pair_list)}", start_timer=_start)
     result = _closest_score_pair(pair_list)
-
-    # result: tuple[NodeProxy, NodeProxy] | None = pair_list[0] if pair_list else None
 
     if result:
         logger.debug(
@@ -601,7 +622,11 @@ def phase_chain_middle(
             start_timer=_start,
         )
         return result
-    logger.debug("chain middle: no valid pair found", start_timer=_start)
+
+    logger.debug(
+        f"chain middle: no valid pair found,",
+        start_timer=_start,
+    )
     return None
 
 
@@ -615,7 +640,7 @@ def _collect_chain_midpoints(
     seen: set[str] = set()
 
     for raw_chain in chains:
-        indexed_nodes: list[NodeProxy] = raw_chain.nodes
+        indexed_nodes: list[NodeProxy] = raw_chain.main_nodes
         midpoint: NodeProxy = indexed_nodes[len(indexed_nodes) // 2]
 
         filename: str = midpoint.filename

@@ -9,6 +9,14 @@ const galleryLogger = FrontendLogger.create("external_modules.gallery.frontend.g
 const UNLIMITED_COMPARISONS = 10;
 const NO_COMPARISON_LIMIT = 999999;
 
+// Slider span per score form. Trueskill scores sit below zero for freshly
+// ranked images because the score is mu - 3 sigma (both start at 0).
+const SCORE_RANGES = {
+    public: { min: 0, max: 1, step: 0.01, decimals: 3 },
+    trueskill: { min: -25, max: 50, step: 0.25, decimals: 2 },
+    position_score: { min: 0, max: 100, step: 1, decimals: 0 },
+};
+
 class GalleryView {
     constructor() {
         this.currentPage = 1;
@@ -25,6 +33,9 @@ class GalleryView {
 
     async _getGalleryImages(page, perPage, filters) {
         const params = new URLSearchParams({ page, per_page: perPage });
+        if (filters.scoreType) {
+            params.set("score_type", filters.scoreType);
+        }
         if (filters.scoreMin !== undefined) {
             params.set("score_min", filters.scoreMin);
         }
@@ -52,8 +63,13 @@ class GalleryView {
         return api._get(`/gallery/images?${params.toString()}`);
     }
 
-    async _getImageHistory(filename) {
-        return api._get(`/gallery/history/${encodeURIComponent(filename)}`);
+    async _getImageHistory(filename, scoreType) {
+        const params = new URLSearchParams();
+        if (scoreType) {
+            params.set("score_type", scoreType);
+        }
+        const query = params.toString();
+        return api._get(`/gallery/history/${encodeURIComponent(filename)}${query ? `?${query}` : ""}`);
     }
 
     cacheElements() {
@@ -61,6 +77,7 @@ class GalleryView {
         this.els = {
             scoreMin: document.getElementById("score-min"),
             scoreMax: document.getElementById("score-max"),
+            scoreType: document.getElementById("score-type"),
             comparisonsMin: document.getElementById("comparisons-min"),
             comparisonsMax: document.getElementById("comparisons-max"),
             scoreDisplay: document.getElementById("score-display"),
@@ -87,15 +104,49 @@ class GalleryView {
         };
     }
 
+    activeScoreRange() {
+        return SCORE_RANGES[this.els.scoreType?.value] ?? SCORE_RANGES.public;
+    }
+
+    setScoreSliderBounds(scoreType) {
+        const range = SCORE_RANGES[scoreType] ?? SCORE_RANGES.public;
+        ["scoreMin", "scoreMax"].forEach((id) => {
+            const el = this.els[id];
+            if (!el) {
+                return;
+            }
+            el.min = range.min;
+            el.max = range.max;
+            el.step = range.step;
+        });
+    }
+
+    clampScoreToRange(value) {
+        const range = this.activeScoreRange();
+        const parsed = parseFloat(value);
+        if (Number.isNaN(parsed)) {
+            return range.min;
+        }
+        return Math.min(Math.max(parsed, range.min), range.max);
+    }
+
+    formatScoreValue(score) {
+        const range = this.activeScoreRange();
+        if (range.decimals === 0) {
+            return String(Math.round(Number(score)));
+        }
+        return Number(score).toFixed(range.decimals);
+    }
+
     attachEventListeners() {
         const updateRanges = () => {
             if (this.els.scoreMin && this.els.scoreMax) {
                 if (parseFloat(this.els.scoreMin.value) > parseFloat(this.els.scoreMax.value)) {
                     this.els.scoreMin.value = this.els.scoreMax.value;
                 }
-                this.els.scoreDisplay.textContent = `${parseFloat(this.els.scoreMin.value)
-                    .toFixed(2)} - ${parseFloat(this.els.scoreMax.value)
-                        .toFixed(2)}`;
+                if (this.els.scoreDisplay) {
+                    this.els.scoreDisplay.textContent = `${this.formatScoreValue(this.els.scoreMin.value)} - ${this.formatScoreValue(this.els.scoreMax.value)}`;
+                }
             }
             if (this.els.comparisonsMin && this.els.comparisonsMax) {
                 if (parseInt(this.els.comparisonsMin.value) > parseInt(this.els.comparisonsMax.value)) {
@@ -114,6 +165,17 @@ class GalleryView {
             });
         });
 
+        this.els.scoreType?.addEventListener("change", () => {
+            this.setScoreSliderBounds(this.els.scoreType.value);
+            const range = this.activeScoreRange();
+            if (this.els.scoreMin) {
+                this.els.scoreMin.value = range.min;
+            }
+            if (this.els.scoreMax) {
+                this.els.scoreMax.value = range.max;
+            }
+            updateRanges(); this.search();
+        });
         this.els.sortFilter?.addEventListener("change", () => {
             this.saveFilters(); this.search();
         });
@@ -206,11 +268,17 @@ class GalleryView {
         if (saved) {
             try {
                 const filters = JSON.parse(saved);
+                const scoreType = filters.scoreType ?? "public";
+                const scoreRange = SCORE_RANGES[scoreType] ?? SCORE_RANGES.public;
+                if (this.els.scoreType) {
+                    this.els.scoreType.value = scoreType;
+                }
+                this.setScoreSliderBounds(scoreType);
                 if (this.els.scoreMin) {
-                    this.els.scoreMin.value = filters.scoreMin ?? 0;
+                    this.els.scoreMin.value = this.clampScoreToRange(filters.scoreMin ?? scoreRange.min);
                 }
                 if (this.els.scoreMax) {
-                    this.els.scoreMax.value = filters.scoreMax ?? 1;
+                    this.els.scoreMax.value = this.clampScoreToRange(filters.scoreMax ?? scoreRange.max);
                 }
                 if (this.els.comparisonsMin) {
                     this.els.comparisonsMin.value = filters.comparisonsMin ?? 0;
@@ -230,9 +298,7 @@ class GalleryView {
 
                 // Update displays
                 if (this.els.scoreDisplay) {
-                    this.els.scoreDisplay.textContent = `${parseFloat(this.els.scoreMin.value)
-                        .toFixed(2)} - ${parseFloat(this.els.scoreMax.value)
-                            .toFixed(2)}`;
+                    this.els.scoreDisplay.textContent = `${this.formatScoreValue(this.els.scoreMin.value)} - ${this.formatScoreValue(this.els.scoreMax.value)}`;
                 }
                 if (this.els.comparisonsDisplay) {
                     this.els.comparisonsDisplay.textContent = `${this.els.comparisonsMin.value} - ${this.els.comparisonsMax.value}`;
@@ -245,6 +311,7 @@ class GalleryView {
 
     saveFilters() {
         const filters = {
+            scoreType: this.els.scoreType?.value ?? "public",
             scoreMin: this.els.scoreMin?.value,
             scoreMax: this.els.scoreMax?.value,
             comparisonsMin: this.els.comparisonsMin?.value,
@@ -294,6 +361,7 @@ class GalleryView {
             this.els.scrollSentinel?.classList.remove("opacity-0");
 
             const filters = {
+                scoreType: this.els.scoreType?.value || "public",
                 scoreMin: parseFloat(this.els.scoreMin.value),
                 scoreMax: parseFloat(this.els.scoreMax.value),
                 comparisonsMin: parseInt(this.els.comparisonsMin.value),
@@ -348,7 +416,7 @@ class GalleryView {
                     <div class="text-[10px] text-gray-300 truncate">${img.filename}</div>
                 </div>
                 <div class="absolute top-2 right-2 bg-black/60 backdrop-blur border border-white/10 text-white text-[10px] px-2 py-1 rounded-md font-bold shadow">
-                    ${Utils.formatScore(img.score)}
+                    ${this.formatScoreValue(img.score)}
                 </div>
             `;
             item.onclick = () => this.openModal(index);
@@ -369,7 +437,7 @@ class GalleryView {
         this.els.modalMetadata.innerHTML = `
             <div class="bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
                 <span class="text-gray-400 block uppercase text-[8px] tracking-widest mb-0.5">Score</span>
-                <span class="text-white font-bold">${Utils.formatScore(img.score)}</span>
+                <span class="text-white font-bold">${this.formatScoreValue(img.score)}</span>
             </div>
             <div class="bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
                 <span class="text-gray-400 block uppercase text-[8px] tracking-widest mb-0.5">Comparisons</span>
@@ -405,7 +473,7 @@ class GalleryView {
         this.els.historyLosses.innerHTML = "";
 
         try {
-            const history = await this._getImageHistory(filename);
+            const history = await this._getImageHistory(filename, this.els.scoreType?.value || "public");
             if (!history || (!history.wins?.length && !history.losses?.length)) {
                 return;
             }
@@ -415,7 +483,7 @@ class GalleryView {
                     <img src="/images/${encodeURIComponent(item.opponent)}" class="w-10 h-10 rounded object-cover border border-white/10" onerror="this.src='/output/ranked/${encodeURIComponent(item.opponent)}'">
                     <div class="flex-1 min-w-0">
                         <div class="text-[10px] text-gray-300 truncate">${item.opponent || "Unknown"}</div>
-                        <div class="text-[9px] text-purple-400 font-bold">${Utils.formatScore(item.opponent_score)}</div>
+                        <div class="text-[9px] text-purple-400 font-bold">${this.formatScoreValue(item.opponent_score)}</div>
                     </div>
                 </div>
             `;

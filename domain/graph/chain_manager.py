@@ -230,6 +230,15 @@ def tarjan_scc(
     return scc_id_of, scc_members
 
 
+def count_main_chain_members(
+    node_main_chain: dict[str, tuple[int, list[str]]],
+) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    for chain_id, _ in node_main_chain.values():
+        counts[chain_id] = counts.get(chain_id, 0) + 1
+    return counts
+
+
 # ======================================================================
 # ChainManager class
 # ======================================================================
@@ -255,6 +264,7 @@ class ChainManager:
         self._chains: dict[int, list[str]] = {}
         self._node_to_chains: dict[str, list[tuple[int, list[str]]]] = {}
         self._node_main_chain: dict[str, tuple[int, list[str]]] = {}
+        self._main_chain_member_count: dict[int, int] = {}
 
         self._common_chains: dict[int, tuple[list[str], bool]] = {}
         self._node_chains: dict[str, dict[int, bool]] = {}
@@ -599,6 +609,7 @@ class ChainManager:
         self._node_main_chain = {}
         self._chains = {}
         self._node_chains = {}
+        self._main_chain_member_count = {}
 
         # 1. Find SCCs (condense cycles into single nodes)
         scc_id_of, scc_members = tarjan_scc(
@@ -804,6 +815,10 @@ class ChainManager:
                 self._common_chains[chain_id] = (chain, True)
                 pbar.update(1)
 
+        self._main_chain_member_count = count_main_chain_members(
+            self._node_main_chain
+        )
+
         logger.info(
             f"Built {len(self._chains)} main chains",
             start_timer=_start,
@@ -821,6 +836,9 @@ class ChainManager:
 
     def get_node_main_chain(self, node_id: str) -> tuple[int, list[str]] | None:
         return self._node_main_chain.get(node_id)
+
+    def get_main_chain_member_count(self, chain_id: int) -> int:
+        return self._main_chain_member_count.get(chain_id, 0)
 
     def get_min_chain_count(self) -> int:
         return len(self._chains)

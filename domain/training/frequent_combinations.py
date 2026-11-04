@@ -177,6 +177,7 @@ def _cache_directory(
         separators=(",", ":"),
     )
     fingerprint.update(encoded_image_ids.encode())
+    fingerprint.update(image_row_ids.dtype.str.encode())
     fingerprint.update(str(minimum_matching_images).encode())
     fingerprint.update(str(maximum_matching_images).encode())
     # Finder strategies may differ on excluded columns, but agree on eligible extensions.

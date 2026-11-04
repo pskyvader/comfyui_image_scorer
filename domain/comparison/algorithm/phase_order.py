@@ -114,6 +114,11 @@ PHASES: tuple[dict[str, object], ...] = (
 )
 
 
+def get_phase_name(phase_index: int) -> str:
+    """Return the phase-name key of the PHASES entry at a list index."""
+    return next(k for k, v in PHASES[phase_index].items() if callable(v))
+
+
 def get_phases() -> list[dict[str, object]]:
     """Return a JSON-serializable version of PHASES (callables stripped).
 
@@ -188,7 +193,7 @@ def select_pair(
     skip_before: int = cg.get_skip_before()
 
     for idx, phase in enumerate(PHASES):
-        name = next(k for k, v in phase.items() if callable(v))
+        name = get_phase_name(idx)
         fn = cast("PhaseFn", phase[name])
 
         if skip_before > idx:

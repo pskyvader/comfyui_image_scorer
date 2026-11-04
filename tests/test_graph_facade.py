@@ -83,3 +83,24 @@ def test_add_link_does_not_mutate_graph_when_persistence_fails() -> None:
         graph.add_link("a.png", "b.png", "a.png", "2026-08-31T00:00:00Z")
 
     assert graph.get_link_count() == 0
+
+
+def test_main_chain_member_count_reaches_chain_proxy() -> None:
+    graph = CrystalGraph()
+    graph.rebuild_from_database(
+        images=[],
+        comparisons=[
+            {"filename_a": "a1", "filename_b": "a2", "winner": "a1"},
+            {"filename_a": "a2", "filename_b": "a3", "winner": "a2"},
+        ],
+    )
+
+    chains = graph.get_all_chains()
+    assert len(chains) == 1
+    chain = chains[0]
+    assert chain.length == 3
+    assert chain.main_length == 3
+    assert [node.filename for node in chain.main_nodes] == ["a1", "a2", "a3"]
+    assert chain.is_main is True
+    assert graph.get_main_chain_member_count(chain.id) == 3
+    assert graph.get_main_chain_member_count(999) == 0

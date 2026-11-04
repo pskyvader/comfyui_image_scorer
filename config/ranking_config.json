@@ -1,7 +1,7 @@
 {
     "subfolder_threshold": 1000,
-    "lru_size": 160,
-    "reserve_count": 20,
+    "lru_size": 240,
+    "reserve_count": 30,
     "max_workers": 100,
     "default_score": 0.5,
     "parallel_requests": true,
@@ -9,13 +9,15 @@
     "seed_percentage": 5,
     "seed_target_comparisons": 15,
     "insertion_target_comparisons": 3,
-    "score_steepness": 1.6,
+    "score_steepness": 1.0,
     "sigma_threshold": 3.5,
-    "compress_images": false,
+    "sigma_range_multiplier": 0.2,
+    "compress_images": true,
     "webp_quality": 90,
     "webp_effort": 0,
     "image_cache_ttl_seconds": 10,
     "minimum_chains_for_pairing": 20,
+    "chain_middle_min_chain_length": 2,
     "analysis_top_bottom_display_rows": 10,
     "analysis_histogram_bucket_count": 10
 }

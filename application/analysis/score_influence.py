@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 import time
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 import numpy as np
 import numpy.typing as npt
@@ -108,6 +108,7 @@ class ScoreInfluenceCacheParams:
     numeric_bins: int
     memory_budget_gb: float
     property_block_size: int | None
+    condition_names_sha256: str
 
     def cache_key(self) -> str:
         payload = json.dumps(
@@ -125,6 +126,7 @@ class ScoreInfluenceCacheParams:
                 self.numeric_bins,
                 self.memory_budget_gb,
                 self.property_block_size,
+                self.condition_names_sha256,
             ],
             separators=(",", ":"),
             sort_keys=True,
@@ -524,18 +526,30 @@ def analyze_sparse_combination_influence(
 ) -> CombinationInfluence:
     """Analyze sparse cached combinations by index without building a matching-row dictionary."""
     combination_count = len(combinations)
-    fold_results, lift_sum, lift_count, matching_image_counts, fold_assignment = (
-        _collect_combination_fold_results(
-            combination_count,
-            combinations.combination_at,
-            combinations.image_rows_at,
-            row_scores,
-            minimum_matching_images,
-            maximum_matching_images,
-            fold_count,
-            seed,
+    if isinstance(combinations, SparseCombinationArraySource):
+        fold_results, lift_sum, lift_count, matching_image_counts, fold_assignment = (
+            _calculate_sparse_fold_results(
+                combinations.image_match_arrays(),
+                row_scores,
+                minimum_matching_images,
+                maximum_matching_images,
+                fold_count,
+                seed,
+            )
         )
-    )
+    else:
+        fold_results, lift_sum, lift_count, matching_image_counts, fold_assignment = (
+            _collect_combination_fold_results(
+                combination_count,
+                combinations.combination_at,
+                combinations.image_rows_at,
+                row_scores,
+                minimum_matching_images,
+                maximum_matching_images,
+                fold_count,
+                seed,
+            )
+        )
     null_started = time.perf_counter()
     if isinstance(combinations, SparseCombinationArraySource):
         null_lifts = _calculate_sparse_null_lifts(
@@ -670,6 +684,29 @@ def _calculate_null_lifts(
     return null_lifts
 
 
+def _sparse_fold_totals(
+    batch_fold_counts: npt.NDArray[np.int64],
+    minimum_matching_images: int,
+    maximum_matching_images: int,
+) -> tuple[npt.NDArray[np.int64], npt.NDArray[np.int64], npt.NDArray[np.bool_]]:
+    """Fold sums and one eligibility mask shared by the sparse fold and null passes.
+
+    The mask replicates the dense gate exactly: the combination total must sit
+    within [minimum, maximum] and both sides of a fold must reach the minimum.
+    Fold sizes need no upper bound of their own, because each is at most the
+    already-bounded total.
+    """
+    total_counts = batch_fold_counts.sum(axis=1)
+    other_counts = total_counts[:, None] - batch_fold_counts
+    valid_folds = (
+        (total_counts[:, None] >= minimum_matching_images)
+        & (total_counts[:, None] <= maximum_matching_images)
+        & (batch_fold_counts >= minimum_matching_images)
+        & (other_counts >= minimum_matching_images)
+    )
+    return total_counts, other_counts, valid_folds
+
+
 def _calculate_sparse_null_lifts(
     image_match_levels: Sequence[tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]],
     row_scores: npt.NDArray[np.float64],
@@ -691,54 +728,52 @@ def _calculate_sparse_null_lifts(
         "null: %d rounds over %d batches", permutation_rounds, len(batch_ranges)
     )
     null_lifts = np.zeros(permutation_rounds, dtype=np.float64)
+    if permutation_rounds == 0:
+        return null_lifts
     generator = np.random.default_rng(seed)
-    for round_index in tqdm(range(permutation_rounds), desc="null rounds", position=0):
-        shuffled = generator.permutation(row_scores)
-        round_best_lift = 0.0
-        for level_index, start, stop in tqdm(
-            batch_ranges,
-            desc="sparse null batches",
-            unit="batch",
-            leave=False,
-            position=1,
-        ):
-            offsets, image_ids = image_match_levels[level_index]
-            batch_offsets = offsets[start : stop + 1]
-            first_image = int(batch_offsets[0])
-            last_image = int(batch_offsets[-1])
-            batch_image_ids = image_ids[first_image:last_image]
-            batch_combination_count = stop - start
-            batch_match_counts = np.diff(batch_offsets)
-            batch_combination_rows = np.repeat(
-                np.arange(batch_combination_count, dtype=np.int32),
-                batch_match_counts,
-            )
-            batch_fold_rows = (
-                batch_combination_rows * fold_count + fold_assignment[batch_image_ids]
-            )
-            batch_fold_counts = np.bincount(
-                batch_fold_rows,
-                minlength=batch_combination_count * fold_count,
-            ).reshape(batch_combination_count, fold_count)
-            fold_membership = coo_matrix(
-                (
-                    np.ones(batch_image_ids.size, dtype=np.bool_),
-                    (batch_fold_rows, batch_image_ids),
-                ),
-                shape=(batch_combination_count * fold_count, len(row_scores)),
-                dtype=np.bool_,
-            ).tocsr()
+    # Batch structure never depends on scores, so one shuffle set serves every batch.
+    shuffled_score_rounds = [
+        generator.permutation(row_scores) for _ in range(permutation_rounds)
+    ]
+    for level_index, start, stop in tqdm(
+        batch_ranges,
+        desc="sparse null batches",
+        unit="batch",
+    ):
+        offsets, image_ids = image_match_levels[level_index]
+        batch_offsets = offsets[start : stop + 1]
+        first_image = int(batch_offsets[0])
+        last_image = int(batch_offsets[-1])
+        batch_image_ids = image_ids[first_image:last_image]
+        batch_combination_count = stop - start
+        batch_match_counts = np.diff(batch_offsets)
+        batch_combination_rows = np.repeat(
+            np.arange(batch_combination_count, dtype=np.int32),
+            batch_match_counts,
+        )
+        batch_fold_rows = (
+            batch_combination_rows * fold_count + fold_assignment[batch_image_ids]
+        )
+        batch_fold_counts = np.bincount(
+            batch_fold_rows,
+            minlength=batch_combination_count * fold_count,
+        ).reshape(batch_combination_count, fold_count)
+        fold_membership = coo_matrix(
+            (
+                np.ones(batch_image_ids.size, dtype=np.bool_),
+                (batch_fold_rows, batch_image_ids),
+            ),
+            shape=(batch_combination_count * fold_count, len(row_scores)),
+            dtype=np.bool_,
+        ).tocsr()
 
-            total_counts = batch_fold_counts.sum(axis=1)
-            other_counts = total_counts[:, None] - batch_fold_counts
-            valid_folds = (
-                (batch_fold_counts >= minimum_matching_images)
-                & (other_counts >= minimum_matching_images)
-                & (batch_fold_counts <= maximum_matching_images)
-                & (other_counts <= maximum_matching_images)
-            )
-            valid_fold_counts = valid_folds.sum(axis=1)
+        _total_counts, other_counts, valid_folds = _sparse_fold_totals(
+            batch_fold_counts, minimum_matching_images, maximum_matching_images
+        )
+        valid_fold_counts = valid_folds.sum(axis=1)
 
+        for round_index in range(permutation_rounds):
+            shuffled = shuffled_score_rounds[round_index]
             fold_score_sums = np.asarray(fold_membership @ shuffled).reshape(
                 batch_combination_count, fold_count
             )
@@ -764,13 +799,141 @@ def _calculate_sparse_null_lifts(
                 out=np.zeros(batch_combination_count, dtype=np.float64),
                 where=valid_fold_counts > 0,
             )
-            round_best_lift = max(
-                round_best_lift,
+            null_lifts[round_index] = max(
+                null_lifts[round_index],
                 float(np.abs(mean_lifts).max(initial=0.0)),
             )
-        null_lifts[round_index] = round_best_lift
 
     return null_lifts
+
+
+def _calculate_sparse_fold_results(
+    image_match_levels: Sequence[tuple[npt.NDArray[np.int64], npt.NDArray[np.int64]]],
+    row_scores: npt.NDArray[np.float64],
+    minimum_matching_images: int,
+    maximum_matching_images: int,
+    fold_count: int,
+    seed: int,
+) -> tuple[
+    list[tuple[int, int, int, float, float, float, int]],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.int64],
+    npt.NDArray[np.int64],
+    npt.NDArray[np.intp],
+]:
+    """Batched equivalent of `_collect_combination_fold_results` for level arrays.
+
+    Combination indices follow the source's global numbering, which reserves
+    its first position for an empty placeholder the dense loop also skips, so
+    every level's local rows offset by the total count of all earlier levels.
+    """
+    started = time.perf_counter()
+    fold_assignment = (
+        np.random.default_rng(seed).permutation(len(row_scores)) % fold_count
+    )
+    level_starts: list[int] = []
+    combination_count = 1
+    for offsets, _image_ids in image_match_levels:
+        level_starts.append(combination_count)
+        combination_count += len(offsets) - 1
+    fold_results: list[tuple[int, int, int, float, float, float, int]] = []
+    lift_sum = np.zeros(combination_count, dtype=np.float64)
+    lift_count = np.zeros(combination_count, dtype=np.int64)
+    matching_image_counts = np.zeros(combination_count, dtype=np.int64)
+
+    max_batch_matches = 2_000_000
+    batch_plan = [
+        (level_index, start, stop)
+        for level_index, (offsets, _image_ids) in enumerate(image_match_levels)
+        for start, stop in _matching_batch_ranges(offsets, max_batch_matches)
+    ]
+    for level_index, start, stop in tqdm(
+        batch_plan,
+        desc="sparse fold batches",
+        unit="batch",
+    ):
+        offsets, image_ids = image_match_levels[level_index]
+        batch_offsets = offsets[start : stop + 1]
+        first_image = int(batch_offsets[0])
+        last_image = int(batch_offsets[-1])
+        batch_image_ids = image_ids[first_image:last_image]
+        batch_combination_count = stop - start
+        batch_match_counts = np.diff(batch_offsets)
+        batch_combination_rows = np.repeat(
+            np.arange(batch_combination_count, dtype=np.int32),
+            batch_match_counts,
+        )
+        batch_fold_rows = (
+            batch_combination_rows * fold_count + fold_assignment[batch_image_ids]
+        )
+        batch_fold_counts = np.bincount(
+            batch_fold_rows,
+            minlength=batch_combination_count * fold_count,
+        ).reshape(batch_combination_count, fold_count)
+        total_counts, other_counts, valid_folds = _sparse_fold_totals(
+            batch_fold_counts, minimum_matching_images, maximum_matching_images
+        )
+        lifted_flat = np.flatnonzero(valid_folds.reshape(-1))
+        if lifted_flat.size == 0:
+            continue
+        batch_fold_sums = np.bincount(
+            batch_fold_rows,
+            weights=row_scores[batch_image_ids],
+            minlength=batch_combination_count * fold_count,
+        ).reshape(batch_combination_count, fold_count)
+        observed_matrix = np.zeros_like(batch_fold_sums)
+        np.divide(
+            batch_fold_sums,
+            batch_fold_counts,
+            out=observed_matrix,
+            where=valid_folds,
+        )
+        predicted_matrix = np.zeros_like(batch_fold_sums)
+        np.divide(
+            batch_fold_sums.sum(axis=1)[:, None] - batch_fold_sums,
+            other_counts,
+            out=predicted_matrix,
+            where=valid_folds,
+        )
+        combo_flat = lifted_flat // fold_count
+        fold_flat = lifted_flat % fold_count
+        flat_observed = observed_matrix.reshape(-1)[lifted_flat]
+        flat_predicted = predicted_matrix.reshape(-1)[lifted_flat]
+        flat_lift = flat_observed - flat_predicted
+        global_first = level_starts[level_index] + start
+        global_rows = np.empty(lifted_flat.size, dtype=FOLD_RESULTS_DTYPE)
+        global_rows["combination_index"] = combo_flat.astype(np.int64) + global_first
+        global_rows["fold"] = fold_flat
+        global_rows["image_count"] = batch_fold_counts.reshape(-1)[lifted_flat]
+        global_rows["observed"] = flat_observed
+        global_rows["predicted"] = flat_predicted
+        global_rows["lift"] = flat_lift
+        global_rows["depth"] = np.full(lifted_flat.size, level_index + 1, dtype=np.int64)
+        # Structured-array rows convert to per-field tuples without a stubbed
+        # element type, so the list contract is restored with one cast.
+        fold_results.extend(
+            cast(
+                "list[tuple[int, int, int, float, float, float, int]]",
+                global_rows.tolist(),
+            )
+        )
+
+        lift_sum[global_first : global_first + batch_combination_count] += np.bincount(
+            combo_flat, weights=flat_lift, minlength=batch_combination_count
+        )
+        lift_count[global_first : global_first + batch_combination_count] += np.bincount(
+            combo_flat, minlength=batch_combination_count
+        ).astype(np.int64)
+        lifted_combinations = valid_folds.any(axis=1)
+        counted_rows = np.flatnonzero(lifted_combinations).astype(np.int64)
+        matching_image_counts[global_first + counted_rows] = total_counts[counted_rows]
+
+    logger.info(
+        "fold analysis: %d measurements in %.0fs",
+        len(fold_results),
+        time.perf_counter() - started,
+    )
+    return fold_results, lift_sum, lift_count, matching_image_counts, fold_assignment
 
 
 def _matching_batch_ranges(

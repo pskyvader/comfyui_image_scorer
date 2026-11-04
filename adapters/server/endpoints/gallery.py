@@ -7,11 +7,21 @@ from typing import Any
 from flask import Blueprint, Flask, jsonify, request
 
 from ....core.observability.logger import get_logger, ModuleLogger
+from ....domain.graph.node_proxy import NodeProxy
 from ....domain.ports.repository import ImageRow
 from ..deps import ServerDeps, get_server_deps
 
 gallery_bp = Blueprint("gallery_v2", __name__, url_prefix="/api/gallery")
 logger: ModuleLogger = get_logger(__name__)
+
+
+def _selected_score(node: NodeProxy, score_type: str) -> float:
+    """Score value in the requested form: public, trueskill, or position_score."""
+    if score_type == "trueskill":
+        return float(node.trueskill_score)
+    if score_type == "position_score":
+        return float(node.position_score)
+    return node.score
 
 
 @gallery_bp.route("/images", methods=["GET"])
@@ -23,6 +33,7 @@ def list_images():
         per_page = 20
 
     nodes = deps.graph.get_all_nodes()
+    score_type = request.args.get("score_type", "public").lower()
     score_min = request.args.get("score_min", 0.0, type=float)
     score_max = request.args.get("score_max", 1.0, type=float)
     comparisons_min = request.args.get("comparisons_min", 0, type=int)
@@ -31,43 +42,46 @@ def list_images():
     tags_query = request.args.get("tags", "").strip().lower()
     search_tags = [tag.strip() for tag in tags_query.split(",")] if tags_query else []
 
-    filtered_and: list[ImageRow] = []
-    filtered_or: list[ImageRow] = []
+    filtered_and: list[tuple[float, ImageRow]] = []
+    filtered_or: list[tuple[float, ImageRow]] = []
     for node in nodes:
         img = node.data
-        if not (score_min <= float(img["score"]) <= score_max):
+        score_value = _selected_score(node, score_type)
+        if not (score_min <= score_value <= score_max):
             continue
         comp_count = int(img.get("comparison_count", 0))
         if not (comparisons_min <= comp_count <= comparisons_max):
             continue
 
         if not search_tags:
-            filtered_and.append(img)
+            filtered_and.append((score_value, img))
             continue
 
         img_tags = ((img.get("prompt_tags") or "") + " " + img["filename"]).lower()
         if all(tag in img_tags for tag in search_tags):
-            filtered_and.append(img)
+            filtered_and.append((score_value, img))
         elif search_mode != "and" and any(tag in img_tags for tag in search_tags):
-            filtered_or.append(img)
+            filtered_or.append((score_value, img))
 
     sort_by = request.args.get("sort", "score_desc")
 
-    def sort_list(items: list[ImageRow]) -> None:
+    def sort_list(items: list[tuple[float, ImageRow]]) -> None:
         if sort_by == "score_asc":
-            items.sort(key=lambda item: float(item["score"]))
+            items.sort(key=lambda item: item[0])
         elif sort_by == "score_desc":
-            items.sort(key=lambda item: float(item["score"]), reverse=True)
+            items.sort(key=lambda item: item[0], reverse=True)
         elif sort_by == "comparisons_asc":
-            items.sort(key=lambda item: int(item["comparison_count"]))
+            items.sort(key=lambda item: int(item[1]["comparison_count"]))
         elif sort_by == "comparisons_desc":
-            items.sort(key=lambda item: int(item["comparison_count"]), reverse=True)
+            items.sort(key=lambda item: int(item[1]["comparison_count"]), reverse=True)
         elif sort_by in {"last_compared_desc", "newest"}:
             items.sort(
-                key=lambda item: item.get("last_compared_at") or "", reverse=True
+                key=lambda item: item[1].get("last_compared_at") or "", reverse=True
             )
         elif sort_by == "last_compared_asc":
-            items.sort(key=lambda item: item.get("last_compared_at") or "9999-99-99")
+            items.sort(
+                key=lambda item: item[1].get("last_compared_at") or "9999-99-99"
+            )
 
     if search_tags:
         sort_list(filtered_and)
@@ -86,13 +100,13 @@ def list_images():
     paginated = filtered[offset : offset + per_page]
     images = [
         {
-            "filename": img["filename"],
-            "score": round(float(img["score"]), 3),
-            "file": f"{img['filename']}?score={round(float(img['score']), 3)}",
-            "comparison_count": int(img.get("comparison_count", 0)),
-            "prompt_tags": img.get("prompt_tags"),
+            "filename": item[1]["filename"],
+            "score": round(item[0], 3),
+            "file": f"{item[1]['filename']}?score={round(item[0], 3)}",
+            "comparison_count": int(item[1].get("comparison_count", 0)),
+            "prompt_tags": item[1].get("prompt_tags"),
         }
-        for img in paginated
+        for item in paginated
     ]
     result = jsonify(
         {
@@ -101,7 +115,7 @@ def list_images():
             "page": page,
             "per_page": per_page,
             "max_comparison_count": max(
-                (int(img.get("comparison_count", 0)) for img in filtered_and + filtered_or), default=0
+                (int(item[1].get("comparison_count", 0)) for item in filtered_and + filtered_or), default=0
             ),
         }
     )
@@ -129,6 +143,7 @@ def get_image_info(filename: str):
 @gallery_bp.route("/history/<path:filename>", methods=["GET"])
 def get_image_history(filename: str):
     deps = get_server_deps()
+    score_type = request.args.get("score_type", "public").lower()
     wins: list[dict[str, Any]] = []
     losses: list[dict[str, Any]] = []
     for link in deps.graph.get_all_links():
@@ -136,7 +151,10 @@ def get_image_history(filename: str):
             continue
         opponent = link.loser if link.winner == filename else link.winner
         opponent_node = deps.graph.get_node(opponent)
-        opponent_score = opponent_node.score if opponent_node is not None else 0.5
+        if opponent_node is None:
+            opponent_score = 0.5
+        else:
+            opponent_score = _selected_score(opponent_node, score_type)
         item = {
             "opponent": opponent,
             "opponent_score": opponent_score,

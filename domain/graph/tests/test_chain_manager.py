@@ -245,6 +245,42 @@ def test_chain_snapshot_matches_known_optimal() -> None:
     assert chain_tuples == {("a1", "a2", "a3", "a4"), ("b1", "b2", "b3")}
 
 
+def test_main_chain_member_count_matches_main_chain_assignment() -> None:
+    """Every chain's member count equals the nodes assigned that main chain."""
+    logger.debug(
+        "Starting test_main_chain_member_count_matches_main_chain_assignment..."
+    )
+
+    comparisons: list[ComparisonRow] = [
+        {"filename_a": "a1", "filename_b": "a2", "winner": "a1"},
+        {"filename_a": "a2", "filename_b": "a3", "winner": "a2"},
+        {"filename_a": "b1", "filename_b": "b2", "winner": "b1"},
+    ]
+    all_filenames = {"a1", "a2", "a3", "b1", "b2", "isolated"}
+
+    cm = _build_manager(comparisons, all_filenames=all_filenames)
+
+    counted_by_chain: dict[int, int] = {}
+    for node_id in cm.get_all_filenames():
+        main = cm.get_node_main_chain(node_id)
+        if main is not None:
+            counted_by_chain[main[0]] = counted_by_chain.get(main[0], 0) + 1
+
+    for chain_id in cm.get_chains():
+        assert cm.get_main_chain_member_count(chain_id) == counted_by_chain.get(
+            chain_id, 0
+        )
+
+    count_by_nodes = {
+        tuple(chain): cm.get_main_chain_member_count(chain_id)
+        for chain_id, chain in cm.get_chains().items()
+    }
+    assert count_by_nodes[("a1", "a2", "a3")] == 3
+    assert count_by_nodes[("b1", "b2")] == 2
+    assert count_by_nodes[("isolated",)] == 1
+    assert cm.get_main_chain_member_count(999) == 0
+
+
 def test_apply_link_returns_the_record_it_touched() -> None:
     """Re-applying a pair must return that pair's record, not the newest one."""
     cm = ChainManager()

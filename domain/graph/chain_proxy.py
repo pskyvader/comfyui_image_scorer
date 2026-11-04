@@ -30,8 +30,25 @@ class ChainProxy:
         return [_node_proxy.NodeProxy(self._chain, n) for n in self._nodes]
 
     @property
+    def main_nodes(self) -> list[NodeProxy]:
+        """Chain nodes whose main chain is this chain, in chain order."""
+        main_nodes: list[NodeProxy] = []
+        for node_id in self._nodes:
+            main: tuple[int, list[str]] | None = self._chain.get_node_main_chain(
+                node_id
+            )
+            if main is not None and main[0] == self._id:
+                main_nodes.append(_node_proxy.NodeProxy(self._chain, node_id))
+        return main_nodes
+
+    @property
     def length(self) -> int:
         return len(self._nodes)
+
+    @property
+    def main_length(self) -> int:
+        """Count nodes that have this chain as their main chain."""
+        return self._chain.get_main_chain_member_count(self._id)
 
     def get_position(self, node: NodeProxy) -> int | None:
         """Get the position of a node within the chain, 0-based index."""
@@ -41,13 +58,7 @@ class ChainProxy:
 
     @property
     def is_main(self) -> bool:
-        for node_id in self._nodes:
-            main: tuple[int, list[str]] | None = self._chain.get_node_main_chain(
-                node_id
-            )
-            if main is not None and main[0] == self._id:
-                return True
-        return False
+        return self.main_length > 0
 
     @property
     def first(self) -> NodeProxy | None:

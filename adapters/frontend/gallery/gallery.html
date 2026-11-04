@@ -13,7 +13,15 @@
             </div>
         </div>
 
-
+        <div class="flex flex-col gap-1 min-w-[150px]">
+            <label class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Score Type</label>
+            <select id="score-type"
+                class="bg-dark-900 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 outline-none text-white">
+                <option value="public" selected>Public Score</option>
+                <option value="trueskill">TrueSkill Score</option>
+                <option value="position_score">Position Score</option>
+            </select>
+        </div>
 
         <div class="flex flex-col gap-1 min-w-[180px] flex-1">
             <label class="text-xs font-semibold text-gray-400 uppercase tracking-wider flex justify-between">

@@ -66,6 +66,7 @@ class RankingSection(SectionModel):
     webp_effort: int
     image_cache_ttl_seconds: int
     minimum_chains_for_pairing: int
+    chain_middle_min_chain_length: int
     analysis_histogram_bucket_count: int
     analysis_top_bottom_display_rows: int
 

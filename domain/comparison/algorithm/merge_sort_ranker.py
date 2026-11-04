@@ -20,9 +20,9 @@ def select_pair_for_comparison(
     """Select the next pair of images to compare.
 
     Returns ``(pair, phase_index)`` where ``pair`` is ``(filename_a,
-    filename_b)`` or ``None`` and ``phase_index`` is an int (0=seed,
-    1=anchor, 2=collapsible, 3=single_win_loss, 4=refine, 5=chain_merge,
-    6=fallback) or ``None``.
+    filename_b)`` or ``None`` and ``phase_index`` is a PHASES list index
+    (owned by phase_order, whose name lookup is the stable phase identity)
+    or ``None``.
     """
     _start = time.perf_counter()
     cached = crystal_graph.get_images_snapshot()

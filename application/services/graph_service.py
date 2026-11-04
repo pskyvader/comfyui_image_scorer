@@ -96,12 +96,7 @@ class CrystalGraph:
 
     def get_main_chain_member_count(self, chain_id: int) -> int:
         """Return how many nodes have ``chain_id`` as their main chain."""
-        count = 0
-        for node in self.get_all_nodes():
-            main = self._chain.get_node_main_chain(node.filename)
-            if main is not None and main[0] == chain_id:
-                count += 1
-        return count
+        return self._chain.get_main_chain_member_count(chain_id)
 
     def rebuild_from_database(
         self,
