@@ -101,6 +101,10 @@ def test_main_chain_member_count_reaches_chain_proxy() -> None:
     assert chain.length == 3
     assert chain.main_length == 3
     assert [node.filename for node in chain.main_nodes] == ["a1", "a2", "a3"]
+    midpoint = chain.main_node_at(1)
+    assert midpoint is not None
+    assert midpoint.filename == "a2"
+    assert chain.main_node_at(3) is None
     assert chain.is_main is True
     assert graph.get_main_chain_member_count(chain.id) == 3
     assert graph.get_main_chain_member_count(999) == 0

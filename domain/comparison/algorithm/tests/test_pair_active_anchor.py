@@ -26,6 +26,18 @@ class _Stub:
     link_count: int
     score: float
 
+    @property
+    def position_score(self) -> float:
+        return self.score
+
+    @property
+    def trueskill_score(self) -> float:
+        return self.score
+
+    @property
+    def sigma_uncertainty(self) -> float:
+        return 10.0
+
 
 def _nodes(stubs: list[_Stub]) -> list[NodeProxy]:
     # The phase only reads filename, link_count and score. Constructing a real
@@ -51,6 +63,18 @@ class TestOpponentSelection:
         assert result is not None, "one newcomer is enough to produce a pair"
         assert result[0].filename == "new"
         assert result[1].filename in pool_set
+        assert result[0] in _nodes([newcomer, *pool])
+        assert result[1] in _nodes([newcomer, *pool])
+
+    def test_seed_pool_members_outside_candidates_are_not_opponents(self) -> None:
+        newcomer = _newcomer()
+
+        assert (
+            phase_anchor_insert(
+                _nodes([newcomer]), {"new", "outside"}, set()
+            )
+            is None
+        )
 
     def test_opponent_comes_from_the_seed_pool(self) -> None:
         pool = [_Stub(f"pool{i:02d}", 20, 0.5) for i in range(3)]
@@ -94,6 +118,20 @@ class TestOpponentSelection:
 
         assert result is not None
         assert result[1].filename == "near"
+
+    def test_position_score_selects_anchor_when_link_counts_tie(self) -> None:
+        lower_position = _newcomer(score=0.2)
+        higher_position = _Stub("higher-position", 0, 0.8)
+        pool = [_Stub("pool", 20, 0.5)]
+
+        result = phase_anchor_insert(
+            _nodes([higher_position, lower_position, *pool]),
+            {"pool"},
+            set(),
+        )
+
+        assert result is not None
+        assert result[0].filename == "new"
 
     def test_newcomer_is_never_its_own_opponent(self) -> None:
         pool = [_Stub(f"pool{i:02d}", 20, 0.5) for i in range(3)]

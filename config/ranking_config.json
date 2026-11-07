@@ -1,7 +1,7 @@
 {
     "subfolder_threshold": 1000,
-    "lru_size": 240,
-    "reserve_count": 30,
+    "lru_size": 160,
+    "reserve_count": 20,
     "max_workers": 100,
     "default_score": 0.5,
     "parallel_requests": true,
@@ -11,7 +11,7 @@
     "insertion_target_comparisons": 3,
     "score_steepness": 1.0,
     "sigma_threshold": 3.5,
-    "sigma_range_multiplier": 0.2,
+    "sigma_range_multiplier": 0.3,
     "compress_images": true,
     "webp_quality": 90,
     "webp_effort": 0,

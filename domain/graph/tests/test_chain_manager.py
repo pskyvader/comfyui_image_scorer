@@ -270,6 +270,18 @@ def test_main_chain_member_count_matches_main_chain_assignment() -> None:
         assert cm.get_main_chain_member_count(chain_id) == counted_by_chain.get(
             chain_id, 0
         )
+        chain = cm.get_chains()[chain_id]
+        main_nodes = [
+            node_id
+            for node_id in chain
+            if (main := cm.get_node_main_chain(node_id)) is not None
+            and main[0] == chain_id
+        ]
+        assert [
+            cm.get_main_chain_node(chain_id, position)
+            for position in range(len(main_nodes))
+        ] == main_nodes
+        assert cm.get_main_chain_node(chain_id, len(main_nodes)) is None
 
     count_by_nodes = {
         tuple(chain): cm.get_main_chain_member_count(chain_id)
@@ -279,6 +291,21 @@ def test_main_chain_member_count_matches_main_chain_assignment() -> None:
     assert count_by_nodes[("b1", "b2")] == 2
     assert count_by_nodes[("isolated",)] == 1
     assert cm.get_main_chain_member_count(999) == 0
+
+
+def test_are_in_same_path_matches_bidirectional_reachability() -> None:
+    comparisons: list[ComparisonRow] = [
+        {"filename_a": "a", "filename_b": "b", "winner": "a"},
+        {"filename_a": "b", "filename_b": "c", "winner": "b"},
+        {"filename_a": "x", "filename_b": "y", "winner": "x"},
+    ]
+    filenames = {"a", "b", "c", "x", "y", "isolated"}
+    cm = _build_manager(comparisons, all_filenames=filenames)
+
+    for start in filenames:
+        for end in filenames:
+            expected = cm.can_reach(start, end) or cm.can_reach(end, start)
+            assert cm.are_in_same_path(start, end) is expected
 
 
 def test_apply_link_returns_the_record_it_touched() -> None:

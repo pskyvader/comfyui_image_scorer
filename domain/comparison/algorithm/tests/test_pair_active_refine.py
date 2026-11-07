@@ -86,6 +86,9 @@ class TestRefineOpponentSelection:
         assert result is not None, "converged pool members must still be usable"
         assert result[0].filename == "target"
         assert result[1].filename.startswith("p")
+        candidate_names = {s.filename for s in [target, *pool]}
+        assert result[0].filename in candidate_names
+        assert result[1].filename in candidate_names
 
     def test_most_uncertain_non_pool_image_is_refined(self) -> None:
         target = _Stub("target", 6, 4.0)
@@ -158,6 +161,11 @@ class TestRefineOpponentSelection:
         target = _Stub("target", 6, 4.0)
 
         assert _refine([target], set()) is None
+
+    def test_seed_pool_names_outside_candidates_are_not_opponents(self) -> None:
+        target = _Stub("target", 6, 4.0)
+
+        assert _refine([target], {"outside"}) is None
 
     def test_load_is_spread_across_the_pool(self) -> None:
         pool = [_Stub(f"p{i:02d}", 20 + i, 2.0) for i in range(8)]

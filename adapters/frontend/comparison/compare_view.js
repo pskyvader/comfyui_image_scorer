@@ -8,9 +8,9 @@
  *     right: describe_image(node_b),
  *     pair:  describe_pair(node_a, node_b, phase_index)
  *   }
- * The phase index is an int (0=seed, 1=anchor, 2=collapsible,
- * 3=single_win_loss, 4=chain_middle, 5=refine, 6=chain_merge, 7=fallback); its human label
- * is mapped below.
+ * The phase index is an int (0=seed, 1=anchor, 2=branch_probe,
+ * 3=collapsible, 4=single_win_loss, 5=chain_middle, 6=refine,
+ * 7=chain_merge, 8=fallback); its human label is mapped below.
  */
 
 const CompareView = (() => {
@@ -179,6 +179,9 @@ const CompareView = (() => {
                 line = `Anchor insert - ${remaining.toLocaleString()} images below ${pair.insertion_target_comparisons} comparisons - ${ready.toLocaleString()} at \u2265${pair.insertion_target_comparisons} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             }
+            case "branch_probe":
+                line = `Branch probe - ${pair.total_chains.toLocaleString()} chains currently - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
+                break;
             case "collapsible": {
                 // Collapsible: by definition both images share one component, so the
                 // component extremes are the merge frontier. top/bottom are "in

@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import random
 import time
-from collections.abc import Callable
-from typing import cast
+from typing import NotRequired, TypedDict
 
 from ....core.observability.logger import get_logger, ModuleLogger
 from ....core.configuration.settings import config
 from .pair_active import (
     phase_seed_coverage,
     phase_anchor_insert,
+    phase_branch_probe,
     phase_collapsible_pairs,
     phase_chain_middle,
     phase_single_win_loss,
@@ -36,107 +36,104 @@ from ...graph.node_proxy import NodeProxy
 logger: ModuleLogger = get_logger(__name__)
 
 
-# Each phase function takes a different subset of the ranking inputs, so the
-# call shape is dispatched per phase below rather than through a fixed
-# signature. Every one of them returns the same selected pair or None.
-PhaseFn = Callable[..., "tuple[NodeProxy, NodeProxy] | None"]
+class PhaseMetadata(TypedDict):
+    phase_label: str
+    color: str
+    description: str
+    show_chain_info: bool
+    show_mu_sigma: bool
+    show_wins_losses: NotRequired[bool]
+    name: str
 
 
-# Each entry is a dict whose first key is the phase name (mapping to its
-# function).  Remaining keys are metadata consumed by the frontend.
-PHASES: tuple[dict[str, object], ...] = (
+# Each entry contains the phase name and metadata consumed by the frontend.
+PHASES: tuple[PhaseMetadata, ...] = (
     {
-        "seed": phase_seed_coverage,
         "phase_label": "Phase 1 / Bootstrap Seed",
         "color": "#f87171",
         "description": "ensures seed images (top {seed_size} by comparisons) reach {seed_target} comparisons each, preferring cross-path opponents with similar scores",
         "show_chain_info": False,
         "show_mu_sigma": False,
+        "name": "seed",
     },
     {
-        "anchor": phase_anchor_insert,
         "phase_label": "Phase 2 / Anchor Insert",
-        "color": "#facc15",
+        "color": "#fb923c",
         "description": "integrates new images with \u2264{insertion_target} comparisons by pairing them with the closest mu (skill) from a different crystal path, preferring different components",
         "show_chain_info": False,
         "show_mu_sigma": False,
+        "name": "anchor",
     },
+    # {
+    #     "phase_label": "Phase 3 / Branch Probe (Test)",
+    #     "color": "#facc15",
+    #     "description": "test branch-compatible opponent selection from a random anchor, using the closest score pair within the sigma range",
+    #     "show_chain_info": True,
+    #     "show_mu_sigma": False,
+    #     "name": "branch_probe",
+    # },
     {
-        "collapsible": phase_collapsible_pairs,
-        "phase_label": "Phase 3 / Collapsible",
+        "phase_label": "Phase 4 / Collapsible",
         "color": "#4ade80",
         "description": "finds two tops or two bottoms in the same component not yet transitively connected; one click resolves ranking for entire branches",
         "show_chain_info": True,
         "show_mu_sigma": False,
+        "name": "collapsible",
     },
     {
-        "single_win_loss": phase_single_win_loss,
-        "phase_label": "Phase 4 / Single Win-Loss",
+        "phase_label": "Phase 5 / Single Win-Loss",
         "color": "#22d3ee",
         "description": "compares images with exactly one win (highest score first) or exactly one loss (lowest score first), picking the closest-score adjacent pair until one image remains in each group",
         "show_chain_info": False,
         "show_mu_sigma": False,
         "show_wins_losses": True,
+        "name": "single_win_loss",
     },
     {
-        "chain_middle": phase_chain_middle,
-        "phase_label": "Phase 4b / Chain Middle",
-        "color": "#f472b6",
+        "phase_label": "Phase 6 / Chain Middle",
+        "color": "#60a5fa",
         "description": "compares mid-chain nodes to resolve the global middle ordering",
         "show_chain_info": True,
         "show_mu_sigma": False,
         "show_wins_losses": True,
+        "name": "chain_middle",
     },
     {
-        "refine": phase_uncertainty_refine,
-        "phase_label": "Phase 5 / Uncertainty Refine",
-        "color": "#60a5fa",
+        "phase_label": "Phase 7 / Uncertainty Refine",
+        "color": "#818cf8",
         "description": "reduces uncertainty by comparing images above \u03c3 \u2265 {sigma_threshold} against the closest-mu seed images",
         "show_chain_info": False,
         "show_mu_sigma": True,
+        "name": "refine",
     },
+    # {
+    #     "phase_label": "Phase 8 / Chain Merge",
+    #     "color": "#a78bfa",
+    #     "description": "merges the longest chains by comparing internal mid-chain nodes, reducing the total number of chains",
+    #     "show_chain_info": True,
+    #     "show_mu_sigma": True,
+    #     "name": "chain_merge",
+    # },
     {
-        "chain_merge": phase_chain_merge,
-        "phase_label": "Phase 6 / Chain Merge",
-        "color": "#a78bfa",
-        "description": "merges the longest chains by comparing internal mid-chain nodes, reducing the total number of chains",
-        "show_chain_info": True,
-        "show_mu_sigma": True,
-    },
-    {
-        "fallback": phase_fallback,
         "phase_label": "Fallback",
         "color": "#9ca3af",
         "description": "last-resort scan for any unseen pair when all heuristics fail",
         "show_chain_info": False,
         "show_mu_sigma": False,
+        "name": "fallback",
     },
 )
 
 
 def get_phase_name(phase_index: int) -> str:
-    """Return the phase-name key of the PHASES entry at a list index."""
-    return next(k for k, v in PHASES[phase_index].items() if callable(v))
+    """Return the phase name at a list index."""
+    return PHASES[phase_index]["name"]
 
 
 def get_phases() -> list[dict[str, object]]:
-    """Return a JSON-serializable version of PHASES (callables stripped).
-
-    Each output dict includes the ``name`` key (derived from the callable
-    key in the source entry) for the frontend to identify the phase.
-    """
-    result: list[dict[str, object]] = []
-    for entry in PHASES:
-        cleaned: dict[str, object] = {}
-        name: str | None = None
-        for k, v in entry.items():
-            if callable(v):
-                name = k
-            else:
-                cleaned[k] = v
-        cleaned["name"] = name
-        result.append(cleaned)
-    return result
+    """Return frontend phase metadata."""
+    phases: list[dict[str, object]] = [dict(entry) for entry in PHASES]
+    return phases
 
 
 def select_pair(
@@ -144,7 +141,7 @@ def select_pair(
     candidate_images: list[ImageRow],
     cg: CrystalGraphPort,
 ) -> tuple[tuple[str, str] | None, int | None]:
-    _start = time.perf_counter()
+    _start: float = time.perf_counter()
 
     if len(candidate_images) < 2:
         logger.warning(
@@ -152,17 +149,9 @@ def select_pair(
         )
         return None, None
 
-    existing_pairs_set: set[tuple[str, str]] = cg.get_existing_pairs()
-    if len(existing_pairs_set) == 0:
-        existing_pairs_set = {
-            canonicalize_pair(link.winner, link.loser) for link in cg.get_all_links()
-        }
-        cg.set_existing_pairs(existing_pairs_set)
-    logger.debug(f"existing pairs: {len(existing_pairs_set)}", start_timer=_start)
-
     random.shuffle(candidate_images)
 
-    candidate_nodes = [
+    candidate_nodes: list[NodeProxy] = [
         node
         for img in candidate_images
         if (node := cg.get_node(img["filename"])) is not None
@@ -174,58 +163,100 @@ def select_pair(
         )
         return None, None
 
-    seed_pool: list[NodeProxy] = stable_seed_pool(
-        [
-            node
-            for img in all_images
-            if (node := cg.get_node(img["filename"])) is not None
-        ]
-    )
-
-    seed_pool_set: set[str] = {node.filename for node in seed_pool}
-
-    reserve_count = int(config["ranking"]["reserve_count"])
+    reserve_count: int = int(config["ranking"]["reserve_count"])
     total_comps: int = cg.get_link_count()
 
     if total_comps % reserve_count == 0:
         cg.reset_selection_state()
 
     skip_before: int = cg.get_skip_before()
+    existing_pairs_set: set[tuple[str, str]] = set()
+    existing_pairs_loaded: bool = False
+    seed_pool: list[NodeProxy] = []
+    seed_pool_loaded: bool = False
+    seed_pool_set: set[str] = set()
+    seed_pool_set_loaded: bool = False
 
-    for idx, phase in enumerate(PHASES):
-        name = get_phase_name(idx)
-        fn = cast("PhaseFn", phase[name])
+    for idx in range(len(PHASES)):
+        name: str = get_phase_name(idx)
 
         if skip_before > idx:
             continue
 
+        if (
+            name
+            in (
+                "seed",
+                "anchor",
+                "branch_probe",
+                "single_win_loss",
+                "chain_middle",
+                "refine",
+                "fallback",
+            )
+            and not existing_pairs_loaded
+        ):
+            existing_pairs_set = cg.get_existing_pairs()
+            if len(existing_pairs_set) == 0:
+                existing_pairs_set = {
+                    canonicalize_pair(link.winner, link.loser)
+                    for link in cg.get_all_links()
+                }
+                cg.set_existing_pairs(existing_pairs_set)
+            logger.debug(
+                f"existing pairs: {len(existing_pairs_set)}", start_timer=_start
+            )
+            existing_pairs_loaded = True
+
+        if name in ("seed", "anchor", "refine") and not seed_pool_loaded:
+            seed_pool = stable_seed_pool(
+                [
+                    node
+                    for img in all_images
+                    if (node := cg.get_node(img["filename"])) is not None
+                ]
+            )
+            seed_pool_loaded = True
+
+        if name in ("anchor", "refine") and not seed_pool_set_loaded:
+            seed_pool_set = {node.filename for node in seed_pool}
+            seed_pool_set_loaded = True
+
         if name == "seed":
-            result = fn(
+            result: tuple[NodeProxy, NodeProxy] | None = phase_seed_coverage(
                 candidate_nodes,
                 existing_pairs_set,
                 seed_pool,
                 len(all_images),
             )
         elif name == "anchor":
-            result = fn(candidate_nodes, seed_pool_set, existing_pairs_set)
+            result = phase_anchor_insert(candidate_nodes, existing_pairs_set)
+        elif name == "branch_probe":
+            result = phase_branch_probe(candidate_nodes, existing_pairs_set)
         elif name == "collapsible":
-            result = fn(candidate_nodes, cg)
+            result = phase_collapsible_pairs(candidate_nodes, cg)
         elif name == "single_win_loss":
-            result = fn(candidate_nodes, existing_pairs_set)
+            result = phase_single_win_loss(candidate_nodes, existing_pairs_set)
         elif name == "chain_middle":
-            result = fn(candidate_nodes, existing_pairs_set, cg)
+            result = phase_chain_middle(candidate_nodes, existing_pairs_set, cg)
         elif name == "refine":
-            result = fn(candidate_nodes, seed_pool_set, existing_pairs_set, cg)
+            result = phase_uncertainty_refine(
+                candidate_nodes, seed_pool_set, existing_pairs_set, cg
+            )
         elif name == "chain_merge":
-            result = fn(candidate_nodes, cg)
+            result = phase_chain_merge(candidate_nodes, cg)
         elif name == "fallback":
-            result = fn(candidate_nodes, existing_pairs_set)
+            result = phase_fallback(candidate_nodes, existing_pairs_set)
         else:
             result = None
 
         if result:
             cg.set_skip_before(idx)
-            return (result[0].filename, result[1].filename), idx
+            selected_pair: tuple[str, str] = (
+                result[0].filename,
+                result[1].filename,
+            )
+            return selected_pair, idx
 
     logger.warning("No pair found after all phases")
     return None, None

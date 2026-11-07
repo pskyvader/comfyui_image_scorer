@@ -126,7 +126,7 @@ class QueueManager {
         this.submissionQueue = [];
         this.outgoingQueue = [];
         this._processLoopRunning = false;
-        this._UNDO_DELAY_MS = 10000;
+        this._UNDO_DELAY_MS = 5000;
         this._submissionCount = 0;
         this._parallelRequests = false;
         this._timeoutMs = DEFAULT_TIMEOUT_MS;

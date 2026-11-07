@@ -230,15 +230,6 @@ def tarjan_scc(
     return scc_id_of, scc_members
 
 
-def count_main_chain_members(
-    node_main_chain: dict[str, tuple[int, list[str]]],
-) -> dict[int, int]:
-    counts: dict[int, int] = {}
-    for chain_id, _ in node_main_chain.values():
-        counts[chain_id] = counts.get(chain_id, 0) + 1
-    return counts
-
-
 # ======================================================================
 # ChainManager class
 # ======================================================================
@@ -264,6 +255,7 @@ class ChainManager:
         self._chains: dict[int, list[str]] = {}
         self._node_to_chains: dict[str, list[tuple[int, list[str]]]] = {}
         self._node_main_chain: dict[str, tuple[int, list[str]]] = {}
+        self._main_chain_nodes: dict[int, list[str]] = {}
         self._main_chain_member_count: dict[int, int] = {}
 
         self._common_chains: dict[int, tuple[list[str], bool]] = {}
@@ -609,6 +601,7 @@ class ChainManager:
         self._node_main_chain = {}
         self._chains = {}
         self._node_chains = {}
+        self._main_chain_nodes = {}
         self._main_chain_member_count = {}
 
         # 1. Find SCCs (condense cycles into single nodes)
@@ -815,9 +808,15 @@ class ChainManager:
                 self._common_chains[chain_id] = (chain, True)
                 pbar.update(1)
 
-        self._main_chain_member_count = count_main_chain_members(
-            self._node_main_chain
-        )
+        for chain_id, nodes in self._chains.items():
+            main_nodes = [
+                node_id
+                for node_id in nodes
+                if (main := self._node_main_chain.get(node_id)) is not None
+                and main[0] == chain_id
+            ]
+            self._main_chain_nodes[chain_id] = main_nodes
+            self._main_chain_member_count[chain_id] = len(main_nodes)
 
         logger.info(
             f"Built {len(self._chains)} main chains",
@@ -840,6 +839,12 @@ class ChainManager:
     def get_main_chain_member_count(self, chain_id: int) -> int:
         return self._main_chain_member_count.get(chain_id, 0)
 
+    def get_main_chain_node(self, chain_id: int, position: int) -> str | None:
+        nodes = self._main_chain_nodes.get(chain_id, [])
+        if 0 <= position < len(nodes):
+            return nodes[position]
+        return None
+
     def get_min_chain_count(self) -> int:
         return len(self._chains)
 
@@ -848,16 +853,46 @@ class ChainManager:
     # ==================================================================
 
     def _quick_reject(self, start: str, end: str) -> str | None:
-        if start not in self._all_filenames or end not in self._all_filenames:
-            return "missing node"
-        same = same_component(start, end, self._node_component)
-        if same is False:
-            return "different component"
+        reject: str | None = self._quick_reject_shared(start, end)
+        if reject is not None:
+            return reject
         if not self._worse_than.get(start):
             return "start has no outgoing"
         if not self._better_than.get(end):
             return "end has no incoming"
         return None
+
+    def _quick_reject_shared(self, start: str, end: str) -> str | None:
+        if start not in self._all_filenames or end not in self._all_filenames:
+            return "missing node"
+        same = same_component(start, end, self._node_component)
+        if same is False:
+            return "different component"
+        return None
+
+    def are_in_same_path(self, start: str, end: str) -> bool:
+        if self._quick_reject_shared(start, end) is not None:
+            return False
+
+        forward_possible = bool(self._worse_than.get(start)) and bool(
+            self._better_than.get(end)
+        )
+        reverse_possible = bool(self._worse_than.get(end)) and bool(
+            self._better_than.get(start)
+        )
+        if not forward_possible and not reverse_possible:
+            return False
+        if start == end:
+            return True
+
+        same_chain, _ = self._check_same_chain(start, end)
+        if same_chain:
+            return True
+        if forward_possible and self._bfs_search(start, end, 3):
+            return True
+        if reverse_possible and self._bfs_search(end, start, 3):
+            return True
+        return False
 
     def _bfs_search(
         self,

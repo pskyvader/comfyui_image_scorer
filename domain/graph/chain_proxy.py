@@ -33,13 +33,17 @@ class ChainProxy:
     def main_nodes(self) -> list[NodeProxy]:
         """Chain nodes whose main chain is this chain, in chain order."""
         main_nodes: list[NodeProxy] = []
-        for node_id in self._nodes:
-            main: tuple[int, list[str]] | None = self._chain.get_node_main_chain(
-                node_id
-            )
-            if main is not None and main[0] == self._id:
-                main_nodes.append(_node_proxy.NodeProxy(self._chain, node_id))
+        for position in range(self.main_length):
+            node: NodeProxy | None = self.main_node_at(position)
+            if node is not None:
+                main_nodes.append(node)
         return main_nodes
+
+    def main_node_at(self, position: int) -> NodeProxy | None:
+        node_id: str | None = self._chain.get_main_chain_node(self._id, position)
+        if node_id is None:
+            return None
+        return _node_proxy.NodeProxy(self._chain, node_id)
 
     @property
     def length(self) -> int:

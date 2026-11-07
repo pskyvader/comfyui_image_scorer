@@ -188,6 +188,7 @@ are implementation details.
 | `core/utilities/__init__.py` | Utility package exports. |
 | `core/utilities/concurrency.py` | Sequential and threaded batch execution helpers. |
 | `core/utilities/helpers.py` | Cache, model, vector, and image export cleanup helpers. |
+| `core/utilities/tests/test_concurrency.py` | Ordered worker-pool execution and result mapping tests. |
 
 ## Domain
 
@@ -238,12 +239,19 @@ are implementation details.
 | `domain/comparison/constants.py` | Comparison constants. |
 | `domain/comparison/comparison_recorder.py` | Comparison persistence and graph recording port consumer. |
 | `domain/comparison/algorithm/__init__.py` | Ranking algorithm package marker. |
-| `domain/comparison/algorithm/phase_order.py` | Ranking phase ordering. |
+| `domain/comparison/algorithm/phase_order.py` | Ranking phase metadata, direct phase dispatch, and on-demand selection data preparation. |
 | `domain/comparison/algorithm/history_collapse.py` | Pair canonicalization, sortable timestamp parsing, and the pure history collapse that reduces imported comparisons to a deterministic survivor set. The single owner of all three. |
 | `domain/comparison/algorithm/graph_helpers.py` | Graph-query, candidate-pool, and collapsibility helpers. |
+| `domain/comparison/algorithm/pair_active.py` | Active pair selection, with functions grouped by pipeline step: phase orchestration, candidate/anchor selection, compatible-node selection, pair formation, filtering, and pair selection. Single-win/loss candidate lanes are yielded in priority order. Both pair members come from the supplied candidate nodes. |
+| `domain/comparison/algorithm/tests/test_pair_active_pipeline.py` | Active-pair candidate-boundary and fallback filtering test. |
+| `domain/comparison/algorithm/tests/test_pair_active_anchor.py` | Anchor Insert seed-pool eligibility, opponent ordering, and load-spreading tests. |
+| `domain/comparison/algorithm/tests/test_pair_active_refine.py` | Uncertainty Refine target selection, seed-pool eligibility, and load-spreading tests. |
+| `domain/comparison/algorithm/tests/test_pair_active_rules.py` | Extracted phase-rule tests, lazy Single Win-Loss lane selection, callback-free orchestration, and explicit intermediate results for nested calls. |
+| `domain/comparison/algorithm/tests/test_phase_order.py` | Phase dispatch tests for direct calls and on-demand, reused selection data. |
+| `domain/comparison/algorithm/tests/test_history_collapse.py` | History-collapse behavior tests: duplicate two-sided histories, contradictions, self-links, missing nodes, and deterministic survivor ordering. |
 | `domain/comparison/algorithm/merge_sort_ranker.py` | Pair selection orchestration for merge-sort ranking. |
-| `domain/comparison/algorithm/pair_active.py` | Active pair selection. |
 | `domain/comparison/algorithm/view.py` | Ranking view and response shaping helpers. Owns the whole-graph ranking measurements in `describe_graph`; `describe_pair` is a projection of that payload. |
+| `domain/comparison/tests/test_comparison_recorder.py` | Comparison recorder rating-state synchronization parity tests. |
 | `domain/loading/__init__.py` | Loading package marker. |
 | `domain/ports/__init__.py` | Domain port exports. |
 | `domain/ports/cache.py` | Cache provider protocol. |
@@ -266,6 +274,7 @@ are implementation details.
 | `application/services/image_processor.py` | Ranked-image discovery, database rebuild, metadata sync, and rating replay. Ratings replay in stored link order so repeated rebuilds of unchanged files reproduce identical values. |
 | `application/services/scoring_service.py` | ComfyUI-facing scoring orchestration. |
 | `application/services/graph_service.py` | CrystalGraph facade over graph state and repositories. `get_graph_stats` returns the `GraphStructure` counts owned by `ChainManager`. `add_image`, `add_images_bulk`, and `rebuild_from_database` intentionally leave the in-memory node map to be replaced wholesale by the next rebuild; `update_image_rating_state` and `update_image_rating_states_bulk` require the filename to be present in that map and raise `KeyError` otherwise. |
+| `application/services/tests/test_image_processor.py` | ImageProcessor filesystem-boundary and rebuild behavior tests. |
 | `application/data_transform/__init__.py` | Application transformation package marker. |
 | `application/data_transform/prepare_data.py` | Training-data preparation orchestration. |
 | `application/hyperparameters/hyperparameter_optimizer.py` | Hyperparameter search orchestration. |
@@ -386,6 +395,8 @@ are implementation details.
 | `infrastructure/persistence/images_repository.py` | Image table operations. |
 | `infrastructure/persistence/path_handler.py` | Runtime path, image-file handling, and history sorting through `domain.comparison.algorithm.history_collapse.safe_parse_timestamp`. |
 | `infrastructure/persistence/file_manager.py` | Concrete filesystem-port implementation. |
+| `infrastructure/persistence/tests/test_bulk_repository.py` | Bulk repository writes must match per-row writes, including ids. |
+| `infrastructure/persistence/tests/test_deduplicate_scored.py` | Deduplication tests over temporary ranked trees, including same-stem and cross-stem matches. |
 | `infrastructure/external_services/__init__.py` | External-service package marker. |
 | `infrastructure/external_services/mediapipe_models.py` | Explicit MediaPipe model download and location handling. |
 | `infrastructure/ml_models/batch_sizer.py` | Model batch-size estimation; profiles CUDA memory through the model's ComfyUI patcher and returns a conservative size on non-CUDA devices. |
@@ -413,12 +424,6 @@ are implementation details.
 | Path | Description |
 |---|---|
 | `tests/test_architecture.py` | Layer-import, database-boundary, and proxy-construction architecture gates. |
-| `tests/test_bulk_repository.py` | Chunked bulk writes must match the per-row path exactly, ids included. |
-| `tests/test_concurrency.py` | Ordered worker-pool execution and result mapping. |
-| `tests/test_deduplicate_scored.py` | Scored-tree deduplication over temporary directories: same-stem copies, filename conflicts, and cross-stem byte-identical detection across differing sizes. |
 | `tests/test_general.py` | General command, endpoint, and integration contract tests. |
-| `tests/test_graph_facade.py` | CrystalGraph facade behavior tests. |
-| `tests/test_history_collapse.py` | History-collapse tests: duplicate two-sided histories, contradictions, self-links, missing nodes, and deterministic survivor ordering. |
-| `tests/test_image_processor.py` | `ImageProcessor` behavior: retained-versus-delegated filesystem operations, plus rebuild-from-ranked coverage (image rebuild, history replay and collapse, prompt tags, JSON sync, and run-to-run determinism). |
+| `tests/test_graph_facade.py` | CrystalGraph facade and persistence-adapter integration tests. |
 | `infrastructure/ml_models/tests/test_batch_sizer.py` | Batch calibration through the public `get()` with a scripted allocator: marginal-cost acceptance, stale-fit ceiling, and the least-squares fit. |
-

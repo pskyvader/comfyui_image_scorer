@@ -378,16 +378,7 @@ class CrystalGraph:
         }
 
     def are_in_same_path(self, img1: str, img2: str) -> bool:
-        if (
-            img1 not in self._chain.get_all_filenames()
-            or img2 not in self._chain.get_all_filenames()
-        ):
-            return False
-        if self._chain.can_reach(img1, img2):
-            return True
-        if self._chain.can_reach(img2, img1):
-            return True
-        return False
+        return self._chain.are_in_same_path(img1, img2)
 
     # -- Repository facade (#47): the single DB-facing surface ----------
 
