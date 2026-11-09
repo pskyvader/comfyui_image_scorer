@@ -25,7 +25,6 @@ from ...core.filesystem.paths import (
     comparison_rule,
     comparisons_file,
 )
-from ...core.utilities.helpers import remove_directory
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -36,7 +35,6 @@ class TrainingLoader:
         self.interaction_data: (
             tuple[npt.NDArray[np.float32], npt.NDArray[np.intp]] | None
         ) = None
-        self.vectors: npt.NDArray[np.float32] | None = None
         self.scores: npt.NDArray[np.float32] | None = None
         self.vectors_keyed: dict[str, npt.NDArray[np.float32]] | None = None
         self.scores_keyed: dict[str, float] | None = None
@@ -44,21 +42,6 @@ class TrainingLoader:
         self.feature_rule: npt.NDArray[np.intp] | None = None
         self.comparison_rule: tuple[int, dict[str, tuple[float, int]]] | None = None
         self.use_cache = use_cache
-
-    def _reset_models(self) -> None:
-        self.vectors = None
-        self.scores = None
-        self.vectors_keyed = None
-        self.scores_keyed = None
-        self.comparison_rows = None
-        self.training_model = None
-        self.feature_rule = None
-        self.comparison_rule = None
-        self.interaction_data = None
-
-    def remove_training_models(self) -> None:
-        remove_directory(Path(models_dir))
-        self._reset_models()
 
     def load_vectors(self) -> dict[str, npt.NDArray[np.float32]]:
         """Load vectors keyed by filename.
@@ -86,16 +69,6 @@ class TrainingLoader:
         if self.use_cache:
             self.vectors_keyed = keyed
         return keyed
-
-    def load_vectors_array(self) -> npt.NDArray[np.float32]:
-        if self.use_cache and self.vectors is not None:
-            return self.vectors
-        keyed = self.load_vectors()
-        x_vector: npt.NDArray[np.float32] = np.array(
-            [keyed[fid] for fid in keyed], dtype=np.float32
-        )
-        self.vectors = x_vector
-        return self.vectors
 
     def _load_vectors_from_jsonl(self) -> dict[str, npt.NDArray[np.float32]]:
         keyed: dict[str, npt.NDArray[np.float32]] = {}
@@ -235,14 +208,6 @@ class TrainingLoader:
         if self.use_cache:
             self.comparison_rows = rows
         return rows
-
-    def load_comparison_counts(self) -> dict[str, int]:
-        """Return per-filename comparison counts derived from the rows."""
-        counts: dict[str, int] = {}
-        for row in self.load_comparison_rows():
-            counts[row["filename_a"]] = counts.get(row["filename_a"], 0) + 1
-            counts[row["filename_b"]] = counts.get(row["filename_b"], 0) + 1
-        return counts
 
     def _load_comparisons_from_npz(self) -> list[ComparisonRow] | None:
         if os.path.exists(comparisons_data):

@@ -3,7 +3,8 @@
 The failure these guard against is a cap that reshapes enumeration: a seed
 dropped by the maximum never comes back, a full-coverage column turns every
 intersected partner into a copy of itself, and identical match sets were stored
-many times per level.
+many times per level. Extensions also must not prune over-maximum parents,
+because deeper intersections shrink back into range.
 """
 
 from __future__ import annotations
@@ -94,15 +95,15 @@ def test_sparse_children_of_wide_parents_rescue_and_dedupe(
     assert summary["image_id_count"] == 6
 
 
-def test_create_qualifying_extension_mask_respects_bounds_and_order() -> None:
+def test_create_qualifying_extension_mask_respects_minimum_and_order() -> None:
     shared = np.array([[5, 3, 2], [5, 3, 2]])
     mask = create_qualifying_extension_mask(
         shared,
         np.array([1, 0]),
         np.arange(3),
         minimum_matching_images=2,
-        maximum_matching_images=4,
     )
+    # The count-5 column survives under sparse seeding; ordering exempts it here.
     assert list(np.nonzero(mask)[1]) == [2, 1, 2]
 
 
@@ -135,3 +136,35 @@ def test_dense_level_one_drops_full_coverage_and_ignores_the_maximum(
         [0, 1, 2],
         [2, 3, 4, 5, 6],
     ]
+
+
+def _wide_matrix() -> np.ndarray:
+    matrix = np.zeros((7, 3), dtype=bool)
+    matrix[0:6, 0] = True
+    matrix[0:6, 1] = True
+    matrix[0:2, 2] = True
+    return matrix
+
+
+@pytest.mark.parametrize("property_block_size", [None, 2])
+def test_sparse_stores_over_maximum_intersections_so_deeper_subsets_surface(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    property_block_size: int | None,
+) -> None:
+    monkeypatch.setattr(frequent_combinations_module, "analysis_dir", tmp_path)
+    results = generate_combinations_sparse(
+        _wide_matrix(),
+        np.arange(7),
+        max_combination_size=3,
+        minimum_matching_images=2,
+        maximum_matching_images=4,
+        memory_budget_gb=1.0,
+        property_block_size=property_block_size,
+    )
+    # (0, 1) matches 6 images, over the maximum; (1, 2) repeats the {0, 1} set of
+    # (0, 2). Pruning the pair would hide the in-range triple (0, 1, 2). The
+    # blocked route emits qualifiers block by block, so keep pair order free.
+    assert {tuple(row) for row in results.levels[1].combinations} == {(0, 1), (0, 2)}
+    assert [tuple(row) for row in results.levels[2].combinations] == [(0, 1, 2)]
+    assert list(results.image_rows_at(6)) == [0, 1]

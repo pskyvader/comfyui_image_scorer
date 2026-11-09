@@ -373,7 +373,7 @@ class FakeDeps:
         from comfyui_image_scorer.adapters.cli.deps import CLIDeps
 
         self.graph: Any = StubGraph()
-        self.processor: Any = SimpleNamespace(
+        self.pairing_processor: Any = SimpleNamespace(
             rebuild_database_from_ranked=Recorder(),
             sync_ranked_files_from_database=Recorder(),
         )
@@ -394,7 +394,7 @@ class FakeDeps:
         self.set_hub_offline: Any = Recorder()
         self.path_resolver: Any = None
         self._cli_deps = CLIDeps(
-            processor=self.processor,
+            pairing_processor=self.pairing_processor,
             graph=self.graph,
             model_loader=self.model_loader,
             batch_sizer_factory=self.batch_sizer_factory,
@@ -436,10 +436,10 @@ def test_cli_database_commands_with_fake_deps():
     assert len(deps.vacuum_database.calls) == 1
 
     assert rebuild(cli) == 0
-    assert len(deps.processor.rebuild_database_from_ranked.calls) == 1
+    assert len(deps.pairing_processor.rebuild_database_from_ranked.calls) == 1
 
     assert sync(cli) == 0
-    assert len(deps.processor.sync_ranked_files_from_database.calls) == 1
+    assert len(deps.pairing_processor.sync_ranked_files_from_database.calls) == 1
 
     assert recalculate(cli) == 0
     assert deps.graph.calls.count("reset_all_image_ratings") == 1
@@ -475,9 +475,9 @@ def test_endpoints_with_fake_deps(method: str, route: str, body: dict[str, Any] 
         assert len(deps.download_configured_models.calls) == 1
         assert len(deps.download_mediapipe_models.calls) == 1
     elif route == "/api/database/rebuild-db":
-        assert len(deps.processor.rebuild_database_from_ranked.calls) == 1
+        assert len(deps.pairing_processor.rebuild_database_from_ranked.calls) == 1
     elif route == "/api/database/sync":
-        assert len(deps.processor.sync_ranked_files_from_database.calls) == 1
+        assert len(deps.pairing_processor.sync_ranked_files_from_database.calls) == 1
     elif route == "/api/database/cleanup":
         assert deps.graph.calls.count("clean_comparisons") == 1
         assert len(deps.vacuum_database.calls) == 1

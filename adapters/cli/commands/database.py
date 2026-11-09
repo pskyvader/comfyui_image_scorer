@@ -24,7 +24,7 @@ def cleanup(deps: CLIDeps) -> int:
 
 def rebuild(deps: CLIDeps) -> int:
     _start = time.perf_counter()
-    deps.processor.rebuild_database_from_ranked()
+    deps.pairing_processor.rebuild_database_from_ranked()
     logger.info("Database rebuilt from ranked files.", start_timer=_start)
     return 0
 
@@ -32,7 +32,7 @@ def rebuild(deps: CLIDeps) -> int:
 def sync(deps: CLIDeps) -> int:
     _start = time.perf_counter()
     deps.graph.rebuild_from_database()
-    deps.processor.sync_ranked_files_from_database()
+    deps.pairing_processor.sync_ranked_files_from_database()
     logger.info("Ranked files synced from the database.", start_timer=_start)
     return 0
 

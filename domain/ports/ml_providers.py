@@ -11,7 +11,6 @@ and injected into domain code through the composition roots (`CLIDeps`,
 
 from typing import Protocol
 
-import numpy as np
 from PIL import Image
 
 
@@ -27,32 +26,3 @@ class MediaPipePort(Protocol):
     """
 
     def analyze(self, img: Image.Image) -> dict[str, list[dict[str, float]]]: ...
-
-
-class VisionEncodingPort(Protocol):
-    """Tensor preparation for vision models.
-
-    Responsible for converting raw image inputs (PIL.Image, numpy, torch.Tensor)
-    into a format suitable for vision model encoding (e.g. resizing, normalization,
-    conversion to torch.Tensor on the correct device).
-
-    This protocol is injected through CLIDeps/ServerDeps and implemented in
-    infrastructure/ml_models/ with the actual tensor preparation logic.
-    """
-
-    def encode(self, img: Image.Image | np.ndarray) -> np.ndarray: ...
-
-
-class FeatureEnginePort(Protocol):
-    """LightGBM / scikit-learn feature engineering and ranking.
-
-    Responsible for generating interaction features (polynomial features,
-    pairwise products) and training LightGBM models for feature importance
-    ranking and Lambdarank-style scoring.
-
-    This protocol is injected through CLIDeps/ServerDeps and implemented in
-    infrastructure/ml_models/ with the actual LightGBM training logic.
-    """
-
-    def fit_ranking(self, X: np.ndarray, y: np.ndarray) -> object: ...
-    def transform(self, X: np.ndarray) -> np.ndarray: ...

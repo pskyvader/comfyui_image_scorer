@@ -202,7 +202,7 @@ class ModelTrainer:
 
         # Note: Custom callbacks with closures (like progress_bar_callback) can't be pickled,
         # causing issues in LightGBM. Only use built-in LightGBM callbacks.
-        self.plot_callback = None
+        self.plot_callback: object | None = None
 
         self.callbacks = callbacks
 

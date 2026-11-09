@@ -27,6 +27,7 @@ from .pair_active import (
 )
 from ....domain.ports.graph import CrystalGraphPort
 from ....domain.ports.repository import ImageRow
+from ....domain.ports.comparison import PairingProcessorPort
 
 from ...comparison.algorithm.history_collapse import canonicalize_pair
 
@@ -140,6 +141,7 @@ def select_pair(
     all_images: list[ImageRow],
     candidate_images: list[ImageRow],
     cg: CrystalGraphPort,
+    pairing_processor: PairingProcessorPort,
 ) -> tuple[tuple[str, str] | None, int | None]:
     _start: float = time.perf_counter()
 
@@ -230,18 +232,22 @@ def select_pair(
                 len(all_images),
             )
         elif name == "anchor":
-            result = phase_anchor_insert(candidate_nodes, existing_pairs_set)
+            result = phase_anchor_insert(candidate_nodes, existing_pairs_set, pairing_processor)
         elif name == "branch_probe":
             result = phase_branch_probe(candidate_nodes, existing_pairs_set)
         elif name == "collapsible":
-            result = phase_collapsible_pairs(candidate_nodes, cg)
+            result = phase_collapsible_pairs(candidate_nodes, cg, pairing_processor)
         elif name == "single_win_loss":
-            result = phase_single_win_loss(candidate_nodes, existing_pairs_set)
+            result = phase_single_win_loss(
+                candidate_nodes, existing_pairs_set, pairing_processor
+            )
         elif name == "chain_middle":
-            result = phase_chain_middle(candidate_nodes, existing_pairs_set, cg)
+            result = phase_chain_middle(
+                candidate_nodes, existing_pairs_set, cg, pairing_processor
+            )
         elif name == "refine":
             result = phase_uncertainty_refine(
-                candidate_nodes, seed_pool_set, existing_pairs_set, cg
+                candidate_nodes, seed_pool_set, existing_pairs_set, cg, pairing_processor
             )
         elif name == "chain_merge":
             result = phase_chain_merge(candidate_nodes, cg)

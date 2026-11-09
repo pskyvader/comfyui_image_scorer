@@ -9,7 +9,7 @@ from flask import current_app
 
 from ...application.services.graph_service import CrystalGraph
 from ...application.hyperparameters.hyperparameter_optimizer import HpoRunner
-from ...application.services.image_processor import ImageProcessor
+from ...application.services.pairing_processor import PairingProcessor
 from ..cli.deps import CLIDeps
 from ...domain.ports.repository import PathResolver
 from ...domain.ports.loading import BatchSizerFactory, MapsProvider, ModelLoader, TrainingLoader
@@ -29,7 +29,7 @@ class ServerDeps:
 
     path_resolver: PathResolver
     graph: CrystalGraph
-    processor: ImageProcessor
+    pairing_processor: PairingProcessor
     model_loader: ModelLoader
     batch_sizer_factory: BatchSizerFactory
     maps_provider: MapsProvider
@@ -49,7 +49,7 @@ class ServerDeps:
 
     def to_cli_deps(self) -> CLIDeps:
         return CLIDeps(
-            processor=self.processor,
+            pairing_processor=self.pairing_processor,
             graph=self.graph,
             model_loader=self.model_loader,
             batch_sizer_factory=self.batch_sizer_factory,

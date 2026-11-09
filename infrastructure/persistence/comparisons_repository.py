@@ -230,16 +230,6 @@ class SQLiteComparisonsRepository:
     def add_comparisons_bulk(self, rows: list[ComparisonRow]) -> list[int]:
         return add_comparisons_bulk(rows)
 
-    def remove_comparison(
-        self,
-        filename_a: str,
-        filename_b: str,
-    ) -> int:
-        return remove_comparison(
-            filename_a=filename_a,
-            filename_b=filename_b,
-        )
-
     def comparison_exists_for_pair(self, filename_a: str, filename_b: str) -> bool:
         return comparison_exists_for_pair(filename_a, filename_b)
 

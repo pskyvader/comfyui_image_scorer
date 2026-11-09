@@ -53,7 +53,7 @@ from ...infrastructure.persistence.database import vacuum_database
 from ...application.services.graph_service import CrystalGraph
 from ...application.hyperparameters.hyperparameter_optimizer import HpoRunner
 from ...infrastructure.ml_models.plot import PlotManager
-from ...application.services.image_processor import ImageProcessor
+from ...application.services.pairing_processor import PairingProcessor
 from ...infrastructure.ml_models.model_loader import (
     model_loader,
     download_configured_models,
@@ -112,7 +112,7 @@ _build_cache = InMemoryCache()
 _webp_cache = InMemoryCache(max_bytes=256 * 1024 * 1024)
 _mediapipe = MediaPipeProvider()
 
-image_processor = ImageProcessor(
+pairing_processor = PairingProcessor(
     max_workers=int(config["ranking"]["max_workers"]),
     graph=graph,
     path_ops=path_ops,
@@ -121,7 +121,7 @@ image_processor = ImageProcessor(
 deps = ServerDeps(
     path_resolver=_PathResolverAdapter(),
     graph=graph,
-    processor=image_processor,
+    pairing_processor=pairing_processor,
     model_loader=model_loader,
     batch_sizer_factory=BatchSizer,
     maps_provider=maps_list,
@@ -140,8 +140,8 @@ deps = ServerDeps(
 )
 
 app = Flask(__name__, static_folder=None)
-app.extensions["image_processor"] = image_processor
-setattr(app, "image_processor", image_processor)
+app.extensions["pairing_processor"] = pairing_processor
+setattr(app, "pairing_processor", pairing_processor)
 app.extensions["server_deps"] = deps
 
 app.config["JSON_SORT_KEYS"] = False
@@ -309,7 +309,7 @@ scanner_thread: threading.Thread | None = None
 def scanner_task(img_root: str) -> None:
     sleep_time = 30
     while True:
-        stats = image_processor.process_next_batch(img_root, batch_size=100)
+        stats = pairing_processor.process_next_batch(img_root, batch_size=100)
         added = stats["added"]
         if isinstance(added, int) and added > 0:
             sleep_time = 30

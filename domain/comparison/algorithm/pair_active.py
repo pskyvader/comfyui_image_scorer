@@ -16,6 +16,7 @@ from ....core.configuration.settings import config
 from ...comparison.algorithm.history_collapse import canonicalize_pair
 
 from ....domain.ports.graph import CrystalGraphPort
+from ....domain.ports.comparison import PairingProcessorPort
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -73,12 +74,11 @@ def phase_seed_coverage(
 def phase_anchor_insert(
     candidate_images: list[NodeProxy],
     existing_pair_set: set[tuple[str, str]],
+    pairing_processor: PairingProcessorPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     """Pair a low-comparison candidate with an eligible seed-pool opponent."""
     _start: float = time.perf_counter()
-    node_a: NodeProxy | None = _select_anchor_insert_node(
-        candidate_images, "position_score"
-    )
+    node_a: NodeProxy | None = _select_anchor_insert_node(candidate_images)
     if node_a is None:
         logger.debug(
             "no eligible anchor, pool too small (0 images at or below the insertion target)",
@@ -91,12 +91,14 @@ def phase_anchor_insert(
     )
     if compatible_nodes is None:
         logger.debug("no compatible opponents", start_timer=_start)
+
+        with pairing_processor.recent_lock:
+            pairing_processor.recent_images.append(node_a.filename)
         return None
+
     pair_list: list[Pair] = _form_candidate_pairs(node_a, compatible_nodes)
     pair_list = _filter_existing_pairs(pair_list, existing_pair_set)
-    result: Pair | None = _closest_score_pair(
-        pair_list, closest=True, prefer_least_compared_opponent=False
-    )
+    result: Pair | None = _closest_score_pair(pair_list, closest=True)
     if result is None:
         pair_list.sort(
             key=lambda pair: abs(pair[0].trueskill_score - pair[1].trueskill_score),
@@ -108,6 +110,9 @@ def phase_anchor_insert(
             f"\n Count:{pair_list[0][0].link_count} vs {pair_list[0][1].link_count}",
             start_timer=_start,
         )
+
+        with pairing_processor.recent_lock:
+            pairing_processor.recent_images.append(node_a.filename)
         return None
     logger.debug(
         f"selected pair: {result[0].filename}({result[0].link_count}) vs {result[1].filename}({result[1].link_count})",
@@ -148,8 +153,7 @@ def phase_branch_probe(
 
 
 def phase_collapsible_pairs(
-    candidate_nodes: list[NodeProxy],
-    cg: CrystalGraphPort,
+    candidate_nodes: list[NodeProxy], cg: CrystalGraphPort, pairing_processor: PairingProcessorPort
 ) -> tuple[NodeProxy, NodeProxy] | None:
     """Anchor on the least-compared node and return its most score-similar same-type partner."""
     _start: float = time.perf_counter()
@@ -163,15 +167,15 @@ def phase_collapsible_pairs(
         )
         return None
 
-    node_a: NodeProxy | None = _find_candidate_node(candidate_nodes, nodes[0].filename)
-    if node_a is None:
-        logger.debug("selected anchor is not a candidate", start_timer=_start)
-        return None
+    node_a: NodeProxy = random.choice(nodes)
     compatible_nodes: list[NodeProxy] | None = _get_ordered_compatible_nodes(
         candidate_nodes, node_a, nodes, skip_first=True
     )
     if compatible_nodes is None:
         logger.debug("no compatible opponents", start_timer=_start)
+
+        with pairing_processor.recent_lock:
+            pairing_processor.recent_images.append(node_a.filename)
         return None
     pair_list: list[Pair] = _form_candidate_pairs(node_a, compatible_nodes)
     closest_pair: Pair | None = _closest_score_pair(pair_list, closest=False)
@@ -181,6 +185,9 @@ def phase_collapsible_pairs(
             f"no pair found, len:{len(nodes)}, bottom:{use_bottom}, checklist:{len(check_list)}",
             start_timer=_start,
         )
+
+        with pairing_processor.recent_lock:
+            pairing_processor.recent_images.append(node_a.filename)
         return None
     logger.debug(
         f"selected pair: {result[0].filename}({result[0].link_count}) vs {result[1].filename}({result[1].link_count})",
@@ -192,6 +199,7 @@ def phase_collapsible_pairs(
 def phase_single_win_loss(
     candidate_nodes: list[NodeProxy],
     existing_pair_set: set[tuple[str, str]],
+    pairing_processor: PairingProcessorPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     """Select an untested pair from candidates with exactly one win or loss."""
     _start: float = time.perf_counter()
@@ -201,7 +209,6 @@ def phase_single_win_loss(
         candidate_nodes
     ):
         node_a, partner_nodes, minimum_count = _prepare_single_win_loss_lane(
-            candidate_nodes,
             nodes,
             single_win,
             filtered_only,
@@ -218,6 +225,9 @@ def phase_single_win_loss(
             partner_nodes, node_a
         )
         if compatible_nodes is None:
+            # no compatible nodes for this node
+            with pairing_processor.recent_lock:
+                pairing_processor.recent_images.append(node_a.filename)
             continue
         pair_list: list[Pair] = _form_candidate_pairs(node_a, compatible_nodes)
         pair_list = _filter_existing_pairs(pair_list, existing_pair_set)
@@ -248,6 +258,7 @@ def phase_chain_middle(
     candidate_images: list[NodeProxy],
     existing_pair_set: set[tuple[str, str]],
     cg: CrystalGraphPort,
+    pairing_processor: PairingProcessorPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     """Compare mid-chain nodes to resolve the global middle ordering."""
     _start: float = time.perf_counter()
@@ -271,20 +282,16 @@ def phase_chain_middle(
         )
         return None
     # logger.debug(f"nodes:{len(nodes)}", start_timer=_start)
-    selected_node = random.choice(nodes)
-
-    node_a: NodeProxy | None = _find_candidate_node(
-        candidate_images, selected_node.filename
-    )
-    if node_a is None:
-        logger.debug("selected anchor is not a candidate", start_timer=_start)
-        return None
+    node_a: NodeProxy = random.choice(nodes)
 
     compatible_nodes: list[NodeProxy] | None = _get_branch_chain_compatible_nodes(
         candidate_images, node_a
     )
     if compatible_nodes is None:
         logger.debug("no compatible branch opponents", start_timer=_start)
+
+        with pairing_processor.recent_lock:
+            pairing_processor.recent_images.append(node_a.filename)
         return None
     pair_list: list[Pair] = _form_candidate_pairs(node_a, compatible_nodes)
     pair_list_filtered: list[Pair] | None = _filter_chain_middle_pairs(
@@ -295,6 +302,9 @@ def phase_chain_middle(
             "no valid pair after filtering",
             start_timer=_start,
         )
+
+        with pairing_processor.recent_lock:
+            pairing_processor.recent_images.append(node_a.filename)
         return None
     result: Pair | None = _closest_score_pair(pair_list_filtered)
 
@@ -308,6 +318,9 @@ def phase_chain_middle(
             f" Sigma:{pair_list_filtered[0][0].sigma_uncertainty:.4f}",
             start_timer=_start,
         )
+
+        with pairing_processor.recent_lock:
+            pairing_processor.recent_images.append(node_a.filename)
         return None
     logger.debug(
         f"selected pair: {result[0].filename}({result[0].link_count}) vs {result[1].filename}({result[1].link_count})",
@@ -321,6 +334,7 @@ def phase_uncertainty_refine(
     seed_pool_set: set[str],
     pair_set: set[tuple[str, str]],
     cg: CrystalGraphPort,
+    pairing_processor: PairingProcessorPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     """Pair a high-uncertainty candidate with an eligible seed-pool node."""
     _start: float = time.perf_counter()
@@ -339,6 +353,9 @@ def phase_uncertainty_refine(
     )
     if compatible_nodes is None:
         logger.debug("no seed-pool opponents", start_timer=_start)
+
+        with pairing_processor.recent_lock:
+            pairing_processor.recent_images.append(node_a.filename)
         return None
     pair_list: list[Pair] = _form_candidate_pairs(node_a, compatible_nodes)
     filtered_pairs: list[Pair] | None = _filter_uncertainty_refine_pairs(
@@ -361,9 +378,12 @@ def phase_uncertainty_refine(
             f" Sigma:{filtered_pairs[0][0].sigma_uncertainty:.4f}",
             start_timer=_start,
         )
+
+        with pairing_processor.recent_lock:
+            pairing_processor.recent_images.append(node_a.filename)
         return None
     logger.debug(
-        f"selected pair: {result[0].filename}({result[0].link_count}) vs {result[1].filename}({result[1].link_count})",
+        f"selected pair: {result[0].filename}({result[0].link_count}) vs {result[1].filename}({result[1].link_count})"
         f" Closest:{result[0].trueskill_score-result[1].trueskill_score:.4f}"
         f" Sigma:{result[0].sigma_uncertainty:.4f}",
         start_timer=_start,
@@ -525,37 +545,35 @@ def _get_seed_coverage_under_target_nodes(
 ) -> list[NodeProxy]:
     """Return candidates below the seed comparison target, most-compared first."""
     seed_target: int = int(config["ranking"]["seed_target_comparisons"])
+    lru_size: int = int(config["ranking"]["lru_size"])
     under_seed_target: list[NodeProxy] = [
         node for node in candidate_nodes if node.link_count < seed_target
     ]
     under_seed_target.sort(key=lambda node: node.link_count, reverse=True)
-    return under_seed_target
+    return under_seed_target[:lru_size]
 
 
 def _select_seed_coverage_anchor(
     under_seed_target: list[NodeProxy],
 ) -> NodeProxy | None:
     """Select the most-compared candidate that remains below the seed target."""
-    return under_seed_target[0] if under_seed_target else None
+    return random.choice(under_seed_target) if under_seed_target else None
 
 
 def _select_anchor_insert_node(
     candidate_nodes: list[NodeProxy],
-    score_type: str,
 ) -> NodeProxy | None:
     """Select the lowest-comparison candidate at or below the insertion target."""
     insertion_target: int = int(config["ranking"]["insertion_target_comparisons"])
-    node_a: NodeProxy | None = min(
-        (node for node in candidate_nodes if node.link_count <= insertion_target),
-        key=lambda node: (node.link_count, node.__getattribute__(score_type)),
-        default=None,
-    )
-    if node_a is None:
+    node_list: list[NodeProxy] = [
+        node for node in candidate_nodes if node.link_count <= insertion_target
+    ]
+    if not node_list:
         return None
-    anchor_node: NodeProxy | None = _find_candidate_node(
-        candidate_nodes, node_a.filename
-    )
-    return anchor_node
+    node_list.sort(key=lambda node: (node.link_count, node.position_score))
+    node_list = node_list[: int(config["ranking"]["lru_size"])]
+    node_a: NodeProxy = random.choice(node_list)
+    return node_a
 
 
 def _collect_chain_extremes(
@@ -630,7 +648,9 @@ def _get_collapsible_candidates(
         nodes = _collect_chain_extremes(
             chains, candidate_names, check_list, use_bottom, cg
         )
-    return nodes, use_bottom, check_list
+    nodes.sort(key=lambda node: node.score)
+    lru_size = int(config["ranking"]["lru_size"])
+    return nodes[:lru_size], use_bottom, check_list
 
 
 def _get_single_win_loss_candidate_lanes(
@@ -656,21 +676,18 @@ def _get_single_win_loss_candidate_lanes(
             if len(links) == 1:
                 nodes.append(node)
         if len(nodes) >= 2:
-            nodes.sort(key=lambda node: (node.link_count, node.mu_skill))
-            yield single_win, filtered_only, nodes
+            nodes.sort(key=lambda node: (node.link_count, node.score))
+            yield single_win, filtered_only, nodes[: int(config["ranking"]["lru_size"])]
 
 
 def _prepare_single_win_loss_lane(
-    candidate_nodes: list[NodeProxy],
     nodes: list[NodeProxy],
     single_win: bool,
     filtered_only: bool,
     minimum_count: int,
 ) -> tuple[NodeProxy | None, list[NodeProxy], int]:
     """Choose a lane anchor and apply its comparison-count eligibility rule."""
-    node_a: NodeProxy | None = _find_candidate_node(candidate_nodes, nodes[0].filename)
-    if node_a is None:
-        return None, [], minimum_count
+    node_a: NodeProxy = random.choice(nodes)
 
     if single_win:
         minimum_count = node_a.link_count
@@ -761,19 +778,18 @@ def _select_uncertainty_refine_anchor(
     """Select the most uncertain eligible candidate outside the seed pool."""
     min_sigma_threshold: float = float(config["ranking"]["sigma_threshold"])
     insertion_target: int = int(config["ranking"]["insertion_target_comparisons"])
+    lru_size: int = int(config["ranking"]["lru_size"])
     target_nodes: list[NodeProxy] = [
         node
         for node in candidate_nodes
         if node.link_count > insertion_target
         and node.sigma_uncertainty >= min_sigma_threshold
+        and node.filename not in seed_pool_set
     ]
     target_nodes.sort(key=lambda node: node.sigma_uncertainty, reverse=True)
-    target_a: NodeProxy | None = next(
-        (node for node in target_nodes if node.filename not in seed_pool_set), None
-    )
-    if target_a is None:
-        return None
-    node_a: NodeProxy | None = _find_candidate_node(candidate_nodes, target_a.filename)
+    target_nodes = target_nodes[:lru_size]
+    node_a: NodeProxy | None = random.choice(target_nodes) if target_nodes else None
+
     return node_a
 
 

@@ -14,7 +14,7 @@ from ...domain.ports.cache import CacheProvider
 from ...application.services.graph_service import CrystalGraph
 from ...application.hyperparameters.hyperparameter_optimizer import HpoRunner
 from ...infrastructure.ml_models.plot import PlotManager
-from ...application.services.image_processor import ImageProcessor
+from ...application.services.pairing_processor import PairingProcessor
 from ...infrastructure.persistence.comparisons_repository import (
     SQLiteComparisonsRepository,
 )
@@ -50,7 +50,7 @@ if config["image_root"] == "":
 class CLIDeps:
     """Dependency container handed to every CLI command function."""
 
-    processor: ImageProcessor
+    pairing_processor: PairingProcessor
     graph: CrystalGraph
     model_loader: ModelLoader
     batch_sizer_factory: BatchSizerFactory
@@ -86,14 +86,14 @@ def build_cli_deps() -> CLIDeps:
 
     path_ops = FileManager()
 
-    processor = ImageProcessor(
+    pairing_processor = PairingProcessor(
         max_workers=int(config["ranking"]["max_workers"]),
         graph=graph,
         path_ops=path_ops,
     )
 
     return CLIDeps(
-        processor=processor,
+        pairing_processor=pairing_processor,
         graph=graph,
         model_loader=_model_loader,
         batch_sizer_factory=BatchSizer,

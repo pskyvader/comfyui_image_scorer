@@ -123,23 +123,6 @@ class DataTransformer:
         ]
         self.vector_ranges: dict[str, VectorRange] = feature_mapping["vector_ranges"]
 
-    def get_raw_data(self) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]]:
-        """Return feature vectors and scores as numpy arrays.
-
-        Loads keyed vectors and scores from the training loader and returns
-        them as aligned numpy arrays suitable for model training.
-
-        Returns:
-            ``x``: array of shape ``(n_features, n_samples)`` with float32 dtype
-            ``y``: array of shape ``(n_samples,)`` with float32 dtype
-        """
-        vectors = self.training_loader.load_vectors()
-        scores = self.training_loader.load_scores()
-        order = list(scores.keys())
-        x = np.array([vectors[fid] for fid in order], dtype=np.float32)
-        y = np.array([scores[fid] for fid in order], dtype=np.float32)
-        return x, y
-
     def filter_low_comparisons(
         self,
         threshold: int,

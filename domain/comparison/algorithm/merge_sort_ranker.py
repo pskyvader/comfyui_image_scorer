@@ -9,6 +9,7 @@ from .graph_helpers import filter_excluded_images
 from .phase_order import select_pair
 
 from ....domain.ports.graph import CrystalGraphPort
+from ....domain.ports.comparison import PairingProcessorPort
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -16,6 +17,7 @@ logger: ModuleLogger = get_logger(__name__)
 def select_pair_for_comparison(
     exclude_set: set[str] | None,
     crystal_graph: CrystalGraphPort,
+    pairing_processor: PairingProcessorPort,
 ) -> tuple[tuple[str, str] | None, int | None]:
     """Select the next pair of images to compare.
 
@@ -53,7 +55,7 @@ def select_pair_for_comparison(
         )
         return None, None
 
-    pair, phase_index = select_pair(cached, candidate_images, cg)
+    pair, phase_index = select_pair(cached, candidate_images, cg, pairing_processor)
 
     if not pair:
         logger.warning(f"no pair", start_timer=_start)

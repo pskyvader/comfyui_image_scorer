@@ -1,4 +1,4 @@
-"""Image processor - discovery, initialization, and rebuild flow."""
+"""Pairing processor - discovery, initialization, and rebuild flow."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ from .graph_service import CrystalGraph
 logger: ModuleLogger = get_logger(__name__)
 
 
-class ImageProcessor:
+class PairingProcessor:
     """Process uninitialized images with parallel workers."""
 
     def __init__(

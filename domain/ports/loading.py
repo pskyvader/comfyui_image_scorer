@@ -7,7 +7,7 @@ injected at adapter roots. All types are concrete — no ``Any``.
 
 from __future__ import annotations
 
-from typing import Callable, KeysView, Protocol, NamedTuple
+from typing import TYPE_CHECKING, Callable, KeysView, Protocol, NamedTuple
 
 import numpy as np
 import numpy.typing as npt
@@ -15,6 +15,9 @@ import torch
 from PIL import Image
 
 from .repository import ComparisonRow
+
+if TYPE_CHECKING:
+    from comfy.model_patcher import ModelPatcher
 
 
 class ModelInfo(NamedTuple):
@@ -105,21 +108,59 @@ class FeatureFilterModel(Protocol):
 
 
 class ModelTrainingService(Protocol):
-    """Trainer surface the feature transformer needs to build and fit a model."""
+    """Trainer surface for building, fitting, and reading training results.
+
+    Mirrors the full public surface of the injected trainer so domain and
+    application code can read iteration diagnostics and per-metric directions
+    while the trainer owns LightGBM internals.
+    """
+
+    METRIC_DIRECTIONS: dict[str, dict[str, bool]]
+
+    eval_metrics: list[str]
+
+    user_verbosity: int
+    n_estimators: int | None
+    test_size: float | None
+    early_stopping_rounds: int | None
+    callbacks: list[Callable[..., object]] | None
+    plot_callback: object | None
+
+    def r2_metric(
+        self, y_true: npt.NDArray[np.float32], y_pred: npt.NDArray[np.float32]
+    ) -> tuple[str, float, bool]: ...
 
     def create_training_model(self, config_dict: dict[str, object]) -> None: ...
+
+    def create_callbacks(self, progress_bar: object) -> None: ...
+
+    def create_metrics(
+        self,
+        y_test: npt.NDArray[np.float32],
+        y_pred: npt.NDArray[np.float32],
+        training_time: float,
+    ) -> None: ...
+
+    def train_model_pairs(
+        self,
+        config_dict: dict[str, object],
+        X: npt.NDArray[np.float32],
+        comparisons: list[dict[str, object]],
+        index_list: list[str],
+    ) -> tuple[object, dict[str, object]]: ...
+
+    def train_model(
+        self,
+        config_dict: dict[str, object],
+        X: npt.NDArray[np.float32],
+        y: npt.NDArray[np.float32],
+    ) -> tuple[object, dict[str, object]]: ...
 
     @property
     def training_model(self) -> FeatureFilterModel | None: ...
 
-
-class VisionModelResult(NamedTuple):
-    output_dim: int
-    total_memory: int
-
-
-class EmbeddingModelResult(NamedTuple):
-    output_dim: int
+    @property
+    def result_metrics(self) -> dict[str, object]: ...
 
 
 class CategoryValue(NamedTuple):
@@ -134,6 +175,10 @@ class ModelLoader(Protocol):
     def load_hf_vision_model(
         self, model_key: str
     ) -> tuple[AttributeModel, int, ImageProcessor]: ...
+    def load_vision_model_patcher(self, model_key: str) -> ModelPatcher: ...
+    def load_attribute_model_patcher(
+        self, model_key: str
+    ) -> tuple[ModelPatcher, int, int]: ...
 
 
 class BatchSizer(Protocol):
@@ -163,6 +208,7 @@ class MapsProvider(Protocol):
     def add_value(self, name: str, value: str) -> CategoryValue: ...
     def get_all_categories(self, name: str) -> list[str]: ...
     def register_value(self, name: str, value: object) -> None: ...
+    def load_maps(self) -> dict[str, list[str]]: ...
 
 
 class TrainingDiagnostics(NamedTuple):
@@ -175,6 +221,7 @@ class TrainingDiagnostics(NamedTuple):
 class TrainingLoader(Protocol):
     def load_vectors(self) -> dict[str, npt.NDArray[np.float32]]: ...
     def load_scores(self) -> dict[str, float]: ...
+    def load_scores_array(self) -> npt.NDArray[np.float32]: ...
     def load_training_model(self) -> ScoringModel: ...
     def load_training_model_diagnostics(self) -> TrainingDiagnostics | None: ...
     def save_training_model(

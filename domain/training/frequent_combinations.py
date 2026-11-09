@@ -119,7 +119,6 @@ class CombinationFinder(Protocol):
         current_combinations: list[tuple[int, ...]],
         property_columns: np.ndarray,
         minimum_matching_images: int,
-        maximum_matching_images: int,
         parent_combinations_per_batch: int,
         combination_depth: int,
         multiplied_matrix_cache_path: Path | None = None,
@@ -167,7 +166,7 @@ def _cache_directory(
     maximum_matching_images: int,
 ) -> Path:
     fingerprint = hashlib.blake2b(digest_size=16)
-    fingerprint.update(b"frequent-combinations-v2")
+    fingerprint.update(b"frequent-combinations-v3")
     fingerprint.update(repr(image_property_matrix.shape).encode())
     fingerprint.update(
         memoryview(np.ascontiguousarray(image_property_matrix)).cast("B")
@@ -347,12 +346,9 @@ def create_qualifying_extension_mask(
     last_property_by_parent: np.ndarray,
     property_columns: np.ndarray,
     minimum_matching_images: int,
-    maximum_matching_images: int,
 ) -> np.ndarray:
-    """Keep parent/property pairs meeting the image-count and ordering rules."""
-    qualifying_extensions = (
-        shared_image_counts >= minimum_matching_images
-    ) & (shared_image_counts <= maximum_matching_images)
+    """Keep parent/property pairs meeting the minimum image support and ordering rules."""
+    qualifying_extensions = shared_image_counts >= minimum_matching_images
     qualifying_extensions &= (
         property_columns[None, :] > last_property_by_parent[:, None]
     )
@@ -364,7 +360,6 @@ def _find_qualifying_extensions(
     current_combinations: list[tuple[int, ...]],
     property_columns: np.ndarray,
     minimum_matching_images: int,
-    maximum_matching_images: int,
     parent_combinations_per_batch: int,
     combination_depth: int,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -391,7 +386,6 @@ def _find_qualifying_extensions(
             last_property_by_parent,
             property_columns,
             minimum_matching_images,
-            maximum_matching_images,
         )
         local_parent_columns, added_property_columns = np.nonzero(qualifying_extensions)
         return local_parent_columns + start, added_property_columns
@@ -419,7 +413,6 @@ def find_qualifying_combinations(
     current_combinations: list[tuple[int, ...]],
     property_columns: np.ndarray,
     minimum_matching_images: int,
-    maximum_matching_images: int,
     parent_combinations_per_batch: int,
     combination_depth: int,
     multiplied_matrix_cache_path: Path | None = None,
@@ -488,7 +481,6 @@ def find_qualifying_combinations(
         current_combinations,
         property_columns,
         minimum_matching_images,
-        maximum_matching_images,
         parent_combinations_per_batch,
         combination_depth,
     )
@@ -501,7 +493,6 @@ def find_qualifying_combinations_blocked(
     current_combinations: list[tuple[int, ...]],
     property_columns: np.ndarray,
     minimum_matching_images: int,
-    maximum_matching_images: int,
     parent_combinations_per_batch: int,
     combination_depth: int,
     property_block_size: int,
@@ -619,7 +610,6 @@ def find_qualifying_combinations_blocked(
         current_combinations,
         property_columns,
         minimum_matching_images,
-        maximum_matching_images,
         parent_combinations_per_batch,
         combination_depth,
     )
@@ -1168,7 +1158,6 @@ def generate_combinations(
             current_combinations,
             property_columns,
             minimum_matching_images,
-            maximum_matching_images,
             batch_item_capacity,
             next_level,
             multiplied_matrix_cache_path=multiplied_path,
@@ -1526,7 +1515,6 @@ def _find_sparse_extensions(
     parent_combinations: list[tuple[int, ...]],
     count_dtype: np.dtype[np.generic],
     minimum_matching_images: int,
-    maximum_matching_images: int,
     property_block_size: int | None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Count valid parent/property pairs without creating nested worker pools."""
@@ -1543,9 +1531,7 @@ def _find_sparse_extensions(
             dtype=np.int64,
             count=len(parent_combinations),
         )
-        qualifying = (
-            shared_image_counts >= minimum_matching_images
-        ) & (shared_image_counts <= maximum_matching_images)
+        qualifying = shared_image_counts >= minimum_matching_images
         qualifying &= property_columns[None, :] > last_properties[:, None]
         parent_columns, property_columns = np.nonzero(qualifying)
         return parent_columns.astype(np.int64), property_columns.astype(np.int64)
@@ -1570,8 +1556,7 @@ def _find_sparse_extensions(
                 dtype=count_dtype,
             )
             local_parents, local_properties = np.nonzero(
-                (later_counts >= minimum_matching_images)
-                & (later_counts <= maximum_matching_images)
+                later_counts >= minimum_matching_images
             )
             if local_parents.size:
                 qualifying_parents.append(parent_indices[local_parents])
@@ -1587,9 +1572,7 @@ def _find_sparse_extensions(
             dtype=np.int64,
             count=len(parent_columns),
         )
-        block_qualifying = (block_counts >= minimum_matching_images) & (
-            block_counts <= maximum_matching_images
-        )
+        block_qualifying = block_counts >= minimum_matching_images
         block_qualifying &= (
             property_columns[block_start:block_stop][None, :] > last_properties[:, None]
         )
@@ -1738,7 +1721,6 @@ def generate_combinations_sparse(
                 local_combinations,
                 count_dtype,
                 minimum_matching_images,
-                maximum_matching_images,
                 property_block_size,
             )
 

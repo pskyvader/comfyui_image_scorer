@@ -18,6 +18,7 @@ from ....domain.comparison.algorithm.view import (
 from ....domain.comparison.algorithm.phase_order import get_phases
 from ....domain.comparison.comparison_recorder import ComparisonRecorder
 from ....domain.ports.repository import ImageRow
+from ....application.services.pairing_processor import PairingProcessor
 from ..deps import ServerDeps, get_server_deps
 
 ranking_bp = Blueprint("ranking_v2", __name__, url_prefix="/api/ranking")
@@ -38,12 +39,12 @@ class SubmitComparisonRequest(BaseModel):
     winner: str = Field(..., min_length=1)
 
 
-def _get_processor():
-    attr = getattr(current_app, "image_processor", None) or current_app.extensions.get(
-        "image_processor"
+def _get_pairing_processor() -> PairingProcessor:
+    attr = getattr(current_app, "pairing_processor", None) or current_app.extensions.get(
+        "pairing_processor"
     )
     if attr is None:
-        raise RuntimeError("image processor failed")
+        raise RuntimeError("pairing processor failed")
     return attr
 
 
@@ -154,11 +155,11 @@ def get_status():
 def get_next_pair():
     _start = time.perf_counter()
     deps = get_server_deps()
-    processor = _get_processor()
+    pairing_processor = _get_pairing_processor()
     recent_files_ordered: list[str] = []
-    if processor:
-        with processor.recent_lock:
-            recent_files_ordered = list(processor.recent_images)
+    if pairing_processor:
+        with pairing_processor.recent_lock:
+            recent_files_ordered = list(pairing_processor.recent_images)
 
     total_nodes = deps.graph.get_node_count()
     if total_nodes < 2:
@@ -177,6 +178,7 @@ def get_next_pair():
     pair, phase_index = merge_sort_ranker.select_pair_for_comparison(
         exclude_set=full_exclude,
         crystal_graph=deps.graph,
+        pairing_processor=pairing_processor,
     )
     logger.debug(f"phase {phase_index}", start_timer=_start)
     if not pair or phase_index is None:
@@ -194,10 +196,10 @@ def get_next_pair():
         result = "", 204
         return result
 
-    if processor:
-        with processor.recent_lock:
-            processor.recent_images.append(filename_a)
-            processor.recent_images.append(filename_b)
+    if pairing_processor:
+        with pairing_processor.recent_lock:
+            pairing_processor.recent_images.append(filename_a)
+            pairing_processor.recent_images.append(filename_b)
 
     left = describe_image(node_a, deps.graph)
     right = describe_image(node_b, deps.graph)
@@ -217,10 +219,10 @@ def get_next_pair():
 @ranking_bp.route("/reset", methods=["POST"])
 def reset_ranking_queue():
     _start = time.perf_counter()
-    processor = _get_processor()
-    if processor:
-        with processor.recent_lock:
-            processor.clear_old_cache(force=True)
+    pairing_processor = _get_pairing_processor()
+    if pairing_processor:
+        with pairing_processor.recent_lock:
+            pairing_processor.clear_old_cache(force=True)
     result = jsonify({"status": "success", "message": "Ranking queue reset."})
     logger.debug("ranking queue reset", start_timer=_start)
     return result
@@ -230,10 +232,10 @@ def reset_ranking_queue():
 def skip_image():
     _start = time.perf_counter()
     req = SkipRequest.model_validate(request.get_json(silent=True) or {}, strict=False)
-    processor = _get_processor()
-    if processor and req.filename:
-        with processor.recent_lock:
-            processor.recent_images.append(req.filename)
+    pairing_processor = _get_pairing_processor()
+    if pairing_processor and req.filename:
+        with pairing_processor.recent_lock:
+            pairing_processor.recent_images.append(req.filename)
     result = jsonify({"status": "ok"})
     logger.debug(f"skipped {req.filename}", start_timer=_start)
     return result
@@ -243,7 +245,7 @@ def skip_image():
 def submit_comparison():
     _start = time.perf_counter()
     deps = get_server_deps()
-    processor = _get_processor()
+    pairing_processor = _get_pairing_processor()
     req = SubmitComparisonRequest.model_validate(request.get_json(), strict=False)
     if req.filename_a == req.filename_b:
         result = jsonify({"error": "Cannot compare image to itself"}), 400
@@ -261,7 +263,7 @@ def submit_comparison():
         result = jsonify({"error": "Failed to record comparison"}), 500
         return result
 
-    processor.clear_old_cache(force=False)
+    pairing_processor.clear_old_cache(force=False)
 
     node_a = deps.graph.get_node(req.filename_a)
     node_b = deps.graph.get_node(req.filename_b)

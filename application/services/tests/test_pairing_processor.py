@@ -1,4 +1,4 @@
-"""Filesystem-boundary behavior of the ranked-image processor."""
+"""Filesystem-boundary behavior of the ranked-image pairing processor."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import NamedTuple, cast
 
 from comfyui_image_scorer.application.services.graph_service import CrystalGraph
-from comfyui_image_scorer.application.services.image_processor import ImageProcessor
+from comfyui_image_scorer.application.services.pairing_processor import PairingProcessor
 from comfyui_image_scorer.core.io.serialization import clean_json_metadata
 from comfyui_image_scorer.domain.analysis.trueskill import (
     INITIAL_MEAN,
@@ -295,17 +295,17 @@ class MemoryComparisonRepository:
 
 
 class _RebuildHarness(NamedTuple):
-    processor: ImageProcessor
+    pairing_processor: PairingProcessor
     graph: CrystalGraph
     port: TempFilePort
     images: MemoryImageRepository
     comparisons: MemoryComparisonRepository
 
 
-def _processor(root: Path) -> tuple[ImageProcessor, TempFilePort]:
+def _pairing_processor(root: Path) -> tuple[PairingProcessor, TempFilePort]:
     port = TempFilePort(root)
-    processor = ImageProcessor(max_workers=1, graph=CrystalGraph(), path_ops=port)
-    return processor, port
+    pairing_processor = PairingProcessor(max_workers=1, graph=CrystalGraph(), path_ops=port)
+    return pairing_processor, port
 
 
 def _harness(root: Path) -> _RebuildHarness:
@@ -316,8 +316,8 @@ def _harness(root: Path) -> _RebuildHarness:
         image_repo=cast(ImageRepository, images),
         comparison_repo=cast(ComparisonRepository, comparisons),
     )
-    processor = ImageProcessor(max_workers=1, graph=graph, path_ops=port)
-    return _RebuildHarness(processor, graph, port, images, comparisons)
+    pairing_processor = PairingProcessor(max_workers=1, graph=graph, path_ops=port)
+    return _RebuildHarness(pairing_processor, graph, port, images, comparisons)
 
 
 def _write_ranked(tier: Path, filename: str, payload: dict[str, object]) -> Path:
@@ -339,9 +339,9 @@ def test_get_fast_total_count_owns_source_scan(tmp_path: Path) -> None:
     _touch(source / "a.png")
     _touch(source / "nested" / "b.jpg")
 
-    processor, port = _processor(tmp_path)
+    pairing_processor, port = _pairing_processor(tmp_path)
 
-    assert processor.get_fast_total_count(str(source)) == 2
+    assert pairing_processor.get_fast_total_count(str(source)) == 2
     assert "list_directory" not in port.calls
 
 
@@ -354,8 +354,8 @@ def test_reorganize_folder_structure_moves_loose_files(tmp_path: Path) -> None:
         json.dumps({"score": 0.7, "prompt_tags": "tag"}), encoding="utf-8"
     )
 
-    processor, port = _processor(tmp_path)
-    processor.reorganize_folder_structure()
+    pairing_processor, port = _pairing_processor(tmp_path)
+    pairing_processor.reorganize_folder_structure()
 
     assert (tmp_path / "scored_0.7" / "loose.png").is_file()
     assert (tmp_path / "scored_0.7" / "loose.json").is_file()
@@ -373,8 +373,8 @@ def test_process_image_file_delegates_to_file_port(tmp_path: Path) -> None:
         json.dumps({"prompt_tags": "tag", "score": 0.4}), encoding="utf-8"
     )
 
-    processor, port = _processor(tmp_path)
-    success, message, *_rest = processor.process_image_file(image)
+    pairing_processor, port = _pairing_processor(tmp_path)
+    success, message, *_rest = pairing_processor.process_image_file(image)
 
     assert success, message
     assert (tmp_path / "scored_0.5" / "shot.png").is_file()
@@ -392,8 +392,8 @@ def test_file_port_is_the_only_destructive_move_path(tmp_path: Path) -> None:
         json.dumps({"prompt_tags": "tag", "score": 0.5}), encoding="utf-8"
     )
 
-    processor, port = _processor(tmp_path)
-    success, message, *_rest = processor.process_image_file(incoming)
+    pairing_processor, port = _pairing_processor(tmp_path)
+    success, message, *_rest = pairing_processor.process_image_file(incoming)
 
     assert success, message
     assert "remove_file" in port.calls
@@ -414,13 +414,13 @@ def test_rebuild_database_from_ranked_rebuilds_every_ranked_image(
     _write_ranked(tmp_path / "scored_0.6", "c.png", {"positive_prompt": "tag-c"})
 
     harness = _harness(tmp_path)
-    harness.processor.rebuild_database_from_ranked()
+    harness.pairing_processor.rebuild_database_from_ranked()
 
     assert harness.graph.get_node_count() == 3
     rows = {row["filename"]: row for row in harness.images.list_nodes()}
     assert set(rows) == {"a.png", "b.png", "c.png"}
     for name, row in rows.items():
-        assert row["score"] == harness.processor.default_score
+        assert row["score"] == harness.pairing_processor.default_score
         assert row["rating_mu"] == INITIAL_MEAN
         assert row["rating_sigma"] == INITIAL_UNCERTAINTY
         assert row["comparison_count"] == 0
@@ -462,7 +462,7 @@ def test_rebuild_database_from_ranked_replays_comparison_history(
     _write_ranked(tier, "c.png", {"positive_prompt": "tag-c"})
 
     harness = _harness(tmp_path)
-    harness.processor.rebuild_database_from_ranked()
+    harness.pairing_processor.rebuild_database_from_ranked()
 
     links = harness.comparisons.list_links()
     assert len(links) == 1
@@ -494,9 +494,9 @@ def test_rebuild_database_from_ranked_prompt_tags_match_cleaned_metadata(
     _write_ranked(tier, "wrapped.png", wrapped)
 
     harness = _harness(tmp_path)
-    harness.processor.rebuild_database_from_ranked()
+    harness.pairing_processor.rebuild_database_from_ranked()
 
-    default_score = harness.processor.default_score
+    default_score = harness.pairing_processor.default_score
     rows = {row["filename"]: row for row in harness.images.list_nodes()}
     for name, payload in (("flat.png", flat), ("wrapped.png", wrapped)):
         expected = clean_json_metadata(
@@ -552,7 +552,7 @@ def test_rebuild_database_from_ranked_is_deterministic(tmp_path: Path) -> None:
     def ratings_for_seed(seed: int) -> dict[str, tuple[float, float]]:
         random.seed(seed)
         harness = _harness(tmp_path)
-        harness.processor.rebuild_database_from_ranked()
+        harness.pairing_processor.rebuild_database_from_ranked()
         return {
             row["filename"]: (row["rating_mu"], row["rating_sigma"])
             for row in harness.images.list_nodes()
@@ -576,7 +576,7 @@ def test_rebuild_database_from_ranked_syncs_json_to_disk(tmp_path: Path) -> None
     _write_ranked(tier, "b.png", {"positive_prompt": "tag-b"})
 
     harness = _harness(tmp_path)
-    harness.processor.rebuild_database_from_ranked()
+    harness.pairing_processor.rebuild_database_from_ranked()
 
     synced = {entry[0]: entry for entry in harness.port.sync_calls}
     assert set(synced) == {"a.png", "b.png"}
@@ -598,7 +598,7 @@ def test_sync_ranked_files_from_database_writes_current_database_state(
     _write_ranked(tier, "a.png", {"positive_prompt": "tag-a"})
 
     harness = _harness(tmp_path)
-    harness.processor.rebuild_database_from_ranked()
+    harness.pairing_processor.rebuild_database_from_ranked()
     harness.port.sync_calls.clear()
     harness.port.calls.clear()
 
@@ -609,7 +609,7 @@ def test_sync_ranked_files_from_database_writes_current_database_state(
     row["comparison_count"] = 7
     harness.graph.rebuild_from_database()
 
-    harness.processor.sync_ranked_files_from_database()
+    harness.pairing_processor.sync_ranked_files_from_database()
 
     assert harness.port.sync_calls == [("a.png", 0.9, 30.0, 4.0, 7)]
     assert "deduplicate_scored" not in harness.port.calls
@@ -624,7 +624,7 @@ def test_sync_ranked_files_from_database_keeps_database_images_missing_files(
     _write_ranked(tier, "a.png", {"positive_prompt": "tag-a"})
 
     harness = _harness(tmp_path)
-    harness.processor.rebuild_database_from_ranked()
+    harness.pairing_processor.rebuild_database_from_ranked()
     harness.port.sync_calls.clear()
 
     harness.images.rows["ghost.png"] = ImageRow(
@@ -639,6 +639,6 @@ def test_sync_ranked_files_from_database_keeps_database_images_missing_files(
     )
     harness.graph.rebuild_from_database()
 
-    harness.processor.sync_ranked_files_from_database()
+    harness.pairing_processor.sync_ranked_files_from_database()
 
     assert {entry[0] for entry in harness.port.sync_calls} == {"a.png", "ghost.png"}

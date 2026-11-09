@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import random
 from itertools import product, islice
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 import numpy as np
 
@@ -13,9 +13,8 @@ from ...domain.data_transformation.data_transformer import (
     DataTransformer,
     list_filtered_features,
 )
-from ...domain.ports.loading import TrainingLoader
+from ...domain.ports.loading import ModelTrainingService, TrainingLoader
 from ...domain.training.grid import around, grid_base
-from ...infrastructure.ml_models.training.model_trainer import ModelTrainer
 
 logger: ModuleLogger = get_logger(__name__)
 
@@ -138,7 +137,7 @@ def reset_hyperparameters() -> HpoState:
 
 
 def load_training_data(
-    filter_comparisons: bool, training_loader: TrainingLoader, model_trainer: ModelTrainer
+    filter_comparisons: bool, training_loader: TrainingLoader, model_trainer: ModelTrainingService
 ) -> tuple[np.ndarray, np.ndarray]:
     """Load keyed vectors/scores and compress unused features. When
     filter_comparisons is True, keep only files with enough comparisons
@@ -203,14 +202,14 @@ def load_training_data(
 
 
 def _evaluate_config(
-    cfg: dict[str, float | int], X: np.ndarray, y: np.ndarray, model_trainer: ModelTrainer
+    cfg: dict[str, float | int], X: np.ndarray, y: np.ndarray, model_trainer: ModelTrainingService
 ) -> tuple[float, float, str]:
     _, metrics = model_trainer.train_model(
-        config_dict=cfg, X=X, y=y
+        config_dict=cast("dict[str, object]", cfg), X=X, y=y
     )
     return (
-        float(metrics["score"]),
-        float(metrics["training_time"]),
+        float(cast("float", metrics["score"])),
+        float(cast("float", metrics["training_time"])),
         str(metrics["primary_metric"]),
     )
 
@@ -221,7 +220,7 @@ def _run_step_on_config(
     X: np.ndarray,
     y: np.ndarray,
     max_combos: int,
-    model_trainer: ModelTrainer,
+    model_trainer: ModelTrainingService,
 ) -> tuple[dict[str, Any], list[str]]:
     all_keys = list(grid_base.keys())
     random.shuffle(all_keys)
@@ -313,7 +312,7 @@ def _run_step_on_config(
 def hpo_cycle(
     X: np.ndarray,
     y: np.ndarray,
-    model_trainer: ModelTrainer,
+    model_trainer: ModelTrainingService,
     optimization_steps: int,
     max_combos: int,
     cycle: int,
@@ -422,7 +421,7 @@ def run_hpo_cycles(
     optimization_steps: int | None,
     max_combos: int | None,
     training_loader: TrainingLoader | None,
-    model_trainer: ModelTrainer,
+    model_trainer: ModelTrainingService,
 ) -> list[HpoState]:
     """Run multiple HPO cycles. Each cycle runs optimization_steps steps
     over the top1..topN configs and breeds the next generation."""
@@ -469,7 +468,7 @@ class HpoRunner:
         optimization_steps: int | None,
         max_combos: int | None,
         training_loader: TrainingLoader | None,
-        model_trainer: ModelTrainer,
+        model_trainer: ModelTrainingService,
     ) -> list[HpoState]:
         if self._running:
             raise RuntimeError(

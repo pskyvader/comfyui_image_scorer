@@ -24,6 +24,9 @@ ALLOWED = {
 }
 COMPOSITION_ROOTS = {
     "adapters/server/main.py",
+    # ServerDeps is the server composition root's deps container and shares
+    # its roots' infrastructure type imports.
+    "adapters/server/deps.py",
     "adapters/cli/deps.py",
     "adapters/comfyui/services.py",
 }
@@ -86,8 +89,15 @@ def test_no_layer_violations():
             else:
                 level = rest[0]
                 base = pkg_parts[: len(pkg_parts) - (level - 1)] if level > 1 else pkg_parts
-                target = (base[0] if base else "")
-                if target in LAYERS and target not in allowed and layer != target:
+                # Relative imports stepping past the repo root resolve their
+                # layer from the module path's first segment.
+                target = base[0] if base else value.split(".")[0]
+                if (
+                    target in LAYERS
+                    and target not in allowed
+                    and layer != target
+                    and not (target == "infrastructure" and rel in COMPOSITION_ROOTS)
+                ):
                     violations.append(f"{rel}: {layer} imports {target} (relative)")
     assert not violations, f"layer violations:\n" + "\n".join(violations)
 
