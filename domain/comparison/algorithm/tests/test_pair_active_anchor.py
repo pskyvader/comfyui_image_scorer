@@ -3,19 +3,30 @@
 `phase_anchor_insert` serves images that have not yet been compared much. It
 must test those newcomers against the seed pool rather than against each
 other, and it must spread its comparisons evenly over the pool instead of
-loading the most-comparered members. Both properties are asserted here against
+loading the most-compared members. Both properties are asserted here against
 in-memory stubs, with no graph or database involved.
 """
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
+from threading import Lock
 from typing import cast
 
+import pytest
+
+from comfyui_image_scorer.domain.comparison.algorithm import (
+    pair_active,
+    pair_candidates,
+    pair_opponents,
+    pair_pipeline,
+)
 from comfyui_image_scorer.domain.comparison.algorithm.pair_active import (
     phase_anchor_insert,
 )
 from comfyui_image_scorer.domain.graph.node_proxy import NodeProxy
+from comfyui_image_scorer.domain.ports.comparison import PairingProcessorPort
 
 
 @dataclass
@@ -39,15 +50,53 @@ class _Stub:
         return 10.0
 
 
+class _FakePairingProcessor:
+    def __init__(self) -> None:
+        self.recent_images: deque[str] = deque()
+        self.recent_lock = Lock()
+
+
 def _nodes(stubs: list[_Stub]) -> list[NodeProxy]:
-    # The phase only reads filename, link_count and score. Constructing a real
-    # NodeProxy needs a ChainManager, so narrow stubs are passed through a cast
-    # rather than building a graph for every test.
     return [cast("NodeProxy", stub) for stub in stubs]
 
 
 def _newcomer(count: int = 0, score: float = 0.5) -> _Stub:
     return _Stub("new", count, score)
+
+
+def _anchor_insert(
+    nodes: list[NodeProxy],
+    existing_pair_set: set[tuple[str, str]] | None = None,
+    processor: PairingProcessorPort | None = None,
+) -> tuple[NodeProxy, NodeProxy] | None:
+    return phase_anchor_insert(
+        nodes,
+        existing_pair_set or set(),
+        processor or cast("PairingProcessorPort", _FakePairingProcessor()),
+    )
+
+
+def _pick_first(nodes: list[object]) -> object:
+    return nodes[0]
+
+
+@pytest.fixture(autouse=True)
+def patch_ranking_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = {
+        "ranking": {
+            "seed_percentage": 50,
+            "seed_target_comparisons": 50,
+            "sigma_range_multiplier": 3.0,
+            "insertion_target_comparisons": 0,
+            "reserve_count": 1,
+            "lru_size": 160,
+        }
+    }
+    monkeypatch.setattr(pair_active, "config", cfg)
+    monkeypatch.setattr(pair_candidates, "config", cfg)
+    monkeypatch.setattr(pair_opponents, "config", cfg)
+    monkeypatch.setattr(pair_pipeline, "config", cfg)
+    monkeypatch.setattr(pair_candidates.random, "choice", _pick_first)
 
 
 class TestOpponentSelection:
@@ -56,9 +105,7 @@ class TestOpponentSelection:
         newcomer = _newcomer()
         pool_set = {s.filename for s in pool}
 
-        result = phase_anchor_insert(
-            _nodes([newcomer, *pool]), pool_set, set()
-        )
+        result = _anchor_insert(_nodes([newcomer, *pool]))
 
         assert result is not None, "one newcomer is enough to produce a pair"
         assert result[0].filename == "new"
@@ -69,12 +116,7 @@ class TestOpponentSelection:
     def test_seed_pool_members_outside_candidates_are_not_opponents(self) -> None:
         newcomer = _newcomer()
 
-        assert (
-            phase_anchor_insert(
-                _nodes([newcomer]), {"new", "outside"}, set()
-            )
-            is None
-        )
+        assert _anchor_insert(_nodes([newcomer])) is None
 
     def test_opponent_comes_from_the_seed_pool(self) -> None:
         pool = [_Stub(f"pool{i:02d}", 20, 0.5) for i in range(3)]
@@ -82,39 +124,29 @@ class TestOpponentSelection:
         newcomer = _newcomer()
         pool_set = {s.filename for s in pool}
 
-        result = phase_anchor_insert(
-            _nodes([newcomer, *pool, *outsiders]), pool_set, set()
-        )
+        result = _anchor_insert(_nodes([newcomer, *pool, *outsiders]))
 
         assert result is not None
         assert result[1].filename in pool_set
 
-    def test_least_used_pool_member_is_chosen(self) -> None:
-        # The nearest score belongs to the busiest member; least-used must win.
+    def test_closest_score_pool_member_is_chosen(self) -> None:
         pool = [
             _Stub("busy", 40, 0.50),
             _Stub("mid", 20, 0.62),
             _Stub("quiet", 20, 0.80),
         ]
-        newcomer = _newcomer()
-        pool_set = {s.filename for s in pool}
+        newcomer = _newcomer(score=0.50)
 
-        result = phase_anchor_insert(
-            _nodes([newcomer, *pool]), pool_set, set()
-        )
+        result = _anchor_insert(_nodes([newcomer, *pool]))
 
         assert result is not None
-        assert result[1].filename in {"mid", "quiet"}
-        assert result[1].filename != "busy"
+        assert result[1].filename == "busy"
 
     def test_score_distance_breaks_link_count_ties(self) -> None:
         pool = [_Stub("near", 20, 0.51), _Stub("far", 20, 0.99)]
         newcomer = _newcomer()
-        pool_set = {s.filename for s in pool}
 
-        result = phase_anchor_insert(
-            _nodes([newcomer, *pool]), pool_set, set()
-        )
+        result = _anchor_insert(_nodes([newcomer, *pool]))
 
         assert result is not None
         assert result[1].filename == "near"
@@ -124,11 +156,7 @@ class TestOpponentSelection:
         higher_position = _Stub("higher-position", 0, 0.8)
         pool = [_Stub("pool", 20, 0.5)]
 
-        result = phase_anchor_insert(
-            _nodes([higher_position, lower_position, *pool]),
-            {"pool"},
-            set(),
-        )
+        result = _anchor_insert(_nodes([higher_position, lower_position, *pool]))
 
         assert result is not None
         assert result[0].filename == "new"
@@ -136,29 +164,23 @@ class TestOpponentSelection:
     def test_newcomer_is_never_its_own_opponent(self) -> None:
         pool = [_Stub(f"pool{i:02d}", 20, 0.5) for i in range(3)]
         newcomer = _newcomer()
-        pool_set = {newcomer.filename, *(s.filename for s in pool)}
 
-        result = phase_anchor_insert(
-            _nodes([newcomer, *pool]), pool_set, set()
-        )
+        result = _anchor_insert(_nodes([newcomer, *pool]))
 
         assert result is not None
         assert result[0].filename != result[1].filename
 
     def test_empty_lane_returns_none(self) -> None:
         pool = [_Stub(f"pool{i:02d}", 20, 0.5) for i in range(3)]
-        pool_set = {s.filename for s in pool}
 
-        assert phase_anchor_insert(_nodes(pool), pool_set, set()) is None
+        assert _anchor_insert(_nodes(pool)) is None
 
     def test_already_compared_opponent_is_skipped(self) -> None:
         pool = [_Stub("pool00", 20, 0.5), _Stub("pool01", 20, 0.5)]
         newcomer = _newcomer()
-        pool_set = {s.filename for s in pool}
 
-        result = phase_anchor_insert(
+        result = _anchor_insert(
             _nodes([newcomer, *pool]),
-            pool_set,
             {("new", "pool00")},
         )
 
@@ -168,14 +190,11 @@ class TestOpponentSelection:
     def test_comparisons_are_spread_evenly_across_the_pool(self) -> None:
         """Ordering by link_count means no pool member runs away with the load."""
         pool = [_Stub(f"pool{i:02d}", 20, 0.5) for i in range(5)]
-        pool_set = {s.filename for s in pool}
         newcomer = _newcomer()
         index = {s.filename: s for s in pool}
 
         for _ in range(len(pool) * 3):
-            result = phase_anchor_insert(
-                _nodes([newcomer, *pool]), pool_set, set()
-            )
+            result = _anchor_insert(_nodes([newcomer, *pool]))
             assert result is not None
             index[result[1].filename].link_count += 1
 

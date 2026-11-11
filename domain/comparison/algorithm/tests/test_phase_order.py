@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
+from threading import Lock
 from typing import cast
 
 import pytest
@@ -10,6 +12,7 @@ import pytest
 from comfyui_image_scorer.domain.comparison.algorithm import phase_order
 from comfyui_image_scorer.domain.graph.link_proxy import LinkProxy
 from comfyui_image_scorer.domain.graph.node_proxy import NodeProxy
+from comfyui_image_scorer.domain.ports.comparison import PairingProcessorPort
 from comfyui_image_scorer.domain.ports.graph import CrystalGraphPort
 from comfyui_image_scorer.domain.ports.repository import ImageRow
 
@@ -17,6 +20,12 @@ from comfyui_image_scorer.domain.ports.repository import ImageRow
 @dataclass(eq=False)
 class _Node:
     filename: str
+
+
+class _FakePairingProcessor:
+    def __init__(self) -> None:
+        self.recent_images: deque[str] = deque()
+        self.recent_lock = Lock()
 
 
 class _Graph:
@@ -71,34 +80,28 @@ def test_phase_metadata_names_do_not_store_function_references() -> None:
     assert [phase["name"] for phase in phases] == [
         "seed",
         "anchor",
-        "branch_probe",
         "collapsible",
         "single_win_loss",
         "chain_middle",
         "refine",
-        "chain_merge",
         "fallback",
     ]
     assert [phase["phase_label"] for phase in phases] == [
         "Phase 1 / Bootstrap Seed",
         "Phase 2 / Anchor Insert",
-        "Phase 3 / Branch Probe (Test)",
         "Phase 4 / Collapsible",
         "Phase 5 / Single Win-Loss",
         "Phase 6 / Chain Middle",
         "Phase 7 / Uncertainty Refine",
-        "Phase 8 / Chain Merge",
         "Fallback",
     ]
     assert [phase["color"] for phase in phases] == [
         "#f87171",
         "#fb923c",
-        "#facc15",
         "#4ade80",
         "#22d3ee",
         "#60a5fa",
         "#818cf8",
-        "#a78bfa",
         "#9ca3af",
     ]
     assert all(not callable(value) for phase in phases for value in phase.values())
@@ -116,7 +119,9 @@ def test_early_collapsible_pair_skips_pair_history_and_seed_setup(
     monkeypatch.setattr(phase_order.random, "shuffle", _keep_order)
 
     def select_collapsible(
-        candidates: list[NodeProxy], _cg: CrystalGraphPort
+        candidates: list[NodeProxy],
+        _cg: CrystalGraphPort,
+        _pairing_processor: PairingProcessorPort,
     ) -> tuple[NodeProxy, NodeProxy]:
         return candidates[0], candidates[1]
 
@@ -131,7 +136,10 @@ def test_early_collapsible_pair_skips_pair_history_and_seed_setup(
     monkeypatch.setattr(phase_order, "stable_seed_pool", unexpected_seed_pool)
 
     pair, phase_index = phase_order.select_pair(
-        _image_rows(), _image_rows(), cast("CrystalGraphPort", graph)
+        _image_rows(),
+        _image_rows(),
+        cast("CrystalGraphPort", graph),
+        cast("PairingProcessorPort", _FakePairingProcessor()),
     )
 
     assert pair is not None
@@ -168,11 +176,10 @@ def test_seed_and_anchor_reuse_lazily_prepared_objects(
 
     def anchor_phase(
         candidates: list[NodeProxy],
-        seed_pool_set: set[str],
         existing_pairs: set[tuple[str, str]],
+        _pairing_processor: PairingProcessorPort,
     ) -> tuple[NodeProxy, NodeProxy]:
         assert candidates == nodes
-        assert seed_pool_set == {"a", "b"}
         assert existing_pairs == set()
         return candidates[0], candidates[1]
 
@@ -190,7 +197,10 @@ def test_seed_and_anchor_reuse_lazily_prepared_objects(
     monkeypatch.setattr(phase_order, "phase_anchor_insert", anchor_phase)
 
     pair, phase_index = phase_order.select_pair(
-        _image_rows(), _image_rows(), cast("CrystalGraphPort", graph)
+        _image_rows(),
+        _image_rows(),
+        cast("CrystalGraphPort", graph),
+        cast("PairingProcessorPort", _FakePairingProcessor()),
     )
 
     assert pair is not None
@@ -211,17 +221,19 @@ def test_branch_probe_runs_immediately_after_anchor_insert(
     ]
     graph = _Graph(nodes)
     calls: list[str] = []
+    def _return_nodes(_nodes: list[NodeProxy]) -> list[NodeProxy]:
+        return nodes
     monkeypatch.setattr(phase_order, "config", {"ranking": {"reserve_count": 2}})
     monkeypatch.setattr(phase_order.random, "shuffle", _keep_order)
-    monkeypatch.setattr(phase_order, "stable_seed_pool", lambda _nodes: nodes)
+    monkeypatch.setattr(phase_order, "stable_seed_pool", _return_nodes)
     monkeypatch.setattr(
         phase_order, "PHASES", ({"name": "anchor"}, {"name": "branch_probe"})
     )
 
     def anchor_phase(
         _candidates: list[NodeProxy],
-        _seed_pool_set: set[str],
         _existing_pairs: set[tuple[str, str]],
+        _pairing_processor: PairingProcessorPort,
     ) -> None:
         calls.append("anchor")
         return None
@@ -239,7 +251,10 @@ def test_branch_probe_runs_immediately_after_anchor_insert(
     monkeypatch.setattr(phase_order, "phase_branch_probe", branch_probe_phase)
 
     pair, phase_index = phase_order.select_pair(
-        _image_rows(), _image_rows(), cast("CrystalGraphPort", graph)
+        _image_rows(),
+        _image_rows(),
+        cast("CrystalGraphPort", graph),
+        cast("PairingProcessorPort", _FakePairingProcessor()),
     )
 
     assert pair == ("a", "b")

@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import ast
+from collections import deque
 import inspect
 from dataclasses import dataclass
+from threading import Lock
 from typing import cast
 
 import pytest
 
-from comfyui_image_scorer.domain.comparison.algorithm import pair_active
+from comfyui_image_scorer.domain.comparison.algorithm import (
+    pair_active,
+    pair_candidates,
+    pair_opponents,
+    pair_pipeline,
+)
+from comfyui_image_scorer.domain.comparison.algorithm.history_collapse import (
+    canonicalize_pair,
+)
 from comfyui_image_scorer.domain.graph.node_proxy import NodeProxy
+from comfyui_image_scorer.domain.ports.comparison import PairingProcessorPort
 from comfyui_image_scorer.domain.ports.graph import CrystalGraphPort
 
 
@@ -125,6 +136,16 @@ class _Graph:
         )
 
 
+class _FakePairingProcessor:
+    def __init__(self) -> None:
+        self.recent_images: deque[str] = deque()
+        self.recent_lock = Lock()
+
+
+def _processor() -> PairingProcessorPort:
+    return cast("PairingProcessorPort", _FakePairingProcessor())
+
+
 def _nodes(*values: tuple[str, int]) -> list[NodeProxy]:
     return [
         cast("NodeProxy", _Node(filename, link_count))
@@ -178,7 +199,7 @@ def _branch_chain_fixture(prefix: str = "") -> tuple[
     )
 
 
-def _config():
+def _config() -> dict[str, dict[str, object]]:
     return {
         "ranking": {
             "seed_percentage": 50,
@@ -186,16 +207,27 @@ def _config():
             "sigma_range_multiplier": 3.0,
             "insertion_target_comparisons": 0,
             "reserve_count": 1,
+            "lru_size": 160,
             "minimum_chains_for_pairing": 2,
             "chain_middle_min_chain_length": 10,
         }
     }
 
 
-def test_seed_coverage_skips_when_ready_pool_reaches_target(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(pair_active, "config", _config())
+def _pick_first_node(nodes: list[NodeProxy]) -> NodeProxy:
+    return nodes[0]
+
+
+@pytest.fixture(autouse=True)
+def patch_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = _config()
+    monkeypatch.setattr(pair_active, "config", cfg)
+    monkeypatch.setattr(pair_candidates, "config", cfg)
+    monkeypatch.setattr(pair_opponents, "config", cfg)
+    monkeypatch.setattr(pair_pipeline, "config", cfg)
+
+
+def test_seed_coverage_skips_when_ready_pool_reaches_target() -> None:
     seed_pool = _nodes(
         ("ready-a", 5),
         ("ready-b", 6),
@@ -210,7 +242,7 @@ def test_seed_coverage_skips_when_ready_pool_reaches_target(
 def test_seed_coverage_selects_anchor_from_candidate_nodes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pair_active, "config", _config())
+    monkeypatch.setattr(pair_active.random, "choice", _pick_first_node)
     candidates = _nodes(("most-ready", 4), ("less-ready", 2), ("over-target", 6))
 
     result = pair_active.phase_seed_coverage(candidates, set(), [], 10)
@@ -221,13 +253,13 @@ def test_seed_coverage_selects_anchor_from_candidate_nodes(
 def test_single_win_loss_candidate_lanes_yield_on_demand(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pair_active, "config", _config())
+    monkeypatch.setattr(pair_active.random, "choice", _pick_first_node)
     candidates = [
         cast("NodeProxy", _CountingNode("first", 1)),
         cast("NodeProxy", _CountingNode("second", 1)),
     ]
 
-    result = pair_active.phase_single_win_loss(candidates, set())
+    result = pair_active.phase_single_win_loss(candidates, set(), _processor())
 
     assert result == (candidates[0], candidates[1])
     assert [cast("_CountingNode", node).link_queries for node in candidates] == [
@@ -239,18 +271,15 @@ def test_single_win_loss_candidate_lanes_yield_on_demand(
 def test_single_win_loss_keeps_pair_members_in_candidate_nodes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pair_active, "config", _config())
+    monkeypatch.setattr(pair_active.random, "choice", _pick_first_node)
     candidates = _nodes(("anchor", 5), ("opponent", 6))
 
-    result = pair_active.phase_single_win_loss(candidates, set())
+    result = pair_active.phase_single_win_loss(candidates, set(), _processor())
 
     assert result == (candidates[0], candidates[1])
 
 
-def test_chain_merge_selects_only_candidate_nodes_and_updates_recent_chains(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(pair_active, "config", _config())
+def test_chain_merge_selects_only_candidate_nodes_and_updates_recent_chains() -> None:
     candidates = [
         cast("NodeProxy", _Node("a0", 2, score=0.0)),
         cast("NodeProxy", _Node("a1", 2, score=0.1)),
@@ -272,12 +301,12 @@ def test_chain_merge_selects_only_candidate_nodes_and_updates_recent_chains(
 def test_collapsible_pairs_select_only_candidate_nodes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pair_active, "config", _config())
     candidates = _nodes(("least-compared", 1), ("other", 2))
     graph = _Graph([_Chain([node]) for node in candidates])
+    monkeypatch.setattr(pair_active.random, "choice", _pick_first_node)
 
     result = pair_active.phase_collapsible_pairs(
-        candidates, cast("CrystalGraphPort", graph)
+        candidates, cast("CrystalGraphPort", graph), _processor()
     )
 
     assert result == (candidates[0], candidates[1])
@@ -286,52 +315,25 @@ def test_collapsible_pairs_select_only_candidate_nodes(
 def test_chain_middle_filters_pairs_after_candidate_formation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pair_active, "config", _config())
     anchor, _, _, opponent, _, _, anchor_chain, branch_chain = (
         _branch_chain_fixture()
     )
     candidates = [anchor, opponent]
     graph = _Graph([anchor_chain, branch_chain])
+    def _pick_anchor(_nodes: list[NodeProxy]) -> NodeProxy:
+        return anchor
+    monkeypatch.setattr(pair_active.random, "choice", _pick_anchor)
 
     result = pair_active.phase_chain_middle(
-        candidates, set(), cast("CrystalGraphPort", graph)
+        candidates, set(), cast("CrystalGraphPort", graph), _processor()
     )
 
     assert result == (anchor, opponent)
 
 
-def test_branch_chain_compatible_nodes_use_candidates_below_upper_node() -> None:
-    anchor, upper, above, first_below, second_below, third_below, _, _ = (
-        _branch_chain_fixture()
-    )
-    candidates = [
-        above,
-        upper,
-        anchor,
-        first_below,
-        second_below,
-        third_below,
-    ]
-
-    compatible_nodes = pair_active._get_branch_chain_compatible_nodes(
-        candidates, anchor
-    )
-
-    assert compatible_nodes is not None
-    assert compatible_nodes == [first_below, second_below, third_below]
-    assert all(node in candidates for node in compatible_nodes)
-
-
-def test_compatible_node_selector_returns_none_when_no_opponents_exist() -> None:
-    anchor = cast("NodeProxy", _Node("anchor", 1))
-
-    assert pair_active._get_compatible_nodes([anchor], anchor) is None
-
-
 def test_branch_probe_filters_then_selects_closest_score_pair(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pair_active, "config", _config())
     first = _branch_chain_fixture()
     second = _branch_chain_fixture("other-")
     candidate_nodes = [
@@ -339,50 +341,16 @@ def test_branch_probe_filters_then_selects_closest_score_pair(
         *second[:6],
     ]
     node_a = first[0]
-    monkeypatch.setattr(pair_active.random, "choice", lambda _nodes: node_a)
+    def _pick_node_a(_nodes: list[NodeProxy]) -> NodeProxy:
+        return node_a
+    monkeypatch.setattr(pair_active.random, "choice", _pick_node_a)
     existing_pair_set = {
-        pair_active.canonicalize_pair(node_a.filename, first[3].filename)
+        canonicalize_pair(node_a.filename, first[3].filename)
     }
 
     result = pair_active.phase_branch_probe(candidate_nodes, existing_pair_set)
 
     assert result == (node_a, first[4])
-
-
-def test_branch_chain_compatible_nodes_return_empty_without_upper_node() -> None:
-    anchor = cast("NodeProxy", _Node("anchor", 1))
-    anchor_chain = _Chain([anchor], id=1)
-    cast("_Node", anchor).chain = anchor_chain
-
-    compatible_nodes = pair_active._get_branch_chain_compatible_nodes(
-        [anchor], anchor
-    )
-
-    assert compatible_nodes is None
-
-
-def test_branch_chain_compatible_nodes_return_empty_without_distinct_branch() -> None:
-    upper = cast("NodeProxy", _Node("upper", 1))
-    anchor = cast("NodeProxy", _Node("anchor", 2))
-    anchor_chain = _Chain([upper, anchor], id=1)
-    cast("_Node", upper).chain = anchor_chain
-    cast("_Node", anchor).chain = anchor_chain
-
-    compatible_nodes = pair_active._get_branch_chain_compatible_nodes(
-        [anchor, upper], anchor
-    )
-
-    assert compatible_nodes is None
-
-
-def test_branch_chain_compatible_nodes_return_empty_without_candidate_matches() -> None:
-    anchor, upper, above, _, _, _, _, _ = _branch_chain_fixture()
-
-    compatible_nodes = pair_active._get_branch_chain_compatible_nodes(
-        [anchor, upper, above], anchor
-    )
-
-    assert compatible_nodes is None
 
 
 def test_phase_pipeline_uses_data_arguments_instead_of_rule_callbacks() -> None:
@@ -394,9 +362,8 @@ def test_phase_pipeline_uses_data_arguments_instead_of_rule_callbacks() -> None:
     }
     phase_names = [name for name in functions if name.startswith("phase_")]
     stage_helpers = {
-        "_find_candidate_node",
-        "_get_compatible_nodes",
-        "_form_candidate_pairs",
+        "get_compatible_nodes",
+        "form_candidate_pairs",
     }
 
     for phase_name in phase_names:
@@ -448,6 +415,11 @@ def test_each_phase_logs_selected_pair_before_returning() -> None:
         "f'selected pair: {result[0].filename}({result[0].link_count}) vs "
         "{result[1].filename}({result[1].link_count})'"
     )
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+    }
     phases = [
         node
         for node in tree.body
@@ -459,17 +431,24 @@ def test_each_phase_logs_selected_pair_before_returning() -> None:
         assert isinstance(log_statement, ast.Expr)
         assert isinstance(log_statement.value, ast.Call)
         call = log_statement.value
-        assert isinstance(call.func, ast.Attribute)
-        assert isinstance(call.func.value, ast.Name)
-        assert call.func.value.id == "logger"
-        assert call.func.attr == "debug"
-        assert ast.unparse(call.args[0]) == expected_message
-        assert [(keyword.arg, ast.unparse(keyword.value)) for keyword in call.keywords] == [
-            ("start_timer", "_start")
-        ]
+        assert isinstance(call.func, ast.Name)
+        assert call.func.id == "_log_selected_pair"
+        assert [ast.unparse(arg) for arg in call.args] == ["result", "_start"]
         assert isinstance(return_statement, ast.Return)
         assert isinstance(return_statement.value, ast.Name)
         assert return_statement.value.id == "result"
+
+    log_func = functions["_log_selected_pair"]
+    log_stmt = log_func.body[1]
+    assert isinstance(log_stmt, ast.Expr)
+    log_call = log_stmt.value
+    assert isinstance(log_call, ast.Call)
+    assert isinstance(log_call.func, ast.Attribute)
+    assert log_call.func.attr == "debug"
+    assert ast.unparse(log_call.args[0]) == expected_message
+    assert [(keyword.arg, ast.unparse(keyword.value)) for keyword in log_call.keywords] == [
+        ("start_timer", "_start")
+    ]
 
 
 def test_phases_do_not_emit_temporary_step_timing_logs() -> None:

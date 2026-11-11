@@ -11,17 +11,52 @@ reference pool. Two properties matter and are asserted here:
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
+from threading import Lock
 from typing import cast
 
+import pytest
+
+from comfyui_image_scorer.domain.comparison.algorithm import (
+    pair_active,
+    pair_candidates,
+    pair_opponents,
+    pair_pipeline,
+)
 from comfyui_image_scorer.domain.comparison.algorithm.pair_active import (
     phase_uncertainty_refine,
 )
+from comfyui_image_scorer.domain.ports.comparison import PairingProcessorPort
 from comfyui_image_scorer.domain.ports.graph import CrystalGraphPort
 from comfyui_image_scorer.domain.graph.node_proxy import NodeProxy
 
 SIGMA_THRESHOLD = 3.5
 INSERTION_TARGET = 3
+
+
+def _pick_first(nodes: list[object]) -> object:
+    return nodes[0]
+
+
+@pytest.fixture(autouse=True)
+def patch_ranking_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = {
+        "ranking": {
+            "seed_percentage": 50,
+            "seed_target_comparisons": 5,
+            "sigma_range_multiplier": 3.0,
+            "insertion_target_comparisons": INSERTION_TARGET,
+            "reserve_count": 1,
+            "lru_size": 160,
+            "sigma_threshold": SIGMA_THRESHOLD,
+        }
+    }
+    monkeypatch.setattr(pair_active, "config", cfg)
+    monkeypatch.setattr(pair_candidates, "config", cfg)
+    monkeypatch.setattr(pair_opponents, "config", cfg)
+    monkeypatch.setattr(pair_pipeline, "config", cfg)
+    monkeypatch.setattr(pair_candidates.random, "choice", _pick_first)
 
 
 @dataclass
@@ -58,6 +93,12 @@ def _nodes(stubs: list[_Stub]) -> list[NodeProxy]:
     return [cast("NodeProxy", stub) for stub in stubs]
 
 
+class _FakePairingProcessor:
+    def __init__(self) -> None:
+        self.recent_images: deque[str] = deque()
+        self.recent_lock = Lock()
+
+
 def _graph(same: set[tuple[str, str]] | None = None) -> CrystalGraphPort:
     # The phase takes a full CrystalGraphPort but only calls are_in_same_path,
     # so a narrow stand-in is passed through a cast instead of a real graph.
@@ -70,7 +111,11 @@ def _refine(
     pairs: set[tuple[str, str]] | None = None,
 ):
     return phase_uncertainty_refine(
-        _nodes(stubs), pool, pairs or set(), _graph()
+        _nodes(stubs),
+        pool,
+        pairs or set(),
+        _graph(),
+        cast("PairingProcessorPort", _FakePairingProcessor()),
     )
 
 
@@ -111,8 +156,7 @@ class TestRefineOpponentSelection:
         assert result is not None
         assert result[0].filename == "target"
 
-    def test_least_compared_pool_member_is_chosen(self) -> None:
-        # The nearest score belongs to the busiest member; least-used must win.
+    def test_closest_score_pool_member_is_chosen(self) -> None:
         target = _Stub("target", 6, 4.0, mu=25.0)
         busy = _Stub("busy", 40, 2.0, mu=25.0)
         quiet = _Stub("quiet", 20, 2.0, mu=27.0)
@@ -121,8 +165,7 @@ class TestRefineOpponentSelection:
         result = _refine([target, busy, quiet], pool)
 
         assert result is not None
-        assert result[1].filename != "busy"
-        assert result[1].filename in pool
+        assert result[1].filename == "busy"
 
     def test_score_gap_breaks_link_count_ties(self) -> None:
         target = _Stub("target", 6, 4.0, mu=25.0)
@@ -145,6 +188,7 @@ class TestRefineOpponentSelection:
             {"blocked", "allowed"},
             set(),
             _graph({("target", "blocked")}),
+            cast("PairingProcessorPort", _FakePairingProcessor()),
         )
 
         assert result is not None
