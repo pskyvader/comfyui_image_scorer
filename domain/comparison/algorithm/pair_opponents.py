@@ -42,9 +42,9 @@ def get_seed_coverage_opponents(
 def get_anchor_insert_opponents(
     candidate_nodes: list[NodeProxy],
     node_a: NodeProxy,
+    seed_target_comparisons: int = int(config["ranking"]["seed_target_comparisons"]),
 ) -> list[NodeProxy] | None:
     """Select the most-compared <=seed_target_comparisons candidates other than the anchor."""
-    seed_target_comparisons: int = int(config["ranking"]["seed_target_comparisons"])
     seed_candidates: list[NodeProxy] = [
         node for node in candidate_nodes if node.link_count <= seed_target_comparisons
     ]

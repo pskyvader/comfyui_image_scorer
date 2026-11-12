@@ -71,7 +71,7 @@ are implementation details.
 | `application/services/pairing_processor.py` | `PairingProcessor.rebuild_database_from_ranked` | Rebuild flow; deduplication, orphan cleanup, metadata sync, and folder-cache control are delegated to `FilePort`. |
 | `application/services/pairing_processor.py` | `PairingProcessor.sync_ranked_files_from_database` | Sync database state into ranked companion JSON without changing the database; collects the ranked entries with an application-owned scan and delegates every read, write, and move to `FilePort`. |
 | `application/services/pairing_processor.py` | `PairingProcessor.sync_database_to_files` | Write one database row and its stored comparison history per collected ranked entry into companion JSON; the caller supplies the collected entries. |
-| `application/services/scoring_service.py` | `ScoringService` | Image scoring orchestration service. |
+| `application/services/scoring_service.py` | `ScoringService` | Image scoring orchestration service; applies the configured transforms in training order, in batch-size chunks, and guards the model against layout-width mismatch. |
 | `application/services/vector_list.py` | `VectorList` | Vector collection and derived-data service. |
 | `application/hyperparameters/hyperparameter_optimizer.py` | `HpoRunner` | Hyperparameter search runner. |
 | `adapters/comfyui/node_registry.py` | `NODE_CLASS_MAPPINGS` | Registered ComfyUI node classes. |
@@ -93,7 +93,7 @@ are implementation details.
 | `adapters/cli/commands/vectors.py` | `run_full_vectors` | Build full vectors and text data. |
 | `adapters/cli/commands/vectors.py` | `run_scores` | Build scores and comparisons. |
 | `adapters/cli/commands/vectors.py` | `run_all` | Run the full build pipeline. |
-| `adapters/cli/commands/training.py` | `train_model` | Train model from vectors and scores. |
+| `adapters/cli/commands/training.py` | `train_model` | Train model from vectors and scores with the configured transform flags, saving the layout width and rule fingerprint beside the model. |
 | `adapters/cli/commands/training.py` | `run_hpo` | Run hyperparameter optimization. |
 | `domain/comparison/constants.py` | `IMAGES_CACHE_TTL` | Image cache time-to-live constant. |
 | `domain/comparison/constants.py` | `MAX_PAIR_CANDIDATES` | Maximum pair candidates for ranking. |
@@ -234,7 +234,7 @@ are implementation details.
 | `domain/analysis/tests/__init__.py`, `domain/analysis/tests/test_derived_features.py` | Derived-feature tests: landmark geometry, the presence splits and their threshold, face geometry, attribute dominance, and prompt structure. |
 | `domain/training/tests/__init__.py`, `domain/training/tests/test_statistics.py`, `domain/training/tests/test_matrix_analysis.py`, `domain/training/tests/test_combination_search.py` | Statistical helper tests and the matrix record-export tests, plus the combination search tests: additive lift against a real interaction, beam width reproducing the greedy chain, duplicate suppression across beams, fold agreement on a known interaction, cross-validation reproducibility, and the permutation null inventing nothing from noise. |
 | `domain/data_transformation/__init__.py` | Transformation package marker. |
-| `domain/data_transformation/data_transformer.py` | Feature transformation pipeline. |
+| `domain/data_transformation/data_transformer.py` | Feature transformation pipeline: optional interaction expansion and gain-based feature filtering with width-validated cached rules and the composite rule fingerprint. |
 | `domain/comparison/__init__.py` | Comparison package marker. |
 | `domain/comparison/constants.py` | Comparison constants. |
 | `domain/comparison/comparison_recorder.py` | Comparison persistence and graph recording port consumer. |
@@ -260,7 +260,7 @@ are implementation details.
 | `domain/ports/comparison.py` | `PairingProcessorPort` | Full pairing-processor application protocol: processing state, batch processing, ranked-tree/database sync, and rebuild surface. |
 | `domain/ports/files.py` | Filesystem service protocol. |
 | `domain/ports/loading.py` | Model, map, batch, and training loader protocols, plus the callable vision, embedding, attribute, transform, and processor surfaces those loaders return. |
-| `domain/ports/loading.py` | `TrainingLoader` | Training-vector, model-artifact, and cached-rule loader protocol. |
+| `domain/ports/loading.py` | `TrainingLoader` | Training-vector, model-artifact, and cached-rule loader protocol; rule loads and saves are width-validated and memoize per-rule digests. |
 | `domain/ports/loading.py` | `ModelTrainingService` | Complete trainer surface mirrored from `ModelTrainer`: metric directions, verbosity, build/fit/evaluate methods, callbacks, and result properties for the feature-importance model. |
 | `domain/ports/loading.py` | `ScoringModel` | Loaded training model surface used for scoring and plotting. |
 | `domain/ports/graph.py` | CrystalGraph application port (Protocol); `add_comparisons_bulk` shares the single insert transaction per batch. |
@@ -273,12 +273,12 @@ are implementation details.
 | `application/services/__init__.py` | Application service exports. |
 | `application/services/vector_list.py` | Vector collection and derived-data service. |
 | `application/services/pairing_processor.py` | Ranked-image discovery, database rebuild, metadata sync, and rating replay. Ratings replay in stored link order so repeated rebuilds of unchanged files reproduce identical values. |
-| `application/services/scoring_service.py` | ComfyUI-facing scoring orchestration. |
+| `application/services/scoring_service.py` | ComfyUI-facing scoring orchestration; applies the configured transforms in training order in batch-size chunks and raises when the transformed width cannot match the model. |
 | `application/services/graph_service.py` | CrystalGraph facade over graph state and repositories. `get_graph_stats` returns the `GraphStructure` counts owned by `ChainManager`. `add_image`, `add_images_bulk`, and `rebuild_from_database` intentionally leave the in-memory node map to be replaced wholesale by the next rebuild; `update_image_rating_state` and `update_image_rating_states_bulk` require the filename to be present in that map and raise `KeyError` otherwise. |
 | `application/services/tests/test_pairing_processor.py` | PairingProcessor filesystem-boundary and rebuild behavior tests. |
 | `application/data_transform/__init__.py` | Application transformation package marker. |
 | `application/data_transform/prepare_data.py` | Training-data preparation orchestration. |
-| `application/hyperparameters/hyperparameter_optimizer.py` | Hyperparameter search orchestration. |
+| `application/hyperparameters/hyperparameter_optimizer.py` | Hyperparameter search orchestration; `load_training_data` applies the optional transforms (interactions, feature filter, comparison filter) in order and returns the data with its rule fingerprint. |
 | `application/hyperparameters/__init__.py` | Hyperparameter package marker. |
 | `application/analysis/__init__.py` | Application analysis package marker. |
 | `application/analysis/inputs.py` | `AnalysisInputs` and `collect_analysis_inputs`. Gathers the filename-keyed scores from the training loader and the prompt tags from the ranked database for both analyzers. Deliberately does not read `vectors.jsonl`, which holds embeddings and no score. |
@@ -416,7 +416,7 @@ are implementation details.
 | `infrastructure/ml_models/training/model_trainer.py` | Model training execution. |
 | `infrastructure/loading/maps_loader.py` | Map configuration and value loading. |
 | `infrastructure/loading/__init__.py` | Loading package exports. |
-| `infrastructure/loading/training_loader.py` | Training-vector and model artifact loading. |
+| `infrastructure/loading/training_loader.py` | Training-vector and model artifact loading, including width-validated transform rules and their digests. |
 | `infrastructure/cache/__init__.py` | Cache package exports. |
 | `infrastructure/cache/memory_cache.py` | In-memory TTL cache implementation. |
 

@@ -1,4 +1,5 @@
 from __future__ import annotations
+import hashlib
 import os
 import json
 from collections.abc import Callable
@@ -171,11 +172,18 @@ class DataTransformer:
         Trains a fast LightGBM model on the keyed vectors/scores to identify and
         remove features with zero importance and low cumulative gain. Returns
         only the kept column indices (the feature mask). Caches the mask as
-        feature_rule.npz. No sorting or alignment is performed here; the keyed
-        inputs are already consistent.
-        """
+        feature_rule.npz alongside the layout width it was built for. No
+        sorting or alignment is performed here; the keyed inputs are already
+        consistent.
 
-        rule_cached = self.training_loader.load_feature_rule()
+        The filter runs over non-zero-importance features: zero-contribution
+        features are always dropped while the filter is enabled, and the
+        keep-proportion prune applies to the survivors. Skipping the filter
+        entirely is the only way to keep zero-contribution features.
+        """
+        n_features_in = next(iter(vectors_keyed.values())).shape[0]
+
+        rule_cached = self.training_loader.load_feature_rule(n_features_in)
         if rule_cached is not None:
             return rule_cached
 
@@ -246,12 +254,12 @@ class DataTransformer:
         sorted_indices = nonzero_indices[sorted_idx]
 
         cumulative = np.cumsum(sorted_importances)
-        gain_threshold = float(config["training"]["feature_gain_threshold"])
+        keep_proportion = float(config["training"]["rule_keep_proportion"])
         keep_mask = np.ones(sorted_indices.shape[0], dtype=bool)
         if cumulative.size:
             cumulative = cumulative / cumulative[-1]  # normalize to 1
-            # Keep features until cumulative gain reaches threshold
-            keep_mask = cumulative <= gain_threshold
+            # Keep features until cumulative gain reaches the proportion
+            keep_mask = cumulative <= keep_proportion
             # Always keep at least one feature
             if not np.any(keep_mask):
                 keep_mask[0] = True
@@ -265,7 +273,7 @@ class DataTransformer:
         kept_indices = sorted_indices[keep_mask]
 
         # Cache only the mask (kept column indices); the caller applies it.
-        self.training_loader.save_feature_rule(kept_indices)
+        self.training_loader.save_feature_rule(kept_indices, n_features_in)
         logger.debug("Saved feature rule to cache")
 
         return kept_indices
@@ -314,8 +322,8 @@ class DataTransformer:
         return accumulators
 
     def compute_correlations(
-        self, k: int, accumulators: InteractionStats, n_samples: int, dtype: np.dtype
-    ) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.intp]]:
+        self, k: int, accumulators: InteractionStats
+    ) -> npt.NDArray[np.intp]:
         n = accumulators["n"]
         # Compute Correlations (Pearson)
         numerator = (n * accumulators["sum_xy"]) - (
@@ -333,81 +341,21 @@ class DataTransformer:
         f_scores = np.nan_to_num(f_scores, nan=0.0)
 
         top_k_indices_local = np.argsort(f_scores)[-k:]
-        top_k_indices_local = np.sort(top_k_indices_local)
-        # Pass 2: Build
-        X_interactions: npt.NDArray[np.float32] = np.zeros((n_samples, k), dtype=dtype)
-        return X_interactions, top_k_indices_local
+        return np.sort(top_k_indices_local)
 
-    def build_interaction_batch(
-        self,
-        X_batch: npt.NDArray[np.float32],
-        top_k_indices_local: npt.NDArray[np.intp],
-        n_features_in: int,
-    ) -> npt.NDArray[np.float32]:
-        """Build interaction feature batch from top-K indices.
-
-        Selects the top-K interaction features from the polynomial expansion
-        and returns them as a concatenated array.
-
-        Args:
-            X_batch: input feature batch of shape ``(batch_size, n_features_in)``
-            top_k_indices_local: indices of the top-K interaction features
-            n_features_in: number of original features (before polynomial expansion)
-
-        Returns:
-            Array of shape ``(batch_size, n_features_in + k)`` with original
-            and selected interaction features concatenated.
-        """
-        X_poly_full: npt.NDArray[np.float32] = np.asarray(
-            self.poly.fit_transform(X_batch), dtype=np.float32
-        )
-        current_interactions = X_poly_full[:, n_features_in:][:, top_k_indices_local]
-        del X_poly_full
-        gc.collect()
-        return current_interactions
-
-    def add_interaction_features(
+    def _scan_interactions(
         self,
         x: npt.NDArray[np.float32],
         y: npt.NDArray[np.float32],
-        target_k: int = 500,
-    ) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.intp]]:
-        """
-        Generates and selects top K interaction features (x*y) using batched processing
-        to avoid OOM. Concatenates them to X.
-        Returns (X_final, selected_interaction_indices)
-        Handles its own caching via 'interaction_data_cache.npz'.
-        """
-
-        interaction_data_cached = self.training_loader.load_interaction_data()
-        if interaction_data_cached:
-            return interaction_data_cached
-
-        n_features_in = x.shape[1]
+        n_features_in: int,
+        n_interactions: int,
+        target_k: int,
+    ) -> npt.NDArray[np.intp]:
+        """Two-pass correlation scan over the raw matrix, returning the local
+        indices of the top-K pairwise products (pass 1 stats, pass 2 selection;
+        the products themselves are rebuilt on demand from the indices)."""
         n_samples = x.shape[0]
-
-        # Basic sizing check before proceeding
-        # n*(n-1)/2 interactions
-
-        # We only care about columns [n_features_in : ] from the poly expansion
-        # Calculate number of interactions
-        n_interactions = (n_features_in * (n_features_in - 1)) // 2
-
-        if n_interactions == 0:
-            return x, np.array([], dtype=np.intp)
-
-        # Batch Size Calculation (Target 1GB)
-        BATCH_MEMORY_TARGET = 8 * 1024**3
-        # Approx full poly width for memory calc
-        n_features_total = n_features_in + n_interactions
-        bytes_per_row = n_features_total * 8
-        batch_size = int(BATCH_MEMORY_TARGET / bytes_per_row)
-        if batch_size < 1:
-            batch_size = 1
-        if batch_size > 5000:
-            batch_size = 5000
-
-        # Accumulators for correlation calculation
+        batch_size = _interaction_batch_size(n_features_in)
 
         accumulators: InteractionStats = {
             "sum_x": np.zeros(n_interactions),
@@ -422,7 +370,6 @@ class DataTransformer:
             f"Scanning {n_interactions} potential interactions in batches of {batch_size}..."
         )
 
-        # Pass 1: Stats
         with tqdm(
             total=n_samples, desc="Computing Correlations", unit="samples", delay=3.0
         ) as pbar:
@@ -435,81 +382,121 @@ class DataTransformer:
                 )
                 pbar.update(len(X_batch))
 
-        # Select Top K
         k = min(target_k, n_interactions)
+        return self.compute_correlations(k, accumulators)
 
-        x_interactions, top_k_indices_local = self.compute_correlations(
-            k, accumulators, n_samples, x.dtype
-        )
+    def create_interaction_rule(
+        self,
+        vectors_keyed: dict[str, npt.NDArray[np.float32]],
+        scores_keyed: dict[str, float],
+        target_k: int,
+    ) -> dict[str, npt.NDArray[np.float32]]:
+        """Extend every keyed vector with its selected interaction products.
 
-        with tqdm(
-            total=n_samples,
-            desc="Building Interaction Matrix",
-            unit="samples",
-            delay=3.0,
-        ) as pbar:
-            for i in range(0, n_samples, batch_size):
-                end_idx = min(i + batch_size, n_samples)
-                X_batch = x[i:end_idx]
-                current_interactions = self.build_interaction_batch(
-                    X_batch, top_k_indices_local, n_features_in
+        Loads the interaction rule for the raw layout width, rebuilding it by a
+        two-pass correlation scan over the current data when missing, then
+        appends the selected pairwise products to each keyed vector. The rule
+        stores only the local interaction-column indices, so extending is
+        order-safe regardless of which files exist.
+        """
+        n_features_in = next(iter(vectors_keyed.values())).shape[0]
+        indices = self.training_loader.load_interaction_rule(n_features_in)
+        if indices is None:
+            n_interactions = (n_features_in * (n_features_in - 1)) // 2
+            if n_interactions == 0:
+                indices = np.array([], dtype=np.intp)
+            else:
+                order = [fid for fid in scores_keyed if fid in vectors_keyed]
+                x = np.array([vectors_keyed[fid] for fid in order], dtype=np.float32)
+                y = np.array([scores_keyed[fid] for fid in order], dtype=np.float32)
+                indices = self._scan_interactions(
+                    x, y, n_features_in, n_interactions, target_k
                 )
+            self.training_loader.save_interaction_rule(indices, n_features_in)
+            logger.debug("Saved interaction rule to cache")
 
-                x_interactions[i:end_idx] = current_interactions
-
-                pbar.update(len(X_batch))
-
-        X_final = np.hstack([x, x_interactions])
-
-        # --- Save Cache ---
-        interaction_data = self.training_loader.save_interaction_data(
-            X_final, top_k_indices_local
-        )
-        logger.debug(f"Saved interaction data to cache")
-
-        return interaction_data
+        extended: dict[str, npt.NDArray[np.float32]] = {}
+        fids = list(vectors_keyed)
+        batch_size = _interaction_batch_size(n_features_in)
+        for i in range(0, len(fids), batch_size):
+            chunk = fids[i : i + batch_size]
+            applied = self._apply_interaction_rule(
+                [vectors_keyed[fid] for fid in chunk], indices
+            )
+            for fid, row in zip(chunk, applied):
+                extended[fid] = row
+        return extended
 
     def apply_feature_filter(
         self, vecs: list[npt.NDArray[np.float32]]
     ) -> list[npt.NDArray[np.float32]]:
         """
-        Applies the feature filter (kept_indices) from feature_rule.npz to the input vector.
+        Applies the feature filter (kept_indices) from feature_rule.npz to the
+        input vectors, keeping only the rule's columns. The rule must exist and
+        match the incoming layout width; prediction-time mismatches raise so a
+        stale rule can never silently mis-align a serving vector.
         """
 
-        rule = self.training_loader.load_feature_rule()
-        if rule is None:
+        n_features_in = vecs[0].shape[0]
+        kept_indices = self.training_loader.load_feature_rule(n_features_in)
+        if kept_indices is None:
             raise FileNotFoundError("Feature rule not found, must generate first")
 
-        kept_indices = rule
-        results: list[npt.NDArray[np.float32]] = []
-        for vec in vecs:
-            filtered_vector = vec[kept_indices]
-            results.append(filtered_vector)
-        return results
+        return [vec[kept_indices] for vec in vecs]
 
     def apply_interaction_features(
         self, vecs: list[npt.NDArray[np.float32]]
     ) -> npt.NDArray[np.float32]:
         """
-        Applies the interaction features (from interaction_data_cache.npz) to the input vector.
-        model_bin_dir: directory containing interaction_data_cache.npz
+        Appends the interaction products selected by the cached rule to the
+        input vectors. The rule must exist and match the incoming layout
+        width; prediction-time mismatches raise so a stale rule can never
+        silently mis-align a serving vector.
         """
-        interaction_data_cached = self.training_loader.load_interaction_data()
-        if not interaction_data_cached:
-            raise FileNotFoundError("Interaction data not found, must generate first")
+        n_features_in = vecs[0].shape[0]
+        interaction_indices = self.training_loader.load_interaction_rule(n_features_in)
+        if interaction_indices is None:
+            raise FileNotFoundError("Interaction rule not found, must generate first")
+        return self._apply_interaction_rule(vecs, interaction_indices)
 
+    def _apply_interaction_rule(
+        self,
+        vecs: list[npt.NDArray[np.float32]],
+        interaction_indices: npt.NDArray[np.intp],
+    ) -> npt.NDArray[np.float32]:
         vecs_np = np.array(vecs)  # shape: (batch_size, feature_dim)
         poly_features: npt.NDArray[np.float32] = np.asarray(
             self.poly.fit_transform(vecs_np), dtype=np.float32
         )  # shape: (batch_size, n_poly_features)
 
-        n_features_in = vecs_np.shape[1]
-        _, interaction_indices = interaction_data_cached
-        inter_feats = poly_features[:, n_features_in:][:, interaction_indices]
+        inter_feats = poly_features[:, vecs_np.shape[1] :][:, interaction_indices]
 
         # Concatenate original features and selected interaction features
-        X_final = np.hstack([vecs_np, inter_feats])
-        return X_final
+        return np.hstack([vecs_np, inter_feats])
+
+
+def _interaction_batch_size(n_features_in: int) -> int:
+    """Row batch size that keeps one full-width interaction matrix near 8 GB."""
+    n_interactions = (n_features_in * (n_features_in - 1)) // 2
+    bytes_per_row = (n_features_in + n_interactions) * 8
+    return min(5000, max(1, int(8 * 1024**3 / bytes_per_row)))
+
+
+def rule_fingerprint(
+    interaction_digest: bytes | None, feature_digest: bytes | None
+) -> int | None:
+    """Compose both rule digests into a single fingerprint of the data layout.
+
+    ``None`` when neither rule exists, matching a model trained without
+    transforms. Both digests are hashed in a fixed order so the fingerprint
+    changes whenever either rule's kept indices change.
+    """
+    if interaction_digest is None and feature_digest is None:
+        return None
+    h = hashlib.blake2b(digest_size=16)
+    h.update(interaction_digest or b"")
+    h.update(feature_digest or b"")
+    return int.from_bytes(h.digest(), "big")
 
 
 def _label_position_slot(pos_in_unit: int) -> str:
@@ -639,13 +626,14 @@ def _print_vector_summary(
     logger.info("  %-28s  %4d/%4d  (%5.1f%%)", vec_name, kept_count, total_in_vec, pct)
 
 
-def list_filtered_features(transformer: DataTransformer) -> None:
+def list_filtered_features(transformer: DataTransformer, n_features_in: int) -> None:
     """
-    Loads the cached filtered features and prints a compact summary of which
-    features survived the gain-based pruning. Multi-slot vectors (position,
-    keypoint, person_map) are broken down by named sub-feature.
+    Loads the cached filtered features for a layout of this width and prints a
+    compact summary of which features survived the gain-based pruning.
+    Multi-slot vectors (position, keypoint, person_map) are broken down by
+    named sub-feature.
     """
-    cached = transformer.training_loader.load_feature_rule()
+    cached = transformer.training_loader.load_feature_rule(n_features_in)
     if cached is None:
         logger.info(
             "No feature rule cache found. Run data_transformer.filter_unused_features() first."

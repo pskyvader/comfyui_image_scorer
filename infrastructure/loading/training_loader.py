@@ -1,3 +1,4 @@
+import hashlib
 import numpy as np
 from numpy import typing as npt
 import os
@@ -16,7 +17,7 @@ from ...core.filesystem.paths import (
     vectors_file,
     scores_file,
     models_dir,
-    interaction_data,
+    interaction_rule,
     training_model,
     vectors_data,
     scores_data,
@@ -29,17 +30,26 @@ from ...core.filesystem.paths import (
 logger: ModuleLogger = get_logger(__name__)
 
 
+def _rule_digest(indices: npt.NDArray[np.intp]) -> bytes:
+    """Stable digest over one rule's kept indices, memoized by the loader."""
+    return hashlib.blake2b(
+        np.ascontiguousarray(indices).tobytes(), digest_size=16
+    ).digest()
+
+
 class TrainingLoader:
     def __init__(self, use_cache: bool):
         self.training_model: ScoringModel | None = None
-        self.interaction_data: (
-            tuple[npt.NDArray[np.float32], npt.NDArray[np.intp]] | None
-        ) = None
+        self.interaction_rule: npt.NDArray[np.intp] | None = None
+        self._interaction_rule_width: int | None = None
+        self._interaction_rule_digest: bytes | None = None
         self.scores: npt.NDArray[np.float32] | None = None
         self.vectors_keyed: dict[str, npt.NDArray[np.float32]] | None = None
         self.scores_keyed: dict[str, float] | None = None
         self.comparison_rows: list[ComparisonRow] | None = None
         self.feature_rule: npt.NDArray[np.intp] | None = None
+        self._feature_rule_width: int | None = None
+        self._feature_rule_digest: bytes | None = None
         self.comparison_rule: tuple[int, dict[str, tuple[float, int]]] | None = None
         self.use_cache = use_cache
 
@@ -240,22 +250,52 @@ class TrainingLoader:
             comparisons_data, ids=ids, winners=winners, a=filename_a, b=filename_b
         )
 
-    def load_feature_rule(self) -> npt.NDArray[np.intp] | None:
-        if self.use_cache and self.feature_rule is not None:
+    def load_feature_rule(self, n_features_in: int) -> npt.NDArray[np.intp] | None:
+        """Return the kept-indices rule built for a raw layout of this width.
+
+        The stored rule is only valid for the feature layout it was built on,
+        so a width mismatch is treated as a cache miss and the caller rebuilds.
+        """
+        if (
+            self.use_cache
+            and self.feature_rule is not None
+            and self._feature_rule_width == n_features_in
+        ):
             return self.feature_rule
         if os.path.exists(feature_rule):
             data = np.load(feature_rule)
-            if "kept_indices" in data:
-                self.feature_rule = data["kept_indices"]
-                return self.feature_rule
+            if (
+                "kept_indices" in data
+                and "n_features_in" in data
+                and int(data["n_features_in"]) == n_features_in
+            ):
+                kept = data["kept_indices"]
+                self.feature_rule = kept
+                self._feature_rule_width = n_features_in
+                self._feature_rule_digest = _rule_digest(kept)
+                return kept
         return None
 
-    def save_feature_rule(self, kept_indices: npt.NDArray[np.intp]) -> None:
+    def save_feature_rule(
+        self, kept_indices: npt.NDArray[np.intp], n_features_in: int
+    ) -> None:
         logger.debug("saving feature rule...")
         os.makedirs(models_dir, exist_ok=True)
-        np.savez_compressed(feature_rule, kept_indices=kept_indices)
+        np.savez_compressed(
+            feature_rule,
+            kept_indices=kept_indices,
+            n_features_in=np.int64(n_features_in),
+        )
+        # Digests are tiny and part of the loader's contract; memoize them
+        # regardless of use_cache so fingerprints stay correct for callers
+        # that keep only disk-backed rules.
+        self._feature_rule_digest = _rule_digest(kept_indices)
+        self._feature_rule_width = n_features_in
         if self.use_cache:
             self.feature_rule = kept_indices
+
+    def feature_rule_digest(self) -> bytes | None:
+        return self._feature_rule_digest
 
     def load_comparison_rule(
         self, threshold: int
@@ -306,31 +346,55 @@ class TrainingLoader:
         if self.use_cache:
             self.comparison_rule = (threshold, rule)
 
-    def load_interaction_data(
-        self,
-    ) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.intp]] | None:
-        if self.use_cache and self.interaction_data is not None:
-            return self.interaction_data
+    def load_interaction_rule(
+        self, n_features_in: int
+    ) -> npt.NDArray[np.intp] | None:
+        """Return the interaction-index rule built for a raw layout of this width.
 
-        if os.path.exists(interaction_data):
-            data = np.load(interaction_data)
-            if "X" in data and "interaction_indices" in data:
-                logger.info("Loading interaction data from cache: %s", interaction_data)
-                self.interaction_data = data["X"], data["interaction_indices"]
-                return self.interaction_data
+        The rule maps local interaction-column positions to the selected
+        pairwise products; it only applies to the layout width it was scanned
+        for, so a mismatch is treated as a cache miss.
+        """
+        if (
+            self.use_cache
+            and self.interaction_rule is not None
+            and self._interaction_rule_width == n_features_in
+        ):
+            return self.interaction_rule
+
+        if os.path.exists(interaction_rule):
+            data = np.load(interaction_rule)
+            if (
+                "interaction_indices" in data
+                and "n_features_in" in data
+                and int(data["n_features_in"]) == n_features_in
+            ):
+                logger.info(
+                    "Loading interaction rule from cache: %s", interaction_rule
+                )
+                indices = data["interaction_indices"]
+                self.interaction_rule = indices
+                self._interaction_rule_width = n_features_in
+                self._interaction_rule_digest = _rule_digest(indices)
+                return indices
         return None
 
-    def save_interaction_data(
-        self, x: npt.NDArray[np.float32], top_k_indices_local: npt.NDArray[np.intp]
-    ) -> tuple[npt.NDArray[np.float32], npt.NDArray[np.intp]]:
+    def save_interaction_rule(
+        self, interaction_indices: npt.NDArray[np.intp], n_features_in: int
+    ) -> None:
         os.makedirs(models_dir, exist_ok=True)
         np.savez_compressed(
-            interaction_data, X=x, interaction_indices=top_k_indices_local
+            interaction_rule,
+            interaction_indices=interaction_indices,
+            n_features_in=np.int64(n_features_in),
         )
-        saved_data = (x, top_k_indices_local)
+        self._interaction_rule_digest = _rule_digest(interaction_indices)
+        self._interaction_rule_width = n_features_in
         if self.use_cache:
-            self.interaction_data = saved_data
-        return saved_data
+            self.interaction_rule = interaction_indices
+
+    def interaction_rule_digest(self) -> bytes | None:
+        return self._interaction_rule_digest
 
     def _normalize(self, val: Any) -> Any:
         if isinstance(val, np.ndarray):
@@ -349,6 +413,10 @@ class TrainingLoader:
                 final_score=float(data["final_score"]) if data["final_score"] is not None else None,
                 pairwise_accuracy=float(data["pairwise_accuracy"]) if data.get("pairwise_accuracy") is not None else None,
                 score_calibration=data.get("score_calibration"),
+                n_features=int(data["n_features"]) if "n_features" in data else None,
+                rule_fingerprint=(
+                    int(data["rule_fingerprint"]) if "rule_fingerprint" in data else None
+                ),
             )
         return TrainingDiagnostics()
 

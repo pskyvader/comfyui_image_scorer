@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import random
 from itertools import product, islice
-from typing import Any, TypedDict, cast
+from typing import Any, NamedTuple, TypedDict, cast
 
 import numpy as np
 
@@ -12,11 +12,20 @@ from ...core.observability.logger import get_logger, ModuleLogger
 from ...domain.data_transformation.data_transformer import (
     DataTransformer,
     list_filtered_features,
+    rule_fingerprint,
 )
 from ...domain.ports.loading import ModelTrainingService, TrainingLoader
 from ...domain.training.grid import around, grid_base
 
 logger: ModuleLogger = get_logger(__name__)
+
+
+class TrainingData(NamedTuple):
+    """Training matrix, targets, and the fingerprint of the transforms applied."""
+
+    x: np.ndarray
+    y: np.ndarray
+    rule_fingerprint: int | None
 
 
 def _num_configs() -> int:
@@ -137,12 +146,16 @@ def reset_hyperparameters() -> HpoState:
 
 
 def load_training_data(
-    filter_comparisons: bool, training_loader: TrainingLoader, model_trainer: ModelTrainingService
-) -> tuple[np.ndarray, np.ndarray]:
-    """Load keyed vectors/scores and compress unused features. When
-    filter_comparisons is True, keep only files with enough comparisons
-    (scores replayed on the kept subset); otherwise keep every scored file
-    with its full-history score."""
+    filter_interactions: bool,
+    filter_features: bool,
+    filter_comparisons: bool,
+    training_loader: TrainingLoader,
+    model_trainer: ModelTrainingService,
+) -> TrainingData:
+    """Load keyed vectors/scores and apply the optional transforms in order:
+    interaction expansion, feature filtering, comparison filtering. Each step
+    is skipped when its flag is False; the returned fingerprint composes the
+    digests of the rules that the applied transforms used."""
     transformer = DataTransformer(training_loader, model_trainer)
     vectors_keyed = training_loader.load_vectors()
     scores_keyed = training_loader.load_scores()
@@ -154,23 +167,34 @@ def load_training_data(
         n_features_total,
     )
 
-    filter_steps = int(config["training"]["feature_filter_steps"])
-    logger.info("filtering unused features after %s steps...", filter_steps)
-    kept_feature_idx = transformer.filter_unused_features(
-        vectors_keyed, scores_keyed, steps=filter_steps
-    )
-    list_filtered_features(transformer)
-    logger.info(
-        "Feature filtering: kept %s features (%.1f%%), dropped %s.",
-        len(kept_feature_idx),
-        100 * len(kept_feature_idx) / n_features_total,
-        n_features_total - len(kept_feature_idx),
-    )
+    vectors_src = vectors_keyed
+    if filter_interactions:
+        target_k = int(config["training"]["rule_number_of_interactions"])
+        logger.info("creating interaction rule (target k=%s)...", target_k)
+        vectors_src = transformer.create_interaction_rule(
+            vectors_keyed, scores_keyed, target_k
+        )
+    n_features_in = next(iter(vectors_src.values())).shape[0]
 
-    threshold = config["training"]["min_comparisons_threshold"]
+    kept_indices: np.ndarray | None = None
+    if filter_features:
+        filter_steps = int(config["training"]["rule_filter_steps"])
+        logger.info("filtering unused features after %s steps...", filter_steps)
+        kept_indices = transformer.filter_unused_features(
+            vectors_src, scores_keyed, steps=filter_steps
+        )
+        list_filtered_features(transformer, n_features_in)
+        logger.info(
+            "Feature filtering: kept %s features (%.1f%%), dropped %s.",
+            len(kept_indices),
+            100 * len(kept_indices) / n_features_in,
+            n_features_in - len(kept_indices),
+        )
+
     kept_filenames: set[str] | None = None
     scores_subset: dict[str, float] | None = None
     if filter_comparisons:
+        threshold = int(config["training"]["rule_min_comparisons"])
         logger.info("filtering low comparison data (threshold=%s) ...", threshold)
         rule = transformer.filter_low_comparisons(threshold=threshold)
         kept_filenames = set(rule)
@@ -187,10 +211,12 @@ def load_training_data(
     for fid in scores_keyed:
         if kept_filenames is not None and fid not in kept_filenames:
             continue
-        vec = vectors_keyed.get(fid)
+        vec = vectors_src.get(fid)
         if vec is None:
             continue
-        x_rows.append(vec[kept_feature_idx])
+        if kept_indices is not None:
+            vec = vec[kept_indices]
+        x_rows.append(vec)
         y_rows.append(
             scores_subset[fid] if scores_subset is not None else scores_keyed[fid]
         )
@@ -198,7 +224,14 @@ def load_training_data(
     x = np.array(x_rows, dtype=np.float32)
     y = np.array(y_rows, dtype=np.float32)
     logger.info("Training data ready: X=%s, Y=%s", x.shape, y.shape)
-    return x, y
+    return TrainingData(
+        x=x,
+        y=y,
+        rule_fingerprint=rule_fingerprint(
+            training_loader.interaction_rule_digest(),
+            training_loader.feature_rule_digest(),
+        ),
+    )
 
 
 def _evaluate_config(
@@ -435,8 +468,10 @@ def run_hpo_cycles(
     if training_loader is None:
         raise RuntimeError("training_loader must be provided")
 
-    X, y = load_training_data(
-        filter_comparisons=True,
+    X, y, _rule_fingerprint = load_training_data(
+        filter_interactions=bool(training_config["rule_create_interactions"]),
+        filter_features=bool(training_config["rule_filter_features"]),
+        filter_comparisons=bool(training_config["rule_filter_comparisons"]),
         training_loader=training_loader,
         model_trainer=model_trainer,
     )

@@ -10,6 +10,7 @@ from ....core.filesystem.paths import (
     vectors_data,
     scores_data,
     feature_rule,
+    interaction_rule,
     comparison_rule,
     training_model,
     vectors_file,
@@ -67,6 +68,7 @@ def run_split_vectors(limit: int, batch: bool, deps: CLIDeps) -> int:
             vectors_data,
             scores_data,
             feature_rule,
+            interaction_rule,
             comparison_rule,
             training_model,
         )

@@ -16,11 +16,15 @@ logger = get_logger(__name__)
 
 def train_model(deps: CLIDeps) -> int:
     logger.info("Loading training data...")
-    vectors, scores = load_training_data(
-        filter_comparisons=True,
+    training_config = config["training"]
+    data = load_training_data(
+        filter_interactions=bool(training_config["rule_create_interactions"]),
+        filter_features=bool(training_config["rule_filter_features"]),
+        filter_comparisons=bool(training_config["rule_filter_comparisons"]),
         training_loader=deps.training_loader,
         model_trainer=deps.model_trainer,
     )
+    vectors, scores = data.x, data.y
 
     logger.info(f"Loaded {len(vectors)} samples, {vectors.shape[1]} features")
 
@@ -32,13 +36,21 @@ def train_model(deps: CLIDeps) -> int:
     )
 
     logger.info(f"Training complete — score={metrics.get('score', 'N/A')}")
-    deps.training_loader.save_training_model(model, additional_data=metrics)
+    additional_data: dict[str, object] = {
+        **metrics,
+        "n_features": int(vectors.shape[1]),
+        "rule_fingerprint": data.rule_fingerprint,
+    }
+    deps.training_loader.save_training_model(model, additional_data=additional_data)
 
-    vectors_full, scores_full = load_training_data(
+    full_data = load_training_data(
+        filter_interactions=bool(training_config["rule_create_interactions"]),
+        filter_features=bool(training_config["rule_filter_features"]),
         filter_comparisons=False,
         training_loader=deps.training_loader,
         model_trainer=deps.model_trainer,
     )
+    vectors_full, scores_full = full_data.x, full_data.y
     os.makedirs(training_plots_dir, exist_ok=True)
     deps.plot_manager.plot_loss_curve(
         metrics,

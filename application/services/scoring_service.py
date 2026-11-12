@@ -10,9 +10,13 @@ import warnings
 from PIL.Image import Image
 
 from ...core.configuration.settings import config, ImageVectorEntry
+from ...core.observability.logger import get_logger
 from ...domain.analysis.image_analysis import ImageAnalysis
 from ...domain.vectors.image_vector import ImageVector
-from ...domain.data_transformation.data_transformer import DataTransformer
+from ...domain.data_transformation.data_transformer import (
+    DataTransformer,
+    rule_fingerprint,
+)
 from ...domain.training.calibration import (
     apply_score_calibration,
     extract_score_calibration,
@@ -22,6 +26,7 @@ from ...domain.ports.loading import (
     MapsProvider,
     ModelTrainingService,
     ScoringModel,
+    TrainingDiagnostics,
     TrainingLoader,
     BatchSizerFactory,
 )
@@ -29,6 +34,8 @@ from ...domain.ports.cache import CacheProvider
 from ...domain.ports.ml_providers import MediaPipePort
 
 from .vector_list import VectorList
+
+logger = get_logger(__name__)
 
 
 class ScoringService:
@@ -182,10 +189,26 @@ class ScoringService:
         matrix = np.array(final_vectors, dtype=np.float32)
 
         data_transformer = DataTransformer(self._training_loader, self._model_trainer)
-        filtered_vectors = data_transformer.apply_feature_filter(list(matrix))
+        training_config = config["training"]
+        vectors: list[np.ndarray] = list(matrix)
+        if bool(training_config["rule_create_interactions"]):
+            # Interaction expansion grows each row by the selected products;
+            # chunking keeps the polynomial buffer at one batch, not all rows.
+            rows: list[np.ndarray] = []
+            for i in range(0, len(vectors), self._batch_size):
+                chunk = data_transformer.apply_interaction_features(
+                    vectors[i : i + self._batch_size]
+                )
+                rows.extend(chunk)
+            vectors = rows
+        if bool(training_config["rule_filter_features"]):
+            vectors = data_transformer.apply_feature_filter(vectors)
 
         model = self._training_loader.load_training_model()
-        all_scores = self._predict_scores(model, filtered_vectors)
+        loaded_diagnostics = self._training_loader.load_training_model_diagnostics()
+        diagnostics = loaded_diagnostics if loaded_diagnostics is not None else TrainingDiagnostics()
+        self._check_model_alignment(diagnostics, len(vectors[0]))
+        all_scores = self._predict_scores(model, vectors, diagnostics)
 
         n_images = len(images_list)
         if len(all_scores) != n_images:
@@ -222,10 +245,47 @@ class ScoringService:
             all_scores.tolist(),
         )
 
+    def _check_model_alignment(
+        self, diagnostics: TrainingDiagnostics, vector_width: int
+    ) -> None:
+        """Fail loudly when serving vectors cannot match the trained layout.
+
+        A stored transform fingerprint that differs from the current rules
+        (same width, different subset) is only logged: the vectors still line
+        up, but the scores may be unreliable until the model is retrained.
+        """
+        if (
+            diagnostics.n_features is not None
+            and diagnostics.n_features != vector_width
+        ):
+            raise RuntimeError(
+                f"Model expects {diagnostics.n_features} features but scoring "
+                f"produced {vector_width}; retrain the model for the current "
+                "transform rules"
+            )
+        expected = rule_fingerprint(
+            self._training_loader.interaction_rule_digest(),
+            self._training_loader.feature_rule_digest(),
+        )
+        if (
+            expected is not None
+            and diagnostics.rule_fingerprint is not None
+            and expected != diagnostics.rule_fingerprint
+        ):
+            logger.error(
+                "Model was trained under different transform rules "
+                "(model fingerprint %s, current %s); retrain to align scoring",
+                diagnostics.rule_fingerprint,
+                expected,
+            )
+
     def _predict_scores(
-        self, model: ScoringModel, filtered_vectors: list[np.ndarray]
+        self,
+        model: ScoringModel,
+        vectors: list[np.ndarray],
+        diagnostics: TrainingDiagnostics,
     ) -> np.ndarray:
-        features = np.asarray(filtered_vectors, dtype=np.float32)
+        features = np.asarray(vectors, dtype=np.float32)
         objective = model.get_params().get("objective")
 
         with warnings.catch_warnings():
@@ -278,9 +338,6 @@ class ScoringService:
                     -1
                 )
                 if objective == "lambdarank":
-                    diagnostics = (
-                        self._training_loader.load_training_model_diagnostics()
-                    )
                     calibration = extract_score_calibration(diagnostics)
                     if calibration is not None:
                         scores = apply_score_calibration(scores, calibration)

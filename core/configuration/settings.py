@@ -80,14 +80,18 @@ class TrainingSection(SectionModel):
     max_combos: int
     device: str
     objective: str
-    min_comparisons_threshold: int
-    feature_gain_threshold: float
+    rule_filter_features: bool = True
+    rule_keep_proportion: float
+    rule_filter_steps: int
+    rule_filter_comparisons: bool = True
+    rule_min_comparisons: int
+    rule_create_interactions: bool = False
+    rule_number_of_interactions: int = 500
     verbosity: int
     analysis_bootstrap_resamples: int
     analysis_confidence_level: float
     analysis_min_images_per_term: int
     analysis_pose_visibility_threshold: float
-    feature_filter_steps: int
     hpo_configs_per_cycle: int
 
 

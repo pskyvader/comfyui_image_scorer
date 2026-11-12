@@ -6,6 +6,8 @@ import random
 import time
 from typing import Iterator
 
+from numpy import log
+
 from ....core.configuration.settings import config
 from ....core.observability.logger import get_logger, ModuleLogger
 from ...graph.chain_proxy import ChainProxy
@@ -156,9 +158,18 @@ def phase_anchor_insert(
         )
         return None
 
-    compatible_nodes: list[NodeProxy] | None = get_anchor_insert_opponents(
-        candidate_images, node_a
-    )
+    if retry > _MAX_RETRIES:
+        logger.debug(
+            f"max retries exceeded ({retry}) for anchor insert, switching to node_a count filter",
+            start_timer=_start,
+        )
+        compatible_nodes: list[NodeProxy] | None = get_anchor_insert_opponents(
+            candidate_images, node_a, node_a.link_count
+        )
+    else:
+        compatible_nodes: list[NodeProxy] | None = get_anchor_insert_opponents(
+            candidate_images, node_a
+        )
     if compatible_nodes is None:
         logger.debug("no compatible opponents", start_timer=_start)
         _mark_recent(pairing_processor, node_a.filename)
@@ -171,6 +182,7 @@ def phase_anchor_insert(
     pair_list: list[Pair] = form_candidate_pairs(node_a, compatible_nodes)
     pair_list = filter_existing_pairs(pair_list, existing_pair_set)
     result: Pair | None = closest_score_pair(pair_list, closest=True)
+
     if result is None:
         pair_list.sort(key=_key_diff)
         sigma_range_multiplier: float = float(

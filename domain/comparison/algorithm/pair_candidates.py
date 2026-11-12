@@ -240,16 +240,14 @@ def collect_chain_midpoints(
         filename: str = midpoint.filename
         if filename in seen:
             continue
-        if candidate_names and filename not in candidate_names:
+        if candidate_names and (filename not in candidate_names):
             continue
 
-        node: NodeProxy | None = (
-            candidates_by_name.get(filename)
-            if candidate_names
-            else cg.get_node(filename)
-        )
-        if node is None:
-            continue
+        node: NodeProxy = candidates_by_name[filename]
+        # if node.get_chain()[0].id != raw_chain.id:
+        #     raise ValueError(
+        #         f"Chain midpoint node {filename} does not belong to the expected chain {raw_chain.id}."
+        #     )
 
         seen.add(filename)
         nodes.append(node)
