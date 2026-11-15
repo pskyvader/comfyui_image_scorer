@@ -6,17 +6,11 @@ logger: ModuleLogger = get_logger(__name__)
 error_count: int = 0
 
 
-def _require_number(value: object, name: str, entry_id: str) -> int | float | str:
+def _require_number(value: object) -> int | float | str:
     """Narrow a raw entry value to the numeric shapes a numeric vector accepts."""
     if not isinstance(value, int | float | str):
         global error_count
         error_count += 1
-        # raise TypeError
-        # logger.error(
-        #     f"Vector '{name}' for id '{entry_id}' expects a number, "
-        #     f"got {type(value).__name__} ({value})"
-        #     f"error count {error_count}"
-        # )
         return 0
     return value
 
@@ -35,7 +29,7 @@ class IntVector:
         error_count = 0
         for id, entry in list(entries.items()):
             current_value = _require_number(
-                get_value_from_entry(entry, self.name, alias), self.name, id
+                get_value_from_entry(entry, self.name, alias)
             )
             self.value_list[id] = int(current_value)
         if error_count > 0:
@@ -70,7 +64,7 @@ class FloatVector:
         error_count = 0
         for id, entry in list(entries.items()):
             current_value = _require_number(
-                get_value_from_entry(entry, self.name, alias), self.name, id
+                get_value_from_entry(entry, self.name, alias)
             )
             self.value_list[id] = float(current_value)
         if error_count > 0:

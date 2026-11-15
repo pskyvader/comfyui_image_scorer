@@ -230,6 +230,63 @@ def tarjan_scc(
     return scc_id_of, scc_members
 
 
+# ------------------------------------------------------------------
+# Transitive reach counts (known better/worse per node)
+# ------------------------------------------------------------------
+
+
+def build_reach_counts(
+    scc_members: dict[int, list[str]],
+    scc_predecessors: dict[int, set[int]],
+    scc_successors: dict[int, set[int]],
+    scc_order: list[int],
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Count images provably better/worse than each image via reachability.
+
+    Contradiction groups (SCCs) count as one ranking unit: a group's members
+    share the same counts and never count each other. The bitset sweeps run
+    in topological order so every group ORs already-final neighbor sets.
+    """
+    group_count: int = len(scc_members)
+    better_bits: list[int] = [0] * group_count
+    for group_id in scc_order:
+        bits: int = 0
+        for predecessor in scc_predecessors[group_id]:
+            bits |= better_bits[predecessor] | (1 << predecessor)
+        better_bits[group_id] = bits
+
+    worse_bits: list[int] = [0] * group_count
+    for group_id in reversed(scc_order):
+        bits = 0
+        for successor in scc_successors[group_id]:
+            bits |= worse_bits[successor] | (1 << successor)
+        worse_bits[group_id] = bits
+
+    singleton_mask: int = 0
+    group_sizes: dict[int, int] = {}
+    for group_id in range(group_count):
+        size: int = len(scc_members[group_id])
+        if size == 1:
+            singleton_mask |= 1 << group_id
+        else:
+            group_sizes[group_id] = size
+
+    known_better: dict[str, int] = {}
+    known_worse: dict[str, int] = {}
+    for group_id in range(group_count):
+        better_count: int = (better_bits[group_id] & singleton_mask).bit_count()
+        worse_count: int = (worse_bits[group_id] & singleton_mask).bit_count()
+        for member_group, size in group_sizes.items():
+            if better_bits[group_id] >> member_group & 1:
+                better_count += size
+            if worse_bits[group_id] >> member_group & 1:
+                worse_count += size
+        for member in scc_members[group_id]:
+            known_better[member] = better_count
+            known_worse[member] = worse_count
+    return known_better, known_worse
+
+
 # ======================================================================
 # ChainManager class
 # ======================================================================
@@ -257,6 +314,8 @@ class ChainManager:
         self._node_main_chain: dict[str, tuple[int, list[str]]] = {}
         self._main_chain_nodes: dict[int, list[str]] = {}
         self._main_chain_member_count: dict[int, int] = {}
+        self._node_known_better: dict[str, int] = {}
+        self._node_known_worse: dict[str, int] = {}
 
         self._common_chains: dict[int, tuple[list[str], bool]] = {}
         self._node_chains: dict[str, dict[int, bool]] = {}
@@ -276,20 +335,6 @@ class ChainManager:
 
     def get_bottom_nodes(self) -> list[str]:
         return list(self._bottom_nodes)
-
-    def get_nodes_with_only_losses(self) -> list[str]:
-        return [
-            node
-            for node in self._all_filenames
-            if self._worse_than[node] == [] and self._better_than[node]
-        ]
-
-    def get_nodes_with_only_wins(self) -> list[str]:
-        return [
-            node
-            for node in self._all_filenames
-            if self._better_than[node] == [] and self._worse_than[node]
-        ]
 
     def get_better_than(self, node_id: str) -> list[str]:
         return self._better_than.get(node_id, [])
@@ -603,6 +648,8 @@ class ChainManager:
         self._node_chains = {}
         self._main_chain_nodes = {}
         self._main_chain_member_count = {}
+        self._node_known_better = {}
+        self._node_known_worse = {}
 
         # 1. Find SCCs (condense cycles into single nodes)
         scc_id_of, scc_members = tarjan_scc(
@@ -818,6 +865,11 @@ class ChainManager:
             self._main_chain_nodes[chain_id] = main_nodes
             self._main_chain_member_count[chain_id] = len(main_nodes)
 
+        # 6. Known better/worse counts (transitive reachability over the SCC DAG)
+        self._node_known_better, self._node_known_worse = build_reach_counts(
+            scc_members, scc_predecessors, scc_successors, scc_order
+        )
+
         logger.info(
             f"Built {len(self._chains)} main chains",
             start_timer=_start,
@@ -838,6 +890,12 @@ class ChainManager:
 
     def get_main_chain_member_count(self, chain_id: int) -> int:
         return self._main_chain_member_count.get(chain_id, 0)
+
+    def get_node_known_better_count(self, node_id: str) -> int:
+        return self._node_known_better.get(node_id, 0)
+
+    def get_node_known_worse_count(self, node_id: str) -> int:
+        return self._node_known_worse.get(node_id, 0)
 
     def get_main_chain_node(self, chain_id: int, position: int) -> str | None:
         nodes = self._main_chain_nodes.get(chain_id, [])

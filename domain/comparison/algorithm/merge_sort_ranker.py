@@ -37,11 +37,6 @@ def select_pair_for_comparison(
         )
         return None, None
 
-    cg: CrystalGraphPort = crystal_graph
-    # if cg.is_cache_stale():
-    #     logger.debug("stale from select pair")
-    #     cg.rebuild_from_database()
-
     combined_exclude: set[str] = set()
     if exclude_set:
         combined_exclude.update(exclude_set)
@@ -55,7 +50,9 @@ def select_pair_for_comparison(
         )
         return None, None
 
-    pair, phase_index = select_pair(cached, candidate_images, cg, pairing_processor)
+    pair, phase_index = select_pair(
+        cached, candidate_images, crystal_graph, pairing_processor
+    )
 
     if not pair:
         logger.warning(f"no pair", start_timer=_start)

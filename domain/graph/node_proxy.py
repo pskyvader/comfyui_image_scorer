@@ -73,6 +73,16 @@ class NodeProxy:
         return self._image_data.get("comparison_count", 0)
 
     @property
+    def known_better_count(self) -> int:
+        """Count of images provably better than this one, including implied wins."""
+        return self._chain.get_node_known_better_count(self._node_id)
+
+    @property
+    def known_worse_count(self) -> int:
+        """Count of images provably worse than this one, including implied losses."""
+        return self._chain.get_node_known_worse_count(self._node_id)
+
+    @property
     def prompt_tags(self) -> str | None:
         return self._image_data.get("prompt_tags")
 

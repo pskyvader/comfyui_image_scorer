@@ -7,13 +7,18 @@ is required here. All field reading is isolated in the helpers below.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from ....core.configuration.settings import config
 from ...graph.node_proxy import NodeProxy
 from ...analysis.trueskill import expected_win_probability, Rating
 from . import graph_helpers
-from .phase_order import get_phase_name
+from .phase_order import (
+    COUNT_FAMILY_PHASES,
+    CountPhaseMetadata,
+    PHASES,
+    get_phase_name,
+)
 
 from ....domain.ports.graph import CrystalGraphPort, GraphStructure
 
@@ -288,15 +293,27 @@ def describe_pair(
         and component_a.id == component_b.id
     )
 
-    # Chain middle targets every chain whose main length has reached the
-    # configured minimum; the merge phase instead targets a minimum chain count.
+    # The chain_small settler counts the small chains it still needs to absorb;
+    # the chain_middle median loop reports the exact-middle resolution state.
+    # The count-family phases report how many nodes currently sit at their
+    # exact win/loss count.
+    phase_name: str = get_phase_name(phase_index)
     target_chains = int(ranking_conf["minimum_chains_for_pairing"])
-    if get_phase_name(phase_index) == "chain_middle":
-        min_chain_length = int(ranking_conf["chain_middle_min_chain_length"])
+    matching_count: int | None = None
+    median_status: dict[str, object] | None = None
+    if phase_name == "chain_middle":
+        median_status = graph_helpers.describe_median_status(cg)
+    elif phase_name == "chain_small":
+        chain_length_threshold = int(ranking_conf["chain_length_threshold"])
         target_chains = sum(
             1
             for chain in cg.get_all_chains()
-            if chain.main_length >= min_chain_length
+            if chain.main_length <= chain_length_threshold
+        )
+    elif phase_name in COUNT_FAMILY_PHASES:
+        count_entry: CountPhaseMetadata = cast(CountPhaseMetadata, PHASES[phase_index])
+        matching_count = graph_helpers.count_exact_result_nodes(
+            cg, count_entry["bottom"], count_entry["count"]
         )
     return {
         "phase": phase_index,
@@ -304,6 +321,8 @@ def describe_pair(
         "total_links": structure["total_links"],
         "total_chains": structure["total_chains"],
         "target_chains": target_chains,
+        "matching_count": matching_count,
+        "median_status": median_status,
         "level": stats["link_level"],
         "base_level": base_level,
         "collapsible": graph_helpers.is_collapsable_pair(

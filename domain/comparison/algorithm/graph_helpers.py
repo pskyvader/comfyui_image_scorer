@@ -28,6 +28,59 @@ def stable_seed_pool(images: list[NodeProxy]) -> list[NodeProxy]:
     return [node for node in by_comps[:seed_size]]
 
 
+def count_exact_result_nodes(cg: CrystalGraphPort, bottom: bool, count: int) -> int:
+    """Count candidate nodes with exactly `count` wins (bottom) or losses."""
+    total: int = 0
+    for node in cg.get_all_nodes():
+        links: list[NodeProxy] = (
+            node.get_links(worse_than=True)
+            if bottom
+            else node.get_links(better_than=True)
+        )
+        if len(links) == count:
+            total += 1
+    return total
+
+
+def describe_median_status(cg: CrystalGraphPort) -> dict[str, object]:
+    """Report the exact-middle resolution state over all graph images.
+
+    The middle image is the one whose provable rank interval is the only one
+    containing the target rank ``(image_count - 1) // 2``; the interval of an
+    image spans its known better/worse counts. The most-informed remaining
+    candidate (narrowest interval) provides the reported better/worse balance.
+    """
+    total_images: int = cg.get_node_count()
+    target_rank: int = (total_images - 1) // 2
+    worse_rank_limit: int = total_images - 1 - target_rank
+    remaining: list[NodeProxy] = []
+    for node in cg.get_all_nodes():
+        known_better: int = node.known_better_count
+        known_worse: int = node.known_worse_count
+        if known_better <= target_rank and known_worse <= worse_rank_limit:
+            remaining.append(node)
+    best: NodeProxy | None = None
+    best_width: int | None = None
+    for node in remaining:
+        interval_width: int = (
+            total_images - 1 - node.known_worse_count - node.known_better_count
+        )
+        if best_width is None or interval_width < best_width:
+            best = node
+            best_width = interval_width
+    resolved: bool = len(remaining) == 1
+    middle_node: NodeProxy | None = best if resolved else None
+    return {
+        "resolved": resolved,
+        "candidate_filename": (
+            middle_node.filename if middle_node is not None else None
+        ),
+        "remaining_count": len(remaining),
+        "known_better": best.known_better_count if best is not None else 0,
+        "known_worse": best.known_worse_count if best is not None else 0,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Grouping helpers
 # ---------------------------------------------------------------------------

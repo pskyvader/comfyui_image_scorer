@@ -59,7 +59,6 @@ class CrystalGraph:
         # _skip_before/_existing_pairs/_last_chains_index globals.
         self._skip_before: int = 0
         self._existing_pairs: set[tuple[str, str]] = set()
-        self._recent_chain_ids: list[int] = []
 
     def _make_node(self, node_id: str) -> NodeProxy:
         return NodeProxy(self._chain, node_id, self._node_data.get(node_id))
@@ -208,12 +207,6 @@ class CrystalGraph:
     def set_existing_pairs(self, pairs: set[tuple[str, str]]) -> None:
         self._existing_pairs = pairs
 
-    def get_recent_chain_ids(self) -> list[int]:
-        return self._recent_chain_ids
-
-    def set_recent_chain_ids(self, chain_ids: list[int]) -> None:
-        self._recent_chain_ids = chain_ids
-
     # -- Images snapshot cache (replaces domain/comparison/state.py) -----
 
     def get_images_snapshot(self) -> list[ImageRow] | None:
@@ -351,12 +344,6 @@ class CrystalGraph:
 
     def get_node_count(self) -> int:
         return len(self._chain.get_all_filenames())
-
-    def get_winner_only_nodes(self) -> list[NodeProxy]:
-        return [self._make_node(n) for n in self._chain.get_nodes_with_only_wins()]
-
-    def get_loser_only_nodes(self) -> list[NodeProxy]:
-        return [self._make_node(n) for n in self._chain.get_nodes_with_only_losses()]
 
     def link_exists_between(self, a: str, b: str) -> bool:
         return self._chain.link_exists_between(a, b)

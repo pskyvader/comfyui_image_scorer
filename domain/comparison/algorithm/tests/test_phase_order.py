@@ -80,34 +80,43 @@ def test_phase_metadata_names_do_not_store_function_references() -> None:
     assert [phase["name"] for phase in phases] == [
         "seed",
         "anchor",
-        "collapsible",
-        "single_win_loss",
+        "only_losers",
+        "only_winners",
+        "mostly_losers",
+        "mostly_winners",
         "chain_middle",
         "refine",
+        "chain_small",
         "fallback",
     ]
     assert [phase["phase_label"] for phase in phases] == [
         "Phase 1 / Bootstrap Seed",
         "Phase 2 / Anchor Insert",
-        "Phase 4 / Collapsible",
-        "Phase 5 / Single Win-Loss",
-        "Phase 6 / Chain Middle",
-        "Phase 7 / Uncertainty Refine",
+        "Phase 3 / Only Losers",
+        "Phase 4 / Only Winners",
+        "Phase 5 / Mostly Losers",
+        "Phase 6 / Mostly Winners",
+        "Phase 7 / Chain Middle",
+        "Phase 8 / Uncertainty Refine",
+        "Phase 9 / Chain Small",
         "Fallback",
     ]
     assert [phase["color"] for phase in phases] == [
         "#f87171",
         "#fb923c",
+        "#facc15",
         "#4ade80",
         "#22d3ee",
         "#60a5fa",
+        "#c084fc",
+        "#a78bfa",
         "#818cf8",
         "#9ca3af",
     ]
     assert all(not callable(value) for phase in phases for value in phase.values())
 
 
-def test_early_collapsible_pair_skips_pair_history_and_seed_setup(
+def test_first_phase_skips_seed_pool_setup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     nodes = [
@@ -118,20 +127,42 @@ def test_early_collapsible_pair_skips_pair_history_and_seed_setup(
     monkeypatch.setattr(phase_order, "config", {"ranking": {"reserve_count": 2}})
     monkeypatch.setattr(phase_order.random, "shuffle", _keep_order)
 
-    def select_collapsible(
+    observed: dict[str, object] = {}
+
+    def count_phase(
         candidates: list[NodeProxy],
-        _cg: CrystalGraphPort,
+        existing_pairs: set[tuple[str, str]],
         _pairing_processor: PairingProcessorPort,
+        *,
+        bottom: bool,
+        count: int,
+        closest: bool,
     ) -> tuple[NodeProxy, NodeProxy]:
+        observed.update(
+            candidates=candidates,
+            existing_pairs=existing_pairs,
+            bottom=bottom,
+            count=count,
+            closest=closest,
+        )
         return candidates[0], candidates[1]
 
-    monkeypatch.setattr(phase_order, "PHASES", ({"name": "collapsible"},))
     monkeypatch.setattr(
-        phase_order, "phase_collapsible_pairs", select_collapsible
+        phase_order,
+        "PHASES",
+        (
+            {
+                "name": "only_losers",
+                "bottom": True,
+                "count": 0,
+                "closest": True,
+            },
+        ),
     )
+    monkeypatch.setattr(phase_order, "phase_exact_count_pair", count_phase)
 
     def unexpected_seed_pool(_images: list[NodeProxy]) -> list[NodeProxy]:
-        raise AssertionError("seed pool should not be built for Collapsible")
+        raise AssertionError("seed pool should not be built for only_losers")
 
     monkeypatch.setattr(phase_order, "stable_seed_pool", unexpected_seed_pool)
 
@@ -145,8 +176,17 @@ def test_early_collapsible_pair_skips_pair_history_and_seed_setup(
     assert pair is not None
     assert set(pair) == {"a", "b"}
     assert phase_index == 0
-    assert graph.existing_pair_reads == 0
-    assert graph.link_reads == 0
+    assert observed["candidates"] == nodes
+    assert observed["existing_pairs"] == set()
+    assert observed == {
+        "candidates": nodes,
+        "existing_pairs": set(),
+        "bottom": True,
+        "count": 0,
+        "closest": True,
+    }
+    assert graph.existing_pair_reads == 1
+    assert graph.link_reads == 1
 
 
 def test_seed_and_anchor_reuse_lazily_prepared_objects(
@@ -212,7 +252,7 @@ def test_seed_and_anchor_reuse_lazily_prepared_objects(
     assert graph.link_reads == 1
 
 
-def test_branch_probe_runs_immediately_after_anchor_insert(
+def test_family_phase_receives_metadata_flags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     nodes = [
@@ -221,13 +261,24 @@ def test_branch_probe_runs_immediately_after_anchor_insert(
     ]
     graph = _Graph(nodes)
     calls: list[str] = []
-    def _return_nodes(_nodes: list[NodeProxy]) -> list[NodeProxy]:
+    observed: dict[str, object] = {}
+    def _return_nodes(_images: list[NodeProxy]) -> list[NodeProxy]:
         return nodes
     monkeypatch.setattr(phase_order, "config", {"ranking": {"reserve_count": 2}})
     monkeypatch.setattr(phase_order.random, "shuffle", _keep_order)
     monkeypatch.setattr(phase_order, "stable_seed_pool", _return_nodes)
     monkeypatch.setattr(
-        phase_order, "PHASES", ({"name": "anchor"}, {"name": "branch_probe"})
+        phase_order,
+        "PHASES",
+        (
+            {"name": "anchor"},
+            {
+                "name": "mostly_winners",
+                "bottom": False,
+                "count": 1,
+                "closest": False,
+            },
+        ),
     )
 
     def anchor_phase(
@@ -238,17 +289,22 @@ def test_branch_probe_runs_immediately_after_anchor_insert(
         calls.append("anchor")
         return None
 
-    def branch_probe_phase(
+    def count_phase(
         candidates: list[NodeProxy],
-        existing_pairs: set[tuple[str, str]],
+        _existing_pairs: set[tuple[str, str]],
+        _pairing_processor: PairingProcessorPort,
+        *,
+        bottom: bool,
+        count: int,
+        closest: bool,
     ) -> tuple[NodeProxy, NodeProxy]:
-        calls.append("branch_probe")
+        calls.append("mostly_winners")
+        observed.update(bottom=bottom, count=count, closest=closest)
         assert candidates == nodes
-        assert existing_pairs == set()
-        return nodes[0], nodes[1]
+        return candidates[0], candidates[1]
 
     monkeypatch.setattr(phase_order, "phase_anchor_insert", anchor_phase)
-    monkeypatch.setattr(phase_order, "phase_branch_probe", branch_probe_phase)
+    monkeypatch.setattr(phase_order, "phase_exact_count_pair", count_phase)
 
     pair, phase_index = phase_order.select_pair(
         _image_rows(),
@@ -259,4 +315,5 @@ def test_branch_probe_runs_immediately_after_anchor_insert(
 
     assert pair == ("a", "b")
     assert phase_index == 1
-    assert calls == ["anchor", "branch_probe"]
+    assert calls == ["anchor", "mostly_winners"]
+    assert observed == {"bottom": False, "count": 1, "closest": False}

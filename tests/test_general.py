@@ -816,6 +816,7 @@ class TestAestheticScoreNodeDelegation:
                 sampler="euler",
                 scheduler="normal",
                 model_name="test-model",
+                clip_skip=-1,
                 lora_name="",
                 lora_strength=0.0,
             )
@@ -838,6 +839,7 @@ class TestAestheticScoreNodeDelegation:
             assert kwargs["sampler"] == "euler"
             assert kwargs["scheduler"] == "normal"
             assert kwargs["model_name"] == "test-model"
+            assert kwargs["clip_skip"] == -1
             assert kwargs["lora_name"] == ""
             assert kwargs["lora_strength"] == 0.0
             # NOTE: min_images and max_images have defaults in INPUT_TYPES
@@ -871,6 +873,7 @@ class TestAestheticScoreNodeReturnTypes:
                 sampler="euler",
                 scheduler="normal",
                 model_name="test-model",
+                clip_skip=-1,
                 lora_name="",
                 lora_strength=0.0,
             )

@@ -281,12 +281,6 @@ class MemoryComparisonRepository:
             "kept": len(self.rows),
         }
 
-    def get_nodes_with_only_wins(self) -> list[str]:
-        return []
-
-    def get_nodes_with_only_losses(self) -> list[str]:
-        return []
-
     def clear_all_comparisons(self) -> int:
         count = len(self.rows)
         self.rows.clear()

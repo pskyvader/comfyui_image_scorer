@@ -324,6 +324,46 @@ def test_apply_link_returns_the_record_it_touched() -> None:
     assert len(history) == 2
 
 
+def test_known_better_worse_counts_follow_transitive_reach() -> None:
+    """Counts include implied wins and losses along the whole chain."""
+    images = ["a", "b", "c", "d", "e"]
+    comparisons: list[ComparisonRow] = [
+        {"filename_a": "a", "filename_b": "b", "winner": "a"},
+        {"filename_a": "b", "filename_b": "c", "winner": "b"},
+        {"filename_a": "c", "filename_b": "d", "winner": "c"},
+        {"filename_a": "d", "filename_b": "e", "winner": "d"},
+    ]
+
+    cm = _build_manager(comparisons, all_filenames=set(images))
+
+    assert cm.get_node_known_better_count("a") == 0
+    assert cm.get_node_known_worse_count("a") == 4
+    assert cm.get_node_known_better_count("c") == 2
+    assert cm.get_node_known_worse_count("c") == 2
+    assert cm.get_node_known_better_count("e") == 4
+    assert cm.get_node_known_worse_count("e") == 0
+
+
+def test_known_counts_treat_contradiction_group_as_one_unit() -> None:
+    """Cycle members share counts, never count each other, and each member of
+    the group counts individually toward nodes outside the group."""
+    images = ["a", "b", "c", "d"]
+    comparisons: list[ComparisonRow] = [
+        {"filename_a": "a", "filename_b": "b", "winner": "a"},
+        {"filename_a": "b", "filename_b": "c", "winner": "b"},
+        {"filename_a": "c", "filename_b": "a", "winner": "c"},
+        {"filename_a": "c", "filename_b": "d", "winner": "c"},
+    ]
+
+    cm = _build_manager(comparisons, all_filenames=set(images))
+
+    for member in ("a", "b", "c"):
+        assert cm.get_node_known_better_count(member) == 0
+        assert cm.get_node_known_worse_count(member) == 1
+    assert cm.get_node_known_better_count("d") == 3
+    assert cm.get_node_known_worse_count("d") == 0
+
+
 def test_real_data_performance() -> None:
     """Test ChainManager performance on real database data (~30K nodes, ~96K comparisons)."""
     logger.debug("Starting test_real_data_performance...")

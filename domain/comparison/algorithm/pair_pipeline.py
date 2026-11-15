@@ -19,25 +19,6 @@ def form_candidate_pairs(
     return [(node_a, node_b) for node_b in compatible_nodes]
 
 
-def get_chain_merge_pair_candidates(
-    a_nodes: list[NodeProxy],
-    b_nodes: list[NodeProxy],
-    a_mid: NodeProxy,
-    b_mid: NodeProxy,
-) -> list[Pair]:
-    """Build midpoint, aligned, and cross-product pairs for two chains."""
-    pair_list: list[Pair] = form_candidate_pairs(a_mid, [b_mid])
-    chain_pairs: zip[tuple[NodeProxy, NodeProxy]] = zip(a_nodes, b_nodes)
-    pair_list.extend(chain_pairs)
-    for node_a in a_nodes:
-        compatible_nodes: list[NodeProxy] = [
-            node_b for node_b in b_nodes if node_b.filename != node_a.filename
-        ]
-        if compatible_nodes:
-            pair_list.extend(form_candidate_pairs(node_a, compatible_nodes))
-    return pair_list
-
-
 def filter_existing_pairs(
     pair_list: list[Pair], existing_pair_set: set[tuple[str, str]]
 ) -> list[Pair]:
@@ -50,18 +31,21 @@ def filter_existing_pairs(
     ]
 
 
-def filter_chain_merge_pairs(
-    pair_list: list[Pair], cg: CrystalGraphPort
-) -> list[Pair]:
-    """Order unique pairs by public-score gap and exclude pairs already in one path."""
-    unique_pairs: dict[Pair, None] = dict.fromkeys(pair_list)
-    ordered_pairs: list[Pair] = list(unique_pairs)
-    ordered_pairs.sort(key=lambda pair: abs(pair[0].score - pair[1].score))
-    return [
+def filter_cross_chain_pairs(
+    pair_list: list[Pair],
+    existing_pair_set: set[tuple[str, str]],
+    cg: CrystalGraphPort,
+) -> list[Pair] | None:
+    """Keep new pairs from different main chains that are not already connected."""
+    filtered_list: list[Pair] = [
         pair
-        for pair in ordered_pairs
+        for pair in filter_existing_pairs(pair_list, existing_pair_set)
         if not cg.are_in_same_path(pair[0].filename, pair[1].filename)
     ]
+
+    if not filtered_list:
+        return None
+    return filtered_list
 
 
 def filter_uncertainty_refine_pairs(
@@ -85,33 +69,17 @@ def filter_uncertainty_refine_pairs(
     return filtered_pairs
 
 
-def filter_chain_middle_pairs(
-    pair_list: list[Pair],
-    node_a: NodeProxy,
-    existing_pair_set: set[tuple[str, str]],
-    cg: CrystalGraphPort,
-) -> list[Pair] | None:
-    """Keep new pairs from different main chains that are not already connected."""
-    anchor_chain_id: int = node_a.get_chain()[0].id
-    filtered_list: list[Pair] = [
-        pair
-        for pair in pair_list
-        if canonicalize_pair(pair[0].filename, pair[1].filename)
-        not in existing_pair_set
-        and anchor_chain_id != pair[1].get_chain()[0].id
-        and not cg.are_in_same_path(pair[0].filename, pair[1].filename)
-    ]
-
-    if not filtered_list:
-        return None
-    return filtered_list
+def sigma_range_cap(node_a: NodeProxy) -> float:
+    """Upper score-gap bound that the anchor's sigma allows for a pair."""
+    return node_a.sigma_uncertainty * float(config["ranking"]["sigma_range_multiplier"])
 
 
 def closest_score_pair(
     pair_list: list[Pair],
-    closest: bool = False,
+    closest: bool,
+    sigma_cap: float,
 ) -> Pair | None:
-    """Choose a score-gap pair within the anchor's sigma range."""
+    """Choose a score-gap pair within the given sigma cap."""
     if not pair_list:
         return None
     pair_list.sort(
@@ -124,15 +92,14 @@ def closest_score_pair(
     best_difference: float = abs(
         best_pair[0].trueskill_score - best_pair[1].trueskill_score
     )
-    sigma_range_multiplier: float = config["ranking"]["sigma_range_multiplier"]
-    if best_difference > best_pair[0].sigma_uncertainty * sigma_range_multiplier:
+    if best_difference > sigma_cap:
         return None
     if closest:
         return best_pair
 
     for pair in pair_list:
         difference: float = abs(pair[0].trueskill_score - pair[1].trueskill_score)
-        if difference > best_pair[0].sigma_uncertainty * sigma_range_multiplier:
+        if difference > sigma_cap:
             break
         if difference > best_difference:
             best_difference = difference

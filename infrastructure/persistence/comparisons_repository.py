@@ -135,28 +135,6 @@ def list_links() -> list[ComparisonRow]:
         return cast(list[ComparisonRow], [dict(row) for row in rows])
 
 
-def get_nodes_with_only_wins() -> list[str]:
-    with get_db_connection() as conn:
-        rows = conn.execute("""
-            SELECT DISTINCT winner AS filename FROM comparisons
-            EXCEPT
-            SELECT CASE WHEN winner = filename_a THEN filename_b ELSE filename_a END
-            FROM comparisons
-            """).fetchall()
-        return [str(row["filename"]) for row in rows]
-
-
-def get_nodes_with_only_losses() -> list[str]:
-    with get_db_connection() as conn:
-        rows = conn.execute("""
-            SELECT CASE WHEN winner = filename_a THEN filename_b ELSE filename_a END AS filename
-            FROM comparisons
-            EXCEPT
-            SELECT DISTINCT winner FROM comparisons
-            """).fetchall()
-        return [str(row["filename"]) for row in rows]
-
-
 def clean_comparisons() -> dict[str, int]:
     """Clean imported comparison history before any rating replay.
 
@@ -241,12 +219,6 @@ class SQLiteComparisonsRepository:
 
     def clean_comparisons(self) -> dict[str, int]:
         return clean_comparisons()
-
-    def get_nodes_with_only_wins(self) -> list[str]:
-        return get_nodes_with_only_wins()
-
-    def get_nodes_with_only_losses(self) -> list[str]:
-        return get_nodes_with_only_losses()
 
     def clear_all_comparisons(self) -> int:
         return clear_all_comparisons()

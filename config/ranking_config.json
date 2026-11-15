@@ -17,7 +17,7 @@
     "webp_effort": 0,
     "image_cache_ttl_seconds": 10,
     "minimum_chains_for_pairing": 20,
-    "chain_middle_min_chain_length": 2,
+    "chain_length_threshold": 2,
     "analysis_top_bottom_display_rows": 10,
     "analysis_histogram_bucket_count": 10
 }

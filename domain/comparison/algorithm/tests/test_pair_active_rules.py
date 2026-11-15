@@ -32,11 +32,18 @@ class _Node:
     trueskill_score: float = 0.5
     sigma_uncertainty: float = 10.0
     score: float = 0.5
+    position: int = 50
     chain: _Chain | None = None
+    known_better_count: int = 0
+    known_worse_count: int = 0
 
     @property
     def mu_skill(self) -> float:
         return self.score
+
+    @property
+    def position_score(self) -> int:
+        return self.position
 
     def get_links(
         self, worse_than: bool = False, better_than: bool = False
@@ -53,16 +60,23 @@ class _Node:
         return True
 
 
-class _CountingNode(_Node):
-    def __init__(self, filename: str, link_count: int) -> None:
-        super().__init__(filename, link_count)
-        self.link_queries: list[bool] = []
+@dataclass(eq=False)
+class _CountNode:
+    filename: str
+    wins: int = 0
+    losses: int = 0
+    trueskill_score: float = 0.5
+    sigma_uncertainty: float = 10.0
+    link_count: int = 0
 
     def get_links(
         self, worse_than: bool = False, better_than: bool = False
-    ) -> list[_Node]:
-        self.link_queries.append(worse_than)
-        return super().get_links(worse_than, better_than)
+    ) -> list[_CountNode]:
+        if worse_than:
+            return [self] * self.wins
+        if better_than:
+            return [self] * self.losses
+        return [self] * (self.wins + self.losses)
 
 
 @dataclass
@@ -91,11 +105,25 @@ class _Chain:
             return self.nodes[position]
         return None
 
+    def get_position(self, node: NodeProxy) -> int | None:
+        if node in self.nodes:
+            return self.nodes.index(node)
+        return None
+
 
 class _Graph:
-    def __init__(self, chains: list[_Chain]) -> None:
+    def __init__(
+        self, chains: list[_Chain], node_count: int | None = None
+    ) -> None:
         self.chains = chains
-        self.recent_chain_ids: list[int] = []
+        self._node_count = (
+            node_count
+            if node_count is not None
+            else len({node.filename for chain in chains for node in chain.nodes})
+        )
+
+    def get_node_count(self) -> int:
+        return self._node_count
 
     def get_all_chains(
         self, min_length: int = 0, sort_order: str = "asc"
@@ -109,20 +137,8 @@ class _Graph:
             reverse=sort_order == "desc",
         )
 
-    def get_recent_chain_ids(self) -> list[int]:
-        return list(self.recent_chain_ids)
-
-    def set_recent_chain_ids(self, chain_ids: list[int]) -> None:
-        self.recent_chain_ids = list(chain_ids)
-
     def are_in_same_path(self, filename_a: str, filename_b: str) -> bool:
         return filename_a == filename_b
-
-    def get_loser_only_nodes(self) -> list[NodeProxy]:
-        return [node for chain in self.chains for node in chain.nodes]
-
-    def get_winner_only_nodes(self) -> list[NodeProxy]:
-        return []
 
     def get_node(self, filename: str) -> NodeProxy | None:
         return next(
@@ -134,6 +150,13 @@ class _Graph:
             ),
             None,
         )
+
+
+class _SamePathGraph(_Graph):
+    """Graph variant that reports one specific filename pair as same-path."""
+
+    def are_in_same_path(self, filename_a: str, filename_b: str) -> bool:
+        return {filename_a, filename_b} == {"best-below", "best-above"}
 
 
 class _FakePairingProcessor:
@@ -153,8 +176,21 @@ def _nodes(*values: tuple[str, int]) -> list[NodeProxy]:
     ]
 
 
-def _branch_chain_fixture(prefix: str = "") -> tuple[
-    NodeProxy,
+def _middle_node(
+    filename: str, known_better: int, known_worse: int
+) -> NodeProxy:
+    return cast(
+        "NodeProxy",
+        _Node(
+            filename,
+            known_better + known_worse,
+            known_better_count=known_better,
+            known_worse_count=known_worse,
+        ),
+    )
+
+
+def _settler_fixture() -> tuple[
     NodeProxy,
     NodeProxy,
     NodeProxy,
@@ -163,39 +199,32 @@ def _branch_chain_fixture(prefix: str = "") -> tuple[
     _Chain,
     _Chain,
 ]:
-    upper = cast("NodeProxy", _Node(f"{prefix}upper", 0))
+    upper = cast("NodeProxy", _Node("upper", 0))
     anchor = cast(
-        "NodeProxy", _Node(f"{prefix}anchor", 1, trueskill_score=0.5)
+        "NodeProxy", _Node("anchor", 1, trueskill_score=0.5)
     )
-    above = cast("NodeProxy", _Node(f"{prefix}above", 3))
+    above = cast("NodeProxy", _Node("above", 3))
     first_below = cast(
-        "NodeProxy", _Node(f"{prefix}first-below", 2, trueskill_score=0.1)
+        "NodeProxy", _Node("first-below", 2, trueskill_score=0.1)
     )
     second_below = cast(
-        "NodeProxy", _Node(f"{prefix}second-below", 2, trueskill_score=0.49)
+        "NodeProxy", _Node("second-below", 2, trueskill_score=0.49)
     )
-    third_below = cast(
-        "NodeProxy", _Node(f"{prefix}third-below", 2, trueskill_score=0.3)
-    )
-    anchor_chain = _Chain([upper, anchor], id=1)
-    branch_chain = _Chain(
-        [above, upper, first_below, second_below, third_below], id=2
-    )
-    cast("_Node", upper).chain = branch_chain
-    cast("_Node", anchor).chain = anchor_chain
-    cast("_Node", above).chain = branch_chain
-    cast("_Node", first_below).chain = branch_chain
-    cast("_Node", second_below).chain = branch_chain
-    cast("_Node", third_below).chain = branch_chain
+    small_chain = _Chain([upper, anchor], id=1)
+    long_chain = _Chain([above, first_below, second_below], id=2)
+    cast("_Node", upper).chain = small_chain
+    cast("_Node", anchor).chain = small_chain
+    cast("_Node", above).chain = long_chain
+    cast("_Node", first_below).chain = long_chain
+    cast("_Node", second_below).chain = long_chain
     return (
-        anchor,
         upper,
+        anchor,
         above,
         first_below,
         second_below,
-        third_below,
-        anchor_chain,
-        branch_chain,
+        small_chain,
+        long_chain,
     )
 
 
@@ -209,13 +238,17 @@ def _config() -> dict[str, dict[str, object]]:
             "reserve_count": 1,
             "lru_size": 160,
             "minimum_chains_for_pairing": 2,
-            "chain_middle_min_chain_length": 10,
+            "chain_length_threshold": 10,
         }
     }
 
 
 def _pick_first_node(nodes: list[NodeProxy]) -> NodeProxy:
     return nodes[0]
+
+
+def _zero_pool_index(_pool_size: int) -> int:
+    return 0
 
 
 @pytest.fixture(autouse=True)
@@ -250,107 +283,220 @@ def test_seed_coverage_selects_anchor_from_candidate_nodes(
     assert result == (candidates[0], candidates[1])
 
 
-def test_single_win_loss_candidate_lanes_yield_on_demand(
+def test_exact_count_selector_counts_wins_for_bottom_pool_and_allows_orphans(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(pair_active.random, "choice", _pick_first_node)
+    monkeypatch.setattr(pair_active.random, "randrange", _zero_pool_index)
+    orphan = _CountNode("orphan")
+    never_won = _CountNode("never-won", wins=0, losses=2, trueskill_score=0.4)
+    double_winner = _CountNode("double-winner", wins=2, losses=0)
     candidates = [
-        cast("NodeProxy", _CountingNode("first", 1)),
-        cast("NodeProxy", _CountingNode("second", 1)),
+        cast("NodeProxy", orphan),
+        cast("NodeProxy", never_won),
+        cast("NodeProxy", double_winner),
     ]
 
-    result = pair_active.phase_single_win_loss(candidates, set(), _processor())
-
-    assert result == (candidates[0], candidates[1])
-    assert [cast("_CountingNode", node).link_queries for node in candidates] == [
-        [True],
-        [True],
-    ]
-
-
-def test_single_win_loss_keeps_pair_members_in_candidate_nodes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(pair_active.random, "choice", _pick_first_node)
-    candidates = _nodes(("anchor", 5), ("opponent", 6))
-
-    result = pair_active.phase_single_win_loss(candidates, set(), _processor())
-
-    assert result == (candidates[0], candidates[1])
-
-
-def test_chain_merge_selects_only_candidate_nodes_and_updates_recent_chains() -> None:
-    candidates = [
-        cast("NodeProxy", _Node("a0", 2, score=0.0)),
-        cast("NodeProxy", _Node("a1", 2, score=0.1)),
-        cast("NodeProxy", _Node("b0", 2, score=0.02)),
-        cast("NodeProxy", _Node("b1", 2, score=0.15)),
-    ]
-    graph = _Graph([_Chain(candidates[:2]), _Chain(candidates[2:])])
-
-    result = pair_active.phase_chain_merge(
-        candidates, cast("CrystalGraphPort", graph)
+    result = pair_active.select_exact_count_pair(
+        candidates, set(), _processor(), bottom=True, count=0, closest=False, retry=0
     )
 
-    assert result is not None
+    assert result == (candidates[0], candidates[1])
+
+
+def test_exact_count_selector_counts_losses_for_top_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pair_active.random, "randrange", _zero_pool_index)
+    never_lost_a = _CountNode("a", wins=3, losses=0)
+    never_lost_b = _CountNode("b", wins=1, losses=0)
+    single_loss = _CountNode("c", wins=1, losses=1)
+    candidates = [
+        cast("NodeProxy", never_lost_a),
+        cast("NodeProxy", never_lost_b),
+        cast("NodeProxy", single_loss),
+    ]
+
+    result = pair_active.select_exact_count_pair(
+        candidates, set(), _processor(), bottom=False, count=0, closest=False, retry=0
+    )
+
+    assert result == (candidates[0], candidates[1])
+
+
+def test_exact_count_selector_returns_none_when_pool_too_small() -> None:
+    candidates = [cast("NodeProxy", _CountNode("lonely"))]
+
+    result = pair_active.select_exact_count_pair(
+        candidates, set(), _processor(), bottom=True, count=0, closest=False, retry=0
+    )
+
+    assert result is None
+
+
+def test_exact_count_selector_skips_existing_pairs_without_marking_recent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pair_active.random, "randrange", _zero_pool_index)
+    processor = _FakePairingProcessor()
+    candidates = [
+        cast("NodeProxy", _CountNode("a")),
+        cast("NodeProxy", _CountNode("b")),
+        cast("NodeProxy", _CountNode("c")),
+    ]
+    existing_pair_set = {canonicalize_pair("a", "b")}
+
+    result = pair_active.select_exact_count_pair(
+        candidates,
+        existing_pair_set,
+        cast("PairingProcessorPort", processor),
+        bottom=True,
+        count=0,
+        closest=False,
+        retry=0,
+    )
+
     assert result == (candidates[0], candidates[2])
-    assert all(any(node is candidate for candidate in candidates) for node in result)
-    assert graph.recent_chain_ids == [0, 1]
+    assert list(processor.recent_images) == []
 
 
-def test_collapsible_pairs_select_only_candidate_nodes(
+def test_exact_count_selector_retries_then_falls_back_widest_gap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    candidates = _nodes(("least-compared", 1), ("other", 2))
-    graph = _Graph([_Chain([node]) for node in candidates])
-    monkeypatch.setattr(pair_active.random, "choice", _pick_first_node)
+    monkeypatch.setattr(pair_active.random, "randrange", _zero_pool_index)
+    processor = _FakePairingProcessor()
+    uncertain = _CountNode(
+        "uncertain", trueskill_score=0.5, sigma_uncertainty=0.01
+    )
+    opponent = _CountNode("opponent", trueskill_score=0.1)
+    candidates = [cast("NodeProxy", uncertain), cast("NodeProxy", opponent)]
 
-    result = pair_active.phase_collapsible_pairs(
-        candidates, cast("CrystalGraphPort", graph), _processor()
+    result = pair_active.select_exact_count_pair(
+        candidates,
+        set(),
+        cast("PairingProcessorPort", processor),
+        bottom=True,
+        count=0,
+        closest=False,
+        retry=0,
     )
 
     assert result == (candidates[0], candidates[1])
+    assert list(processor.recent_images) == ["uncertain"]
 
 
-def test_chain_middle_filters_pairs_after_candidate_formation(
+def test_chain_small_pairs_small_chain_extreme_with_long_chain_member(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    anchor, _, _, opponent, _, _, anchor_chain, branch_chain = (
-        _branch_chain_fixture()
+    upper, anchor, _, first_below, second_below, small_chain, long_chain = (
+        _settler_fixture()
     )
-    candidates = [anchor, opponent]
-    graph = _Graph([anchor_chain, branch_chain])
-    def _pick_anchor(_nodes: list[NodeProxy]) -> NodeProxy:
-        return anchor
-    monkeypatch.setattr(pair_active.random, "choice", _pick_anchor)
+    candidates = [upper, anchor, first_below, second_below]
+    graph = _Graph([small_chain, long_chain])
+    cfg = _config()
+    cfg["ranking"]["chain_length_threshold"] = 2
+    monkeypatch.setattr(pair_active, "config", cfg)
+    monkeypatch.setattr(pair_active.random, "randrange", _zero_pool_index)
 
-    result = pair_active.phase_chain_middle(
+    result = pair_active.phase_chain_small(
         candidates, set(), cast("CrystalGraphPort", graph), _processor()
     )
 
-    assert result == (anchor, opponent)
+    assert result == (candidates[0], candidates[3])
 
 
-def test_branch_probe_filters_then_selects_closest_score_pair(
+def test_chain_small_returns_none_without_long_chains() -> None:
+    upper, anchor, above, first_below, second_below, small_chain, long_chain = (
+        _settler_fixture()
+    )
+    candidates = [upper, anchor, above, first_below, second_below]
+    graph = _Graph([small_chain, long_chain])
+
+    result = pair_active.phase_chain_small(
+        candidates, set(), cast("CrystalGraphPort", graph), _processor()
+    )
+
+    assert result is None
+
+
+def test_chain_small_marks_recent_when_every_pair_is_filtered(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    first = _branch_chain_fixture()
-    second = _branch_chain_fixture("other-")
-    candidate_nodes = [
-        *first[:6],
-        *second[:6],
-    ]
-    node_a = first[0]
-    def _pick_node_a(_nodes: list[NodeProxy]) -> NodeProxy:
-        return node_a
-    monkeypatch.setattr(pair_active.random, "choice", _pick_node_a)
-    existing_pair_set = {
-        canonicalize_pair(node_a.filename, first[3].filename)
-    }
+    _, anchor, _, first_below, _, small_chain, long_chain = _settler_fixture()
+    candidates = [anchor, first_below]
+    graph = _Graph([small_chain, long_chain])
+    cfg = _config()
+    cfg["ranking"]["chain_length_threshold"] = 2
+    monkeypatch.setattr(pair_active, "config", cfg)
+    monkeypatch.setattr(pair_active.random, "randrange", _zero_pool_index)
+    processor = _FakePairingProcessor()
+    existing_pair_set = {canonicalize_pair("anchor", "first-below")}
 
-    result = pair_active.phase_branch_probe(candidate_nodes, existing_pair_set)
+    result = pair_active.phase_chain_small(
+        candidates,
+        existing_pair_set,
+        cast("CrystalGraphPort", graph),
+        cast("PairingProcessorPort", processor),
+    )
 
-    assert result == (node_a, first[4])
+    assert result is None
+    assert list(processor.recent_images) == ["anchor"]
+
+
+def test_chain_middle_pairs_flankers_around_target_rank() -> None:
+    below = _middle_node("below", 2, 3)
+    at_rank = _middle_node("at-rank", 3, 3)
+    too_losing = _middle_node("too-losing", 1, 5)
+    too_winning = _middle_node("too-winning", 4, 2)
+    candidates = [below, at_rank, too_losing, too_winning]
+    graph = _Graph([], node_count=7)
+
+    result = pair_active.phase_chain_middle(
+        candidates, set(), cast("CrystalGraphPort", graph)
+    )
+
+    assert result == (candidates[0], candidates[1])
+
+
+def test_chain_middle_returns_none_when_middle_resolved() -> None:
+    only_candidate = _middle_node("only", 2, 3)
+    disqualified = _middle_node("disqualified", 4, 2)
+    candidates = [only_candidate, disqualified]
+    graph = _Graph([], node_count=7)
+
+    result = pair_active.phase_chain_middle(
+        candidates, set(), cast("CrystalGraphPort", graph)
+    )
+
+    assert result is None
+
+
+def test_chain_middle_skips_blocked_flanker_pair() -> None:
+    best_below = _middle_node("best-below", 2, 3)
+    other_below = _middle_node("other-below", 1, 3)
+    best_above = _middle_node("best-above", 3, 3)
+    other_above = _middle_node("other-above", 3, 2)
+    candidates = [best_below, other_below, best_above, other_above]
+    graph = _SamePathGraph([], node_count=7)
+
+    result = pair_active.phase_chain_middle(
+        candidates, set(), cast("CrystalGraphPort", graph)
+    )
+
+    assert result == (candidates[0], candidates[3])
+
+
+def test_chain_middle_pairs_most_informed_candidates_when_one_sided() -> None:
+    pinned = _middle_node("pinned", 3, 3)
+    narrow = _middle_node("narrow", 3, 2)
+    wide = _middle_node("wide", 3, 1)
+    candidates = [pinned, narrow, wide]
+    graph = _Graph([], node_count=7)
+
+    result = pair_active.phase_chain_middle(
+        candidates, set(), cast("CrystalGraphPort", graph)
+    )
+
+    assert result == (candidates[0], candidates[1])
 
 
 def test_phase_pipeline_uses_data_arguments_instead_of_rule_callbacks() -> None:

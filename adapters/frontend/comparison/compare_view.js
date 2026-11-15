@@ -8,9 +8,8 @@
  *     right: describe_image(node_b),
  *     pair:  describe_pair(node_a, node_b, phase_index)
  *   }
- * The phase index is an int (0=seed, 1=anchor, 2=branch_probe,
- * 3=collapsible, 4=single_win_loss, 5=chain_middle, 6=refine,
- * 7=chain_merge, 8=fallback); its human label is mapped below.
+ * The phase index is an int into the backend PHASES list; names, labels,
+ * colors, and display flags come from that metadata, never a hardcoded index.
  */
 
 const CompareView = (() => {
@@ -179,31 +178,30 @@ const CompareView = (() => {
                 line = `Anchor insert - ${remaining.toLocaleString()} images below ${pair.insertion_target_comparisons} comparisons - ${ready.toLocaleString()} at \u2265${pair.insertion_target_comparisons} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             }
-            case "branch_probe":
-                line = `Branch probe - ${pair.total_chains.toLocaleString()} chains currently - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
+            case "only_losers":
+                line = `Only losers - ${pair.matching_count.toLocaleString()} images that never won a comparison - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
-            case "collapsible": {
-                // Collapsible: by definition both images share one component, so the
-                // component extremes are the merge frontier. top/bottom are "in
-                // progress"; everything else is a fully merged (ready) image.
-                const compId = left.component_id;
-                const compSize = left.component_size;
-                const top = left._extremes.top;
-                const bottom = left._extremes.bottom;
-                const inProgress = top + bottom;
-                const ready = pair.total_nodes - inProgress;
-                line = `Collapsible pairs${pair.collapsible ? " (resolving a branch)" : ""} - component ${compId} (${compSize.toLocaleString()} images) - top ${top.toLocaleString()} / bottom ${bottom.toLocaleString()} - ${inProgress.toLocaleString()} in progress / ${ready.toLocaleString()} ready - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
+            case "only_winners":
+                line = `Only winners - ${pair.matching_count.toLocaleString()} images that never lost a comparison - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
+                break;
+            case "mostly_losers":
+                line = `Mostly losers - ${pair.matching_count.toLocaleString()} images with exactly 1 win - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
+                break;
+            case "mostly_winners":
+                line = `Mostly winners - ${pair.matching_count.toLocaleString()} images with exactly 1 loss - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
+                break;
+            case "chain_small":
+                line = `Chain small - component ${left.component_id} (${left.component_size.toLocaleString()} images) - ${pair.target_chains.toLocaleString()} small chains to settle (of ${pair.total_chains.toLocaleString()}) - reserve ${pair.reserve_count} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
+                break;
+            case "chain_middle": {
+                // Median loop: report the exact-middle resolution state.
+                const median = pair.median_status;
+                const medianPart = median.resolved
+                    ? `middle image: ${median.candidate_filename}`
+                    : `${median.remaining_count.toLocaleString()} middle candidates left (closest: ${median.known_better} better / ${median.known_worse} worse known)`;
+                line = `Chain middle - ${medianPart} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             }
-            case "single_win_loss":
-                line = `Single win/loss - ${pair.single_win_count.toLocaleString()} with 1 win only - ${pair.single_loss_count.toLocaleString()} with 1 loss only - ${pair.ready_count.toLocaleString()} ready (more than 1 win & 1 loss) - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
-                break;
-            case "chain_middle":
-                line = `Chain middle - component ${left.component_id} (${left.component_size.toLocaleString()} images) - ${pair.total_chains.toLocaleString()} chains (target ${pair.target_chains}) - reserve ${pair.reserve_count} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
-                break;
-            case "chain_merge":
-                line = `Chain merge - component ${left.component_id} (${left.component_size.toLocaleString()} images) - ${pair.total_chains.toLocaleString()} chains (target ${pair.target_chains}) - reserve ${pair.reserve_count} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
-                break;
             case "refine":
                 line = `Uncertainty refine - ${pair.sigma_above_threshold.toLocaleString()} above \u03c3 threshold (\u2265${pair.sigma_threshold}) / ${pair.sigma_below_threshold.toLocaleString()} ready (\u03c3 < ${pair.sigma_threshold}) - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
