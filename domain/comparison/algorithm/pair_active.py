@@ -285,9 +285,7 @@ def phase_anchor_insert(
             candidate_images, node_a, node_a.link_count
         )
     else:
-        seed_target_comparisons: int = int(
-            config["ranking"]["seed_target_comparisons"]
-        )
+        seed_target_comparisons: int = int(config["ranking"]["seed_target_comparisons"])
         compatible_nodes = get_anchor_insert_opponents(
             candidate_images, node_a, seed_target_comparisons
         )
@@ -303,8 +301,17 @@ def phase_anchor_insert(
 
     pair_list: list[Pair] = form_candidate_pairs(node_a, compatible_nodes)
     pair_list = filter_existing_pairs(pair_list, existing_pair_set)
-    sigma_cap: float = sigma_range_cap(node_a)
-    result = closest_score_pair(pair_list, closest=True, sigma_cap=sigma_cap)
+
+    pair_list.sort(
+        key=lambda pair: (
+            abs(pair[0].position_score - pair[1].position_score),
+            pair[1].link_count,
+        )
+    )
+    result = pair_list[0] if pair_list else None
+
+    # sigma_cap: float = sigma_range_cap(node_a)
+    # result = closest_score_pair(pair_list, closest=True, sigma_cap=sigma_cap)
 
     if result is None:
         _log_sigma_miss(pair_list, _start)
