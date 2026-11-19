@@ -8,6 +8,7 @@ execution order — the list index IS the phase number.
 
 from __future__ import annotations
 
+import random
 import time
 from typing import NotRequired, TypedDict, cast
 
@@ -194,6 +195,8 @@ def select_pair(
             "select_pair: only %d candidates, need >=2", len(candidate_images)
         )
         return None, None
+
+    random.shuffle(candidate_images)
 
     candidate_nodes: list[NodeProxy] = [
         node

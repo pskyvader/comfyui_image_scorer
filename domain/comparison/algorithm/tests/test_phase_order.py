@@ -70,6 +70,10 @@ def _image_rows() -> list[ImageRow]:
     )
 
 
+def _keep_order(_images: list[ImageRow]) -> None:
+    return None
+
+
 def test_phase_metadata_names_do_not_store_function_references() -> None:
     phases = phase_order.get_phases()
 
@@ -121,6 +125,7 @@ def test_first_phase_skips_seed_pool_setup(
     ]
     graph = _Graph(nodes)
     monkeypatch.setattr(phase_order, "config", {"ranking": {"reserve_count": 2}})
+    monkeypatch.setattr(phase_order.random, "shuffle", _keep_order)
 
     observed: dict[str, object] = {}
 
@@ -195,6 +200,7 @@ def test_seed_and_anchor_reuse_lazily_prepared_objects(
     seed_pool_calls = 0
     observed_seed_pool: list[NodeProxy] = []
     monkeypatch.setattr(phase_order, "config", {"ranking": {"reserve_count": 2}})
+    monkeypatch.setattr(phase_order.random, "shuffle", _keep_order)
 
     def seed_phase(
         candidates: list[NodeProxy],
@@ -259,6 +265,7 @@ def test_family_phase_receives_metadata_flags(
     def _return_nodes(_images: list[NodeProxy]) -> list[NodeProxy]:
         return nodes
     monkeypatch.setattr(phase_order, "config", {"ranking": {"reserve_count": 2}})
+    monkeypatch.setattr(phase_order.random, "shuffle", _keep_order)
     monkeypatch.setattr(phase_order, "stable_seed_pool", _return_nodes)
     monkeypatch.setattr(
         phase_order,
