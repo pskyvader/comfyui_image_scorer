@@ -44,34 +44,28 @@ def count_exact_result_nodes(cg: CrystalGraphPort, bottom: bool, count: int) -> 
 
 
 def describe_median_status(cg: CrystalGraphPort) -> dict[str, object]:
-    """Report the exact-middle resolution state over all graph images.
+    """Report how many images can still be the middle and how many are ruled out.
 
-    The middle image is the one whose provable rank interval is the only one
-    containing the target rank ``(image_count - 1) // 2``; the interval of an
-    image spans its known better/worse counts. The most-informed remaining
-    candidate (narrowest interval) provides the reported better/worse balance.
+    The middle bound is half the images. An image stays eligible while both its
+    proven-better and proven-worse counts are at or below that bound. Those
+    counts only grow, so the eligible pool only shrinks and the excluded count
+    only grows.
     """
     total_images: int = cg.get_node_count()
-    target_rank: int = (total_images - 1) // 2
-    worse_rank_limit: int = total_images - 1 - target_rank
+    middle_bound: int = total_images // 2
     remaining: list[NodeProxy] = []
+    highest_known_better: int = 0
+    highest_known_worse: int = 0
     for node in cg.get_all_nodes():
         known_better: int = node.known_better_count
         known_worse: int = node.known_worse_count
-        if known_better <= target_rank and known_worse <= worse_rank_limit:
+        if known_better <= middle_bound and known_worse <= middle_bound:
             remaining.append(node)
-    best: NodeProxy | None = None
-    best_width: int | None = None
-    for node in remaining:
-        interval_width: int = (
-            total_images - 1 - node.known_worse_count - node.known_better_count
-        )
-        if best_width is None or interval_width < best_width:
-            best = node
-            best_width = interval_width
-    resolved: bool = len(remaining) == 1
-    middle_node: NodeProxy | None = best if resolved else None
+            highest_known_better = max(highest_known_better, known_better)
+            highest_known_worse = max(highest_known_worse, known_worse)
     remaining_count: int = len(remaining)
+    resolved: bool = remaining_count == 1
+    middle_node: NodeProxy | None = remaining[0] if resolved else None
     est_comparisons_min: int = (
         math.ceil(math.log2(remaining_count)) if remaining_count > 1 else 0
     )
@@ -81,12 +75,14 @@ def describe_median_status(cg: CrystalGraphPort) -> dict[str, object]:
         "candidate_filename": (
             middle_node.filename if middle_node is not None else None
         ),
-        "target_rank": target_rank,
+        "target_rank": middle_bound,
+        "middle_bound": middle_bound,
         "remaining_count": remaining_count,
+        "exited": total_images - remaining_count,
+        "highest_known_better": highest_known_better,
+        "highest_known_worse": highest_known_worse,
         "est_comparisons_min": est_comparisons_min,
         "est_comparisons_max": est_comparisons_max,
-        "known_better": best.known_better_count if best is not None else 0,
-        "known_worse": best.known_worse_count if best is not None else 0,
     }
 
 

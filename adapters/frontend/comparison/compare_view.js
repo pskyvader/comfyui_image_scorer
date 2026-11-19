@@ -199,20 +199,17 @@ const CompareView = (() => {
                 line = `Chain small - component ${left.component_id} (${left.component_size.toLocaleString()} images) - ${pair.target_chains.toLocaleString()} small chains to settle (of ${pair.total_chains.toLocaleString()}) - reserve ${pair.reserve_count} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             case "chain_middle": {
-                // Median loop: report the exact-middle resolution state.
+                // Middle loop: report the shrinking eligible pool.
                 const median = pair.median_status;
                 let medianPart;
                 if (!median) {
                     medianPart = "resolving middle image";
                 } else if (median.resolved) {
-                    medianPart = `Middle found: ${median.candidate_filename} (rank ${median.target_rank})`;
+                    medianPart = `Middle found: ${median.candidate_filename}`;
                 } else {
-                    const estText = median.est_comparisons_min === median.est_comparisons_max
-                        ? `${median.est_comparisons_min}`
-                        : `${median.est_comparisons_min}–${median.est_comparisons_max}`;
-                    medianPart = `${median.remaining_count.toLocaleString()} middle candidates left (~${estText} comparisons to find middle, target rank ${median.target_rank})`;
+                    medianPart = `${median.remaining_count.toLocaleString()} middle candidates left (at most ${median.est_comparisons_max} comparisons, middle bound ${median.middle_bound})`;
                 }
-                line = `Chain middle - ${medianPart} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
+                line = `Chain middle - ${medianPart} - ${(median?.exited ?? 0).toLocaleString()} images ruled out - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             }
             case "refine":
@@ -287,8 +284,10 @@ const CompareView = (() => {
                         <tr class="h-6"><td class="text-gray-500 pr-4">Prediction Accuracy</td><td class="text-white text-right">${accuracyText()}</td></tr>
                         ${pair.median_status ? `
                         <tr class="h-6"><td class="text-gray-500 pr-4">Middle Candidates Left</td><td class="text-yellow-400 font-bold text-right">${pair.median_status.remaining_count}</td></tr>
-                        <tr class="h-6"><td class="text-gray-500 pr-4">Est. Comps to Middle</td><td class="text-green-400 font-bold text-right">${pair.median_status.est_comparisons_min === pair.median_status.est_comparisons_max ? pair.median_status.est_comparisons_min : pair.median_status.est_comparisons_min + "–" + pair.median_status.est_comparisons_max}</td></tr>
-                        <tr class="h-6"><td class="text-gray-500 pr-4">Target Median Rank</td><td class="text-white text-right">${pair.median_status.target_rank}</td></tr>
+                        <tr class="h-6"><td class="text-gray-500 pr-4">Images Ruled Out</td><td class="text-white text-right">${pair.median_status.exited ?? 0}</td></tr>
+                        <tr class="h-6"><td class="text-gray-500 pr-4">Max Comparisons Left</td><td class="text-green-400 font-bold text-right">${pair.median_status.est_comparisons_max}</td></tr>
+                        <tr class="h-6"><td class="text-gray-500 pr-4">Middle Bound</td><td class="text-white text-right">${pair.median_status.middle_bound}</td></tr>
+                        <tr class="h-6"><td class="text-gray-500 pr-4">Nearest Exit (better / worse)</td><td class="text-white text-right font-mono">${pair.median_status.highest_known_better ?? 0} / ${pair.median_status.highest_known_worse ?? 0}</td></tr>
                         ` : ""}
                     </tbody>
                 </table>

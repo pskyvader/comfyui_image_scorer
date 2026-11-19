@@ -8,7 +8,6 @@ execution order — the list index IS the phase number.
 
 from __future__ import annotations
 
-import random
 import time
 from typing import NotRequired, TypedDict, cast
 
@@ -130,7 +129,7 @@ PHASES: tuple[PhaseMetadata | CountPhaseMetadata, ...] = (
     {
         "phase_label": "Phase 7 / Chain Middle",
         "color": "#c084fc",
-        "description": "compares the two remaining middle candidates estimated closest to the target rank to resolve the exact middle image",
+        "description": "keeps only images that could still be the middle: neither the pile proven better nor the pile proven worse has passed half the set. Each vote uses an image about to be ruled out, so every result eliminates someone for good and the countdown only goes down until one image is left",
         "show_chain_info": True,
         "show_mu_sigma": False,
         "show_wins_losses": True,
@@ -195,8 +194,6 @@ def select_pair(
             "select_pair: only %d candidates, need >=2", len(candidate_images)
         )
         return None, None
-
-    random.shuffle(candidate_images)
 
     candidate_nodes: list[NodeProxy] = [
         node
@@ -272,7 +269,9 @@ def select_pair(
                 closest=count_entry["closest"],
             )
         elif name == "chain_middle":
-            result = phase_chain_middle(candidate_nodes, existing_pairs_set, cg)
+            result = phase_chain_middle(
+                candidate_nodes, existing_pairs_set, cg, pairing_processor
+            )
         elif name == "refine":
             result = phase_uncertainty_refine(
                 candidate_nodes,

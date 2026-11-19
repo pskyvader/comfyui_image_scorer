@@ -69,6 +69,10 @@ class _CountNode:
     sigma_uncertainty: float = 10.0
     link_count: int = 0
 
+    @property
+    def position_score(self) -> int:
+        return 50
+
     def get_links(
         self, worse_than: bool = False, better_than: bool = False
     ) -> list[_CountNode]:
@@ -359,7 +363,7 @@ def test_exact_count_selector_skips_existing_pairs_without_marking_recent(
     assert list(processor.recent_images) == []
 
 
-def test_exact_count_selector_retries_then_falls_back_widest_gap(
+def test_exact_count_selector_uses_position_gap_when_scores_are_far_apart(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(pair_active.random, "randrange", _zero_pool_index)
@@ -381,7 +385,6 @@ def test_exact_count_selector_retries_then_falls_back_widest_gap(
     )
 
     assert result == (candidates[0], candidates[1])
-    assert list(processor.recent_images) == ["uncertain"]
 
 
 def test_chain_small_pairs_small_chain_extreme_with_long_chain_member(
@@ -442,65 +445,125 @@ def test_chain_small_marks_recent_when_every_pair_is_filtered(
     assert list(processor.recent_images) == ["anchor"]
 
 
-def test_chain_middle_pairs_flankers_around_target_rank() -> None:
-    below = _middle_node("below", 2, 3)
-    at_rank = _middle_node("at-rank", 3, 3)
-    too_losing = _middle_node("too-losing", 1, 5)
-    too_winning = _middle_node("too-winning", 4, 2)
-    candidates = [below, at_rank, too_losing, too_winning]
-    graph = _Graph([], node_count=7)
+def test_chain_middle_uses_half_set_bound_on_even_node_count() -> None:
+    first = _middle_node("first", 2, 2)
+    second = _middle_node("second", 3, 2)
+    third = _middle_node("third", 2, 3)
+    ruled_out = _middle_node("ruled-out", 4, 1)
+    graph = _Graph([], node_count=6)
 
     result = pair_active.phase_chain_middle(
-        candidates, set(), cast("CrystalGraphPort", graph)
+        [first, second, third, ruled_out],
+        set(),
+        cast("CrystalGraphPort", graph),
+        _processor(),
     )
 
-    assert result == (candidates[0], candidates[1])
+    assert result is not None
+    assert ruled_out not in result
 
 
-def test_chain_middle_returns_none_when_middle_resolved() -> None:
-    only_candidate = _middle_node("only", 2, 3)
-    disqualified = _middle_node("disqualified", 4, 2)
-    candidates = [only_candidate, disqualified]
-    graph = _Graph([], node_count=7)
+def test_chain_middle_returns_none_with_one_eligible_candidate() -> None:
+    only = _middle_node("only", 2, 2)
+    ruled_out = _middle_node("ruled-out", 4, 1)
+    graph = _Graph([], node_count=6)
 
     result = pair_active.phase_chain_middle(
-        candidates, set(), cast("CrystalGraphPort", graph)
+        [only, ruled_out],
+        set(),
+        cast("CrystalGraphPort", graph),
+        _processor(),
     )
 
     assert result is None
 
 
-def test_chain_middle_skips_blocked_flanker_pair() -> None:
-    best_below = _middle_node("best-below", 2, 3)
-    other_below = _middle_node("other-below", 1, 3)
-    best_above = _middle_node("best-above", 3, 3)
-    other_above = _middle_node("other-above", 3, 2)
-    candidates = [best_below, other_below, best_above, other_above]
-    graph = _SamePathGraph([], node_count=7)
-
-    result = pair_active.phase_chain_middle(
-        candidates, set(), cast("CrystalGraphPort", graph)
-    )
-
-    # (other-below, best-above) scores highest on eliminations and narrowing
-    # and is not blocked by _SamePathGraph (only best-below/best-above are same-path).
-    assert result == (candidates[1], candidates[2])
-
-
-def test_chain_middle_pairs_most_informed_candidates_when_one_sided() -> None:
-    pinned = _middle_node("pinned", 3, 3)
-    narrow = _middle_node("narrow", 3, 2)
-    wide = _middle_node("wide", 3, 1)
-    candidates = [pinned, narrow, wide]
+def test_chain_middle_pairs_two_remaining_candidates_without_special_case() -> None:
+    first = _middle_node("first", 3, 1)
+    second = _middle_node("second", 1, 3)
     graph = _Graph([], node_count=7)
 
     result = pair_active.phase_chain_middle(
-        candidates, set(), cast("CrystalGraphPort", graph)
+        [first, second],
+        set(),
+        cast("CrystalGraphPort", graph),
+        _processor(),
     )
 
-    # (pinned, wide) provides the highest total interval narrowing since
-    # wide has the widest unconstrained span to shrink.
-    assert result == (candidates[0], candidates[2])
+    assert result is not None
+    assert set(result) == {first, second}
+
+
+def test_chain_middle_filters_opponents_before_trimming(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _config()
+    cfg["ranking"]["lru_size"] = 1
+    monkeypatch.setattr(pair_active, "config", cfg)
+    anchor = _middle_node("best-below", 3, 1)
+    blocked = _middle_node("best-above", 2, 1)
+    allowed = _middle_node("allowed", 1, 1)
+    graph = _SamePathGraph([], node_count=7)
+
+    result = pair_active.phase_chain_middle(
+        [anchor, blocked, allowed],
+        set(),
+        cast("CrystalGraphPort", graph),
+        _processor(),
+    )
+
+    assert result == (anchor, allowed)
+
+
+def test_chain_middle_marks_anchor_recent_without_valid_opponents() -> None:
+    anchor = _middle_node("best-below", 3, 1)
+    blocked = _middle_node("best-above", 2, 1)
+    processor = _FakePairingProcessor()
+    graph = _SamePathGraph([], node_count=7)
+
+    result = pair_active.phase_chain_middle(
+        [anchor, blocked],
+        set(),
+        cast("CrystalGraphPort", graph),
+        cast("PairingProcessorPort", processor),
+    )
+
+    assert result is None
+    assert list(processor.recent_images) == ["best-below"]
+
+
+def test_chain_middle_picks_closest_skill_from_shortlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _config()
+    cfg["ranking"]["lru_size"] = 3
+    monkeypatch.setattr(pair_active, "config", cfg)
+    anchor = cast(
+        "NodeProxy",
+        _Node("anchor", 4, known_better_count=4, known_worse_count=0, trueskill_score=0.5),
+    )
+    close_count = cast(
+        "NodeProxy",
+        _Node("close-count", 3, known_better_count=3, known_worse_count=0, trueskill_score=0.1),
+    )
+    middle_count = cast(
+        "NodeProxy",
+        _Node("middle-count", 2, known_better_count=2, known_worse_count=0, trueskill_score=0.3),
+    )
+    close_score = cast(
+        "NodeProxy",
+        _Node("close-score", 1, known_better_count=1, known_worse_count=0, trueskill_score=0.5),
+    )
+    graph = _Graph([], node_count=9)
+
+    result = pair_active.phase_chain_middle(
+        [anchor, close_count, middle_count, close_score],
+        set(),
+        cast("CrystalGraphPort", graph),
+        _processor(),
+    )
+
+    assert result == (anchor, close_score)
 
 
 def test_phase_pipeline_uses_data_arguments_instead_of_rule_callbacks() -> None:

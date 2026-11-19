@@ -55,6 +55,13 @@ def _key_link_count(node: NodeProxy) -> int:
     return node.link_count
 
 
+def _key_position_gap(pair: Pair) -> tuple[int, int]:
+    return (
+        abs(pair[0].position_score - pair[1].position_score),
+        pair[1].link_count,
+    )
+
+
 def _log_selected_pair(result: Pair, _start: float) -> None:
     """Log the standard success message for all phases."""
     logger.debug(
@@ -138,12 +145,7 @@ def select_exact_count_pair(
         )
         return result
 
-    pair_list.sort(
-        key=lambda pair: (
-            abs(pair[0].position_score - pair[1].position_score),
-            pair[1].link_count,
-        )
-    )
+    pair_list.sort(key=_key_position_gap)
     result = pair_list[0] if pair_list else None
 
     # sigma_cap: float = sigma_range_cap(node_a)
@@ -167,184 +169,33 @@ def select_exact_count_pair(
     return result
 
 
-_CandidateEntry = tuple[NodeProxy, int, int]
-_CandidatePair = tuple[_CandidateEntry, _CandidateEntry]
+def _middle_matching_count(node: NodeProxy) -> int:
+    """Distance to leaving the middle pool on whichever side is closest."""
+    return max(node.known_better_count, node.known_worse_count)
 
 
-def _key_cand_better(c: _CandidateEntry) -> int:
-    return c[1]
+def _middle_anchor_key(node: NodeProxy) -> tuple[int, int]:
+    """Order candidates by nearest exit, then by the direction of their chain position."""
+    prefer_better_side: bool = node.known_better_count >= node.known_worse_count
+    position_key: int = (
+        node.position_score if prefer_better_side else -node.position_score
+    )
+    return -_middle_matching_count(node), position_key
 
 
-def _key_cand_worse(c: _CandidateEntry) -> int:
-    return c[2]
-
-
-def _key_cand_interval(c: _CandidateEntry) -> int:
-    return -(c[1] + c[2])
-
-
-def _elim_counts(
-    entry_a: _CandidateEntry,
-    entry_b: _CandidateEntry,
-    target_rank: int,
-    worse_rank_limit: int,
-) -> tuple[int, int]:
-    """Return (elim_if_a_wins, elim_if_b_wins) using reachability bounds."""
-    _, better_a, worse_a = entry_a
-    _, better_b, worse_b = entry_b
-    elim_aw: int = int(better_a + 1 > target_rank) + int(worse_b + 1 > worse_rank_limit)
-    elim_bw: int = int(better_b + 1 > target_rank) + int(worse_a + 1 > worse_rank_limit)
-    return elim_aw, elim_bw
-
-
-def _narrow_counts(
-    entry_a: _CandidateEntry,
-    entry_b: _CandidateEntry,
-) -> tuple[int, int]:
-    """Return (narrow_if_a_wins, narrow_if_b_wins) using interval bounds."""
-    _, better_a, worse_a = entry_a
-    _, better_b, worse_b = entry_b
-    narrow_aw: int = max(0, better_a + 1 - better_b) + max(0, worse_b + 1 - worse_a)
-    narrow_bw: int = max(0, better_b + 1 - better_a) + max(0, worse_a + 1 - worse_b)
-    return narrow_aw, narrow_bw
-
-
-def _filter_guaranteed_eliminations(
-    pairs: list[_CandidatePair],
-    target_rank: int,
-    worse_rank_limit: int,
-) -> list[_CandidatePair]:
-    """Keep pairs with the highest worst-case candidate eliminations."""
-    if len(pairs) <= 1:
-        return pairs
-    scored: list[tuple[int, _CandidatePair]] = [
-        (min(_elim_counts(p[0], p[1], target_rank, worse_rank_limit)), p)
-        for p in pairs
-    ]
-    max_score: int = max(s for s, _ in scored)
-    return [p for s, p in scored if s == max_score]
-
-
-def _filter_total_eliminations(
-    pairs: list[_CandidatePair],
-    target_rank: int,
-    worse_rank_limit: int,
-) -> list[_CandidatePair]:
-    """Keep pairs with the highest total expected eliminations."""
-    if len(pairs) <= 1:
-        return pairs
-    scored: list[tuple[int, _CandidatePair]] = [
-        (sum(_elim_counts(p[0], p[1], target_rank, worse_rank_limit)), p)
-        for p in pairs
-    ]
-    max_score: int = max(s for s, _ in scored)
-    return [p for s, p in scored if s == max_score]
-
-
-def _filter_guaranteed_narrowing(
-    pairs: list[_CandidatePair],
-) -> list[_CandidatePair]:
-    """Keep pairs with the highest worst-case interval narrowing."""
-    if len(pairs) <= 1:
-        return pairs
-    scored: list[tuple[int, _CandidatePair]] = [
-        (min(_narrow_counts(p[0], p[1])), p) for p in pairs
-    ]
-    max_score: int = max(s for s, _ in scored)
-    return [p for s, p in scored if s == max_score]
-
-
-def _filter_total_narrowing(
-    pairs: list[_CandidatePair],
-) -> list[_CandidatePair]:
-    """Keep pairs with the highest total interval narrowing."""
-    if len(pairs) <= 1:
-        return pairs
-    scored: list[tuple[int, _CandidatePair]] = [
-        (sum(_narrow_counts(p[0], p[1])), p) for p in pairs
-    ]
-    max_score: int = max(s for s, _ in scored)
-    return [p for s, p in scored if s == max_score]
-
-
-def _prune_middle_candidates(
-    candidates: list[_CandidateEntry],
-    target_rank: int,
-    worse_rank_limit: int,
-) -> list[_CandidateEntry]:
-    """Select the most informative boundary nodes and flankers for large candidate pools."""
-    boundary: list[_CandidateEntry] = [
-        c for c in candidates if c[1] == target_rank or c[2] == worse_rank_limit
-    ]
-    by_better: list[_CandidateEntry] = sorted(
-        candidates, key=_key_cand_better, reverse=True
-    )[:25]
-    by_worse: list[_CandidateEntry] = sorted(
-        candidates, key=_key_cand_worse, reverse=True
-    )[:25]
-    by_narrow: list[_CandidateEntry] = sorted(
-        candidates, key=_key_cand_interval, reverse=True
-    )[:25]
-    seen: set[str] = set()
-    pruned: list[_CandidateEntry] = []
-    for c in boundary + by_better + by_worse + by_narrow:
-        fn: str = c[0].filename
-        if fn not in seen:
-            seen.add(fn)
-            pruned.append(c)
-    return pruned
-
-
-def select_median_flanker_pair(
-    middle_candidates: list[tuple[NodeProxy, int, int]],
-    target_rank: int,
-    total_images: int,
-    blocked_pairs: set[tuple[str, str]],
-) -> Pair | None:
-    """Pick the candidate pair whose comparison eliminates the most candidates.
-
-    Filters unblocked candidate pairs through sequential stages:
-    1. Guaranteed (worst-case) candidate eliminations.
-    2. Total expected eliminations.
-    3. Guaranteed (worst-case) rank interval narrowing.
-    4. Total rank interval narrowing.
-
-    Each stage only executes if multiple candidate pairs remain tied.
-    """
-    if len(middle_candidates) <= 1:
-        return None
-
-    worse_rank_limit: int = total_images - 1 - target_rank
-    candidates: list[_CandidateEntry] = middle_candidates
-    if len(candidates) > 100:
-        candidates = _prune_middle_candidates(
-            candidates, target_rank, worse_rank_limit
-        )
-
-    pairs: list[_CandidatePair] = []
-    for i in range(len(candidates)):
-        entry_a = candidates[i]
-        fn_a: str = entry_a[0].filename
-        for j in range(i + 1, len(candidates)):
-            entry_b = candidates[j]
-            fn_b: str = entry_b[0].filename
-            if (fn_a, fn_b) in blocked_pairs or (fn_b, fn_a) in blocked_pairs:
-                continue
-            pairs.append((entry_a, entry_b))
-
-    if not pairs:
-        return None
-
-    pairs = _filter_guaranteed_eliminations(pairs, target_rank, worse_rank_limit)
-    if len(pairs) > 1:
-        pairs = _filter_total_eliminations(pairs, target_rank, worse_rank_limit)
-    if len(pairs) > 1:
-        pairs = _filter_guaranteed_narrowing(pairs)
-    if len(pairs) > 1:
-        pairs = _filter_total_narrowing(pairs)
-
-    best: _CandidatePair = pairs[0]
-    return best[0][0], best[1][0]
+def _middle_opponent_key(item: tuple[bool, int, Pair]) -> tuple[int, int]:
+    """Order opponents by how close their matching count is to the anchor's."""
+    prefer_better_side, anchor_count, pair = item
+    opponent: NodeProxy = pair[1]
+    side_count: int = (
+        opponent.known_better_count
+        if prefer_better_side
+        else opponent.known_worse_count
+    )
+    position_key: int = (
+        opponent.position_score if prefer_better_side else -opponent.position_score
+    )
+    return abs(side_count - anchor_count), position_key
 
 
 # =============================================================================
@@ -442,12 +293,7 @@ def phase_anchor_insert(
     pair_list: list[Pair] = form_candidate_pairs(node_a, compatible_nodes)
     pair_list = filter_existing_pairs(pair_list, existing_pair_set)
 
-    pair_list.sort(
-        key=lambda pair: (
-            abs(pair[0].position_score - pair[1].position_score),
-            pair[1].link_count,
-        )
-    )
+    pair_list.sort(key=_key_position_gap)
     result = pair_list[0] if pair_list else None
 
     # sigma_cap: float = sigma_range_cap(node_a)
@@ -496,54 +342,63 @@ def phase_chain_middle(
     candidate_images: list[NodeProxy],
     existing_pair_set: set[tuple[str, str]],
     cg: CrystalGraphPort,
+    pairing_processor: PairingProcessorPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
-    """Narrow the exact middle image by comparing its two closest remaining candidates.
+    """Resolve the middle image by voting on a candidate about to be ruled out.
 
-    The middle image is the one whose provable rank interval is the only one
-    containing the target rank ``(image_count - 1) // 2``. Every remaining
-    candidate keeps its interval; each comparison picks the two candidates
-    estimated closest to that rank from opposite sides.
+    An image can still be the middle only while neither of its proven counts
+    has passed half the images. Those counts only grow, so the pool of possible
+    middles only ever shrinks. This phase puts the image closest to leaving the
+    pool on the left and offers it only images it has never met. Because that
+    anchor sits on an edge, either outcome rules at least one image out for
+    good and the countdown cannot go back up.
+
+    Candidates are ordered by how close they are to an exit and by chain
+    position. Opponents are filtered before being trimmed to the closest
+    counts, and the final pair is the closest skill match in that shortlist.
     """
     _start: float = time.perf_counter()
     total_images: int = cg.get_node_count()
-    target_rank: int = (total_images - 1) // 2
-    worse_rank_limit: int = total_images - 1 - target_rank
-    middle_candidates: list[tuple[NodeProxy, int, int]] = []
+    middle_bound: int = total_images // 2
+    pool: list[NodeProxy] = []
     for node in candidate_images:
-        known_better: int = node.known_better_count
-        known_worse: int = node.known_worse_count
-        if known_better > target_rank or known_worse > worse_rank_limit:
-            continue
-        middle_candidates.append((node, known_better, known_worse))
-    if len(middle_candidates) <= 1:
+        if (
+            node.known_better_count <= middle_bound
+            and node.known_worse_count <= middle_bound
+        ):
+            pool.append(node)
+    if len(pool) <= 1:
         logger.debug(
-            f"{len(middle_candidates)} middle candidates remain, nothing to compare",
+            f"{len(pool)} middle candidates remain, nothing to compare",
             start_timer=_start,
         )
         return None
 
-    result: Pair | None = None
-    blocked_pairs: set[tuple[str, str]] = set()
-    attempts: int = 0
-    while result is None and attempts <= _MAX_RETRIES:
-        pair: Pair | None = select_median_flanker_pair(
-            middle_candidates, target_rank, total_images, blocked_pairs
-        )
-        if pair is None:
-            break
-        node_a: NodeProxy = pair[0]
-        node_b: NodeProxy = pair[1]
-        pair_list: list[Pair] = form_candidate_pairs(node_a, [node_b])
-        pair_list_filtered: list[Pair] | None = filter_cross_chain_pairs(
-            pair_list, existing_pair_set, cg
-        )
-        if pair_list_filtered is None:
-            blocked_pairs.add((node_a.filename, node_b.filename))
-            attempts += 1
-            continue
-        result = pair_list_filtered[0]
+    pool.sort(key=_middle_anchor_key)
+    anchor: NodeProxy = pool[0]
+    prefer_better_side: bool = anchor.known_better_count >= anchor.known_worse_count
+    anchor_count: int = _middle_matching_count(anchor)
+    opponents: list[NodeProxy] = pool[1:]
+
+    pair_list: list[Pair] = form_candidate_pairs(anchor, opponents)
+    valid_pairs: list[Pair] | None = filter_cross_chain_pairs(
+        pair_list, existing_pair_set, cg
+    )
+    if valid_pairs is None:
+        _mark_recent(pairing_processor, anchor.filename)
+        logger.debug("no untested opponent for the middle anchor", start_timer=_start)
+        return None
+
+    lru_size: int = int(config["ranking"]["lru_size"])
+    ranked: list[tuple[bool, int, Pair]] = [
+        (prefer_better_side, anchor_count, pair) for pair in valid_pairs
+    ]
+    ranked.sort(key=_middle_opponent_key)
+    shortlist: list[Pair] = [item[2] for item in ranked[:lru_size]]
+    result: Pair | None = closest_score_pair(shortlist, closest=True, sigma_cap=math.inf)
     if result is None:
-        logger.debug("no unblocked flanker pair available", start_timer=_start)
+        _mark_recent(pairing_processor, anchor.filename)
+        logger.debug("no pair inside the middle shortlist", start_timer=_start)
         return None
     _log_selected_pair(result, _start)
     return result
