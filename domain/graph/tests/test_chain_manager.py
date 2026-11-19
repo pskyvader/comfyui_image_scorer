@@ -324,6 +324,34 @@ def test_apply_link_returns_the_record_it_touched() -> None:
     assert len(history) == 2
 
 
+def test_main_chain_positions_are_indexed_once() -> None:
+    images = ["a", "b", "c", "d"]
+    comparisons: list[ComparisonRow] = [
+        {"filename_a": "a", "filename_b": "b", "winner": "a"},
+        {"filename_a": "b", "filename_b": "c", "winner": "b"},
+        {"filename_a": "c", "filename_b": "d", "winner": "c"},
+    ]
+
+    cm = _build_manager(comparisons, all_filenames=set(images))
+
+    assert [cm.get_node_main_position(name) for name in images] == [0, 1, 2, 3]
+
+
+def test_same_path_uses_full_reachability() -> None:
+    images = ["a", "b", "c", "d", "e", "f"]
+    comparisons: list[ComparisonRow] = [
+        {"filename_a": "a", "filename_b": "b", "winner": "a"},
+        {"filename_a": "b", "filename_b": "c", "winner": "b"},
+        {"filename_a": "c", "filename_b": "d", "winner": "c"},
+        {"filename_a": "d", "filename_b": "e", "winner": "d"},
+        {"filename_a": "e", "filename_b": "f", "winner": "e"},
+    ]
+
+    cm = _build_manager(comparisons, all_filenames=set(images))
+
+    assert cm.are_in_same_path("a", "f") is True
+
+
 def test_known_better_worse_counts_follow_transitive_reach() -> None:
     """Counts include implied wins and losses along the whole chain."""
     images = ["a", "b", "c", "d", "e"]

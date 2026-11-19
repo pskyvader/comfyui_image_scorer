@@ -240,7 +240,9 @@ def build_reach_counts(
     scc_predecessors: dict[int, set[int]],
     scc_successors: dict[int, set[int]],
     scc_order: list[int],
-) -> tuple[dict[str, int], dict[str, int]]:
+) -> tuple[
+    dict[str, int], dict[str, int], list[int], list[int]
+]:
     """Count images provably better/worse than each image via reachability.
 
     Contradiction groups (SCCs) count as one ranking unit: a group's members
@@ -284,7 +286,7 @@ def build_reach_counts(
         for member in scc_members[group_id]:
             known_better[member] = better_count
             known_worse[member] = worse_count
-    return known_better, known_worse
+    return known_better, known_worse, better_bits, worse_bits
 
 
 # ======================================================================
@@ -314,8 +316,12 @@ class ChainManager:
         self._node_main_chain: dict[str, tuple[int, list[str]]] = {}
         self._main_chain_nodes: dict[int, list[str]] = {}
         self._main_chain_member_count: dict[int, int] = {}
+        self._node_main_position: dict[str, int] = {}
         self._node_known_better: dict[str, int] = {}
         self._node_known_worse: dict[str, int] = {}
+        self._node_group: dict[str, int] = {}
+        self._better_group_bits: list[int] = []
+        self._worse_group_bits: list[int] = []
 
         self._common_chains: dict[int, tuple[list[str], bool]] = {}
         self._node_chains: dict[str, dict[int, bool]] = {}
@@ -648,8 +654,12 @@ class ChainManager:
         self._node_chains = {}
         self._main_chain_nodes = {}
         self._main_chain_member_count = {}
+        self._node_main_position = {}
         self._node_known_better = {}
         self._node_known_worse = {}
+        self._node_group = {}
+        self._better_group_bits = []
+        self._worse_group_bits = []
 
         # 1. Find SCCs (condense cycles into single nodes)
         scc_id_of, scc_members = tarjan_scc(
@@ -865,10 +875,25 @@ class ChainManager:
             self._main_chain_nodes[chain_id] = main_nodes
             self._main_chain_member_count[chain_id] = len(main_nodes)
 
+        seen_main_chains: set[int] = set()
+        for _, full_chain in self._node_main_chain.values():
+            chain_key: int = id(full_chain)
+            if chain_key in seen_main_chains:
+                continue
+            seen_main_chains.add(chain_key)
+            for position, node_id in enumerate(full_chain):
+                self._node_main_position[node_id] = position
+
         # 6. Known better/worse counts (transitive reachability over the SCC DAG)
-        self._node_known_better, self._node_known_worse = build_reach_counts(
+        (
+            self._node_known_better,
+            self._node_known_worse,
+            self._better_group_bits,
+            self._worse_group_bits,
+        ) = build_reach_counts(
             scc_members, scc_predecessors, scc_successors, scc_order
         )
+        self._node_group = dict(scc_id_of)
 
         logger.info(
             f"Built {len(self._chains)} main chains",
@@ -890,6 +915,9 @@ class ChainManager:
 
     def get_main_chain_member_count(self, chain_id: int) -> int:
         return self._main_chain_member_count.get(chain_id, 0)
+
+    def get_node_main_position(self, node_id: str) -> int | None:
+        return self._node_main_position.get(node_id)
 
     def get_node_known_better_count(self, node_id: str) -> int:
         return self._node_known_better.get(node_id, 0)
@@ -931,7 +959,6 @@ class ChainManager:
     def are_in_same_path(self, start: str, end: str) -> bool:
         if self._quick_reject_shared(start, end) is not None:
             return False
-
         forward_possible = bool(self._worse_than.get(start)) and bool(
             self._better_than.get(end)
         )
@@ -943,14 +970,18 @@ class ChainManager:
         if start == end:
             return True
 
-        same_chain, _ = self._check_same_chain(start, end)
-        if same_chain:
+        start_group: int | None = self._node_group.get(start)
+        end_group: int | None = self._node_group.get(end)
+        if start_group is None or end_group is None:
+            return False
+        if start_group == end_group:
             return True
-        if forward_possible and self._bfs_search(start, end, 3):
-            return True
-        if reverse_possible and self._bfs_search(end, start, 3):
-            return True
-        return False
+
+        end_bit: int = 1 << end_group
+        return bool(
+            self._better_group_bits[start_group] & end_bit
+            or self._worse_group_bits[start_group] & end_bit
+        )
 
     def _bfs_search(
         self,

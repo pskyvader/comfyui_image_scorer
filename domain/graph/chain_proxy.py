@@ -55,10 +55,8 @@ class ChainProxy:
         return self._chain.get_main_chain_member_count(self._id)
 
     def get_position(self, node: NodeProxy) -> int | None:
-        """Get the position of a node within the chain, 0-based index."""
-        if node.id not in self._nodes:
-            return None
-        return self._nodes.index(node.id)
+        """Get the position of a node within its main chain, 0-based index."""
+        return self._chain.get_node_main_position(node.id)
 
     @property
     def is_main(self) -> bool:
