@@ -207,7 +207,7 @@ const CompareView = (() => {
                 } else if (median.resolved) {
                     medianPart = `Middle found: ${median.candidate_filename}`;
                 } else {
-                    medianPart = `${median.remaining_count.toLocaleString()} middle candidates left (at most ${median.est_comparisons_max} comparisons, middle bound ${median.middle_bound})`;
+                    medianPart = `${median.remaining_count.toLocaleString()} middle candidates left (at most ${median.est_comparisons_max} comparisons, middle bound ${median.middle_bound} = max proven better-or-worse per image)`;
                 }
                 line = `Chain middle - ${medianPart} - ${(median?.exited ?? 0).toLocaleString()} images ruled out - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
@@ -286,7 +286,7 @@ const CompareView = (() => {
                         <tr class="h-6"><td class="text-gray-500 pr-4">Middle Candidates Left</td><td class="text-yellow-400 font-bold text-right">${pair.median_status.remaining_count}</td></tr>
                         <tr class="h-6"><td class="text-gray-500 pr-4">Images Ruled Out</td><td class="text-white text-right">${pair.median_status.exited ?? 0}</td></tr>
                         <tr class="h-6"><td class="text-gray-500 pr-4">Max Comparisons Left</td><td class="text-green-400 font-bold text-right">${pair.median_status.est_comparisons_max}</td></tr>
-                        <tr class="h-6"><td class="text-gray-500 pr-4">Middle Bound</td><td class="text-white text-right">${pair.median_status.middle_bound}</td></tr>
+                        <tr class="h-6"><td class="text-gray-500 pr-4">Middle Bound (max better / worse per image)</td><td class="text-white text-right">${pair.median_status.middle_bound}</td></tr>
                         <tr class="h-6"><td class="text-gray-500 pr-4">Nearest Exit (better / worse)</td><td class="text-white text-right font-mono">${pair.median_status.highest_known_better ?? 0} / ${pair.median_status.highest_known_worse ?? 0}</td></tr>
                         ` : ""}
                     </tbody>
