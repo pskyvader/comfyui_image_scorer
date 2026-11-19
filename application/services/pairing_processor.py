@@ -273,6 +273,7 @@ class PairingProcessor:
                 )
 
             update_desc()
+            source_birthtime = {path: path.stat().st_birthtime for path in batch_files}
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 future_to_file = {
                     executor.submit(self.process_image_file, img_path): img_path
@@ -294,6 +295,7 @@ class PairingProcessor:
                                 prompt_tags=prompt_tags,
                                 rating_mu=INITIAL_MEAN,
                                 rating_sigma=INITIAL_UNCERTAINTY,
+                                added_at=source_birthtime[future_to_file[future]],
                             ):
                                 added += 1
                                 current_global += 1
@@ -344,7 +346,7 @@ class PairingProcessor:
         )
 
         image_rows: list[ImageRowForInsert] = []
-        for img_path, entry, _timestamp, _file_id in all_entries:
+        for img_path, entry, _metadata_key, _file_id in all_entries:
             cleaned = clean_json_metadata(
                 entry,
                 default_score=self.default_score,
@@ -360,6 +362,7 @@ class PairingProcessor:
                     "rating_sigma": INITIAL_UNCERTAINTY,
                     "comparison_count": 0,
                     "prompt_tags": cleaned.get("prompt_tags"),
+                    "added_at": Path(img_path).stat().st_birthtime,
                 }
             )
         for chunk_start in tqdm(
@@ -389,7 +392,7 @@ class PairingProcessor:
             delay=3.0,
             position=0,
         ) as pbar:
-            for img_path, entry, _timestamp, _file_id in all_entries:
+            for img_path, entry, _metadata_key, _file_id in all_entries:
                 filename = Path(img_path).name
 
                 cleaned = clean_json_metadata(

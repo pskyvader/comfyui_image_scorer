@@ -482,7 +482,9 @@ def test_chain_middle_skips_blocked_flanker_pair() -> None:
         candidates, set(), cast("CrystalGraphPort", graph)
     )
 
-    assert result == (candidates[0], candidates[3])
+    # (other-below, best-above) scores highest on eliminations and narrowing
+    # and is not blocked by _SamePathGraph (only best-below/best-above are same-path).
+    assert result == (candidates[1], candidates[2])
 
 
 def test_chain_middle_pairs_most_informed_candidates_when_one_sided() -> None:
@@ -496,7 +498,9 @@ def test_chain_middle_pairs_most_informed_candidates_when_one_sided() -> None:
         candidates, set(), cast("CrystalGraphPort", graph)
     )
 
-    assert result == (candidates[0], candidates[1])
+    # (pinned, wide) provides the highest total interval narrowing since
+    # wide has the widest unconstrained span to shrink.
+    assert result == (candidates[0], candidates[2])
 
 
 def test_phase_pipeline_uses_data_arguments_instead_of_rule_callbacks() -> None:

@@ -140,6 +140,7 @@ class CrystalGraphPort(Protocol):
         prompt_tags: str | None,
         rating_mu: float,
         rating_sigma: float,
+        added_at: float,
     ) -> bool: ...
 
     def update_image_rating_state(

@@ -35,6 +35,7 @@ def _seed_images(names: list[str]) -> None:
             prompt_tags=None,
             rating_mu=0.0,
             rating_sigma=0.0,
+            added_at=100.0,
         )
 
 
@@ -159,6 +160,7 @@ def test_bulk_images_match_per_row() -> None:
             "rating_sigma": 2.0,
             "comparison_count": 3,
             "prompt_tags": "tag_a",
+            "added_at": 100.0,
         },
         {
             "filename": "b.png",
@@ -167,6 +169,7 @@ def test_bulk_images_match_per_row() -> None:
             "rating_sigma": 2.5,
             "comparison_count": 4,
             "prompt_tags": None,
+            "added_at": 200.0,
         },
     ]
     for row in per_row:
@@ -177,6 +180,7 @@ def test_bulk_images_match_per_row() -> None:
             prompt_tags=row["prompt_tags"],
             rating_mu=row["rating_mu"],
             rating_sigma=row["rating_sigma"],
+            added_at=row["added_at"],
         )
     per_row_stored = images_repository.list_nodes()
     images_repository.clear_all_images()
@@ -186,6 +190,10 @@ def test_bulk_images_match_per_row() -> None:
 
     assert inserted == 2
     assert bulk_stored == per_row_stored
+    assert {row["filename"]: row.get("added_at") for row in bulk_stored} == {
+        "a.png": 100.0,
+        "b.png": 200.0,
+    }
 
 
 @pytest.mark.usefixtures("temp_db")

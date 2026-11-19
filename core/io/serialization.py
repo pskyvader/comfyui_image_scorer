@@ -11,7 +11,7 @@ from ..observability.logger import get_logger, ModuleLogger
 
 logger: ModuleLogger = get_logger(__name__)
 
-# One discovered ranked image: image path, companion JSON entry, timestamp, file id.
+# One discovered ranked image: image path, companion JSON entry, leading metadata key, file id.
 CollectedFile: TypeAlias = tuple[str, dict[str, Any], str, str]
 
 
@@ -79,16 +79,16 @@ def collect_single_file(
             if keys:
                 first_key = keys[0]
                 if isinstance(entry[first_key], dict) and len(keys) < 5:
-                    timestamp = first_key
+                    metadata_key = first_key
                     entry = entry[first_key]
                 else:
-                    timestamp = "unknown"
+                    metadata_key = "unknown"
             else:
-                timestamp = "unknown"
+                metadata_key = "unknown"
         else:
-            timestamp = next(iter(entry.keys())) if entry.keys() else "unknown"
+            metadata_key = next(iter(entry.keys())) if entry.keys() else "unknown"
 
-        result = (img_path, entry, timestamp, file_id)
+        result = (img_path, entry, metadata_key, file_id)
 
     return result
 

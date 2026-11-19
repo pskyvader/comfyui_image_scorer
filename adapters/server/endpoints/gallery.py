@@ -74,14 +74,10 @@ def list_images():
             items.sort(key=lambda item: int(item[1]["comparison_count"]))
         elif sort_by == "comparisons_desc":
             items.sort(key=lambda item: int(item[1]["comparison_count"]), reverse=True)
-        elif sort_by in {"last_compared_desc", "newest"}:
-            items.sort(
-                key=lambda item: item[1].get("last_compared_at") or "", reverse=True
-            )
-        elif sort_by == "last_compared_asc":
-            items.sort(
-                key=lambda item: item[1].get("last_compared_at") or "9999-99-99"
-            )
+        elif sort_by == "added_desc":
+            items.sort(key=lambda item: item[1].get("added_at", 0.0), reverse=True)
+        elif sort_by == "added_asc":
+            items.sort(key=lambda item: item[1].get("added_at", 0.0))
 
     if search_tags:
         sort_list(filtered_and)

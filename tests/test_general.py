@@ -258,6 +258,29 @@ def test_endpoint_bodies_are_single_calls():
                 assert token in source, f"{route}: missing call {token}"
 
 
+def test_gallery_added_sort_uses_stored_added_at():
+    deps = _make_fake_deps()
+    rows = [
+        {"filename": "old.png", "score": 0.5, "comparison_count": 0, "prompt_tags": None, "added_at": 100.0},
+        {"filename": "new.png", "score": 0.5, "comparison_count": 0, "prompt_tags": None, "added_at": 300.0},
+        {"filename": "mid.png", "score": 0.5, "comparison_count": 0, "prompt_tags": None, "added_at": 200.0},
+    ]
+    deps.graph = SimpleNamespace(
+        get_all_nodes=lambda: [
+            SimpleNamespace(filename=row["filename"], score=row["score"], data=row)
+            for row in rows
+        ]
+    )
+    app = _make_app(deps)
+
+    with app.test_client() as client:
+        newest = client.get("/api/gallery/images?sort=added_desc").get_json()
+        oldest = client.get("/api/gallery/images?sort=added_asc").get_json()
+
+    assert [img["filename"] for img in newest["images"]] == ["new.png", "mid.png", "old.png"]
+    assert [img["filename"] for img in oldest["images"]] == ["old.png", "mid.png", "new.png"]
+
+
 def test_no_dry_run_references():
     pattern = re.compile(r"dry[_\-]?run|dryRun", re.IGNORECASE)
     ignored = {".git", "output", "comfyui_image_scorer_old", "__pycache__"}

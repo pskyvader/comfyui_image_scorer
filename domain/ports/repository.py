@@ -20,6 +20,7 @@ class ImageRow(TypedDict):
     last_compared_at: str | None
     ranking_generation: int
     prompt_tags: str | None
+    added_at: NotRequired[float]
 
 
 class ComparisonRow(TypedDict):
@@ -49,6 +50,7 @@ class ImageRowForInsert(TypedDict):
     rating_sigma: float
     comparison_count: int
     prompt_tags: str | None
+    added_at: float
 
 
 class ImageRepository(Protocol):
@@ -66,6 +68,7 @@ class ImageRepository(Protocol):
         prompt_tags: str | None,
         rating_mu: float,
         rating_sigma: float,
+        added_at: float,
     ) -> bool: ...
 
     def update_image_rating_state(

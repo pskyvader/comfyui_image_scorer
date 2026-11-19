@@ -377,6 +377,7 @@ class CrystalGraph:
         prompt_tags: str | None,
         rating_mu: float,
         rating_sigma: float,
+        added_at: float,
     ) -> bool:
         """Insert one image row into the repository.
 
@@ -392,6 +393,7 @@ class CrystalGraph:
             prompt_tags=prompt_tags,
             rating_mu=rating_mu,
             rating_sigma=rating_sigma,
+            added_at=added_at,
         )
 
     def add_images_bulk(self, rows: list[ImageRowForInsert]) -> int:

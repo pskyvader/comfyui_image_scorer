@@ -7,6 +7,7 @@ strategies.
 
 from __future__ import annotations
 
+import math
 import time
 
 from ....core.configuration.settings import config
@@ -70,12 +71,20 @@ def describe_median_status(cg: CrystalGraphPort) -> dict[str, object]:
             best_width = interval_width
     resolved: bool = len(remaining) == 1
     middle_node: NodeProxy | None = best if resolved else None
+    remaining_count: int = len(remaining)
+    est_comparisons_min: int = (
+        math.ceil(math.log2(remaining_count)) if remaining_count > 1 else 0
+    )
+    est_comparisons_max: int = max(0, remaining_count - 1)
     return {
         "resolved": resolved,
         "candidate_filename": (
             middle_node.filename if middle_node is not None else None
         ),
-        "remaining_count": len(remaining),
+        "target_rank": target_rank,
+        "remaining_count": remaining_count,
+        "est_comparisons_min": est_comparisons_min,
+        "est_comparisons_max": est_comparisons_max,
         "known_better": best.known_better_count if best is not None else 0,
         "known_worse": best.known_worse_count if best is not None else 0,
     }

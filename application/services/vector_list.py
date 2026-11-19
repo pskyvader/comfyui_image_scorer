@@ -86,7 +86,7 @@ class VectorList:
 
         duplicated: list[str] = []
         for data in raw_data:
-            image_path, entry, _timestamp, file_id = data
+            image_path, entry, _metadata_key, file_id = data
 
             if (
                 file_id in self.unique_ids

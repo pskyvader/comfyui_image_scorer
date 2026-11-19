@@ -74,7 +74,8 @@ def _ensure_images_table(conn: sqlite3.Connection) -> None:
             comparison_count INTEGER DEFAULT 0,
             last_compared_at TEXT,
             ranking_generation INTEGER DEFAULT 0,
-            prompt_tags TEXT
+            prompt_tags TEXT,
+            added_at REAL NOT NULL
         )
         """)
 

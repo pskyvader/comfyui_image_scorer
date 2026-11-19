@@ -37,14 +37,23 @@ def add_image(
     prompt_tags: str | None,
     rating_mu: float,
     rating_sigma: float,
+    added_at: float,
 ) -> None:
     with get_db_connection() as conn:
         conn.execute(
             """
-            INSERT OR IGNORE INTO images (filename, score, rating_mu, rating_sigma, comparison_count, prompt_tags)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO images (filename, score, rating_mu, rating_sigma, comparison_count, prompt_tags, added_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (filename, score, rating_mu, rating_sigma, comparison_count, prompt_tags),
+            (
+                filename,
+                score,
+                rating_mu,
+                rating_sigma,
+                comparison_count,
+                prompt_tags,
+                added_at,
+            ),
         )
         conn.commit()
 
@@ -57,8 +66,8 @@ def add_images_bulk(rows: list[ImageRowForInsert]) -> int:
         conn.executemany(
             """
             INSERT OR IGNORE INTO images
-            (filename, score, rating_mu, rating_sigma, comparison_count, prompt_tags)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (filename, score, rating_mu, rating_sigma, comparison_count, prompt_tags, added_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -68,6 +77,7 @@ def add_images_bulk(rows: list[ImageRowForInsert]) -> int:
                     float(row.get("rating_sigma", 0.0)),
                     int(row.get("comparison_count", 0)),
                     row.get("prompt_tags"),
+                    float(row["added_at"]),
                 )
                 for row in rows
             ],
@@ -220,6 +230,7 @@ class SQLiteImagesRepository:
         prompt_tags: str | None,
         rating_mu: float,
         rating_sigma: float,
+        added_at: float,
     ) -> bool:
         add_image(
             filename=filename,
@@ -228,6 +239,7 @@ class SQLiteImagesRepository:
             prompt_tags=prompt_tags,
             rating_mu=rating_mu,
             rating_sigma=rating_sigma,
+            added_at=added_at,
         )
         return True
 

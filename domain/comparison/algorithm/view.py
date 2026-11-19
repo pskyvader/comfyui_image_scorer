@@ -146,6 +146,8 @@ def _describe_one(node: NodeProxy, cg: CrystalGraphPort) -> dict[str, Any]:
         "trueskill_score": round(float(node.trueskill_score), 4),
         "position_score": int(node.position_score),
         "link_count": int(node.link_count),
+        "known_better": int(node.known_better_count),
+        "known_worse": int(node.known_worse_count),
         "wins": len(node.get_links(worse_than=True)),
         "losses": len(node.get_links(better_than=True)),
         "chain_length": chain_length,

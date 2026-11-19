@@ -9,6 +9,12 @@ const galleryLogger = FrontendLogger.create("external_modules.gallery.frontend.g
 const UNLIMITED_COMPARISONS = 10;
 const NO_COMPARISON_LIMIT = 999999;
 
+// Older saved filters stored the comparison-based sort values; keep them usable.
+const LEGACY_SORT_VALUES = {
+    last_compared_desc: "added_desc",
+    last_compared_asc: "added_asc",
+};
+
 // Slider span per score form. Trueskill scores sit below zero for freshly
 // ranked images because the score is mu - 3 sigma (both start at 0).
 const SCORE_RANGES = {
@@ -287,7 +293,7 @@ class GalleryView {
                     this.els.comparisonsMax.value = filters.comparisonsMax ?? 10;
                 }
                 if (this.els.sortFilter) {
-                    this.els.sortFilter.value = filters.sort ?? "score_desc";
+                    this.els.sortFilter.value = LEGACY_SORT_VALUES[filters.sort] ?? filters.sort ?? "score_desc";
                 }
                 if (this.els.tagsFilter) {
                     this.els.tagsFilter.value = filters.tags ?? "";

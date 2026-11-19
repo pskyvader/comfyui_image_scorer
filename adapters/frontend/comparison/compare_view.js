@@ -94,6 +94,11 @@ const CompareView = (() => {
             lines.push(`μ: ${node.rating_mu.toFixed(2)}`);
             lines.push(`σ: ${node.rating_sigma.toFixed(2)}`);
         }
+        if (phase && phase.name === "chain_middle") {
+            const better = node.known_better ?? 0;
+            const worse = node.known_worse ?? 0;
+            lines.push(`Known: ${better} better / ${worse} worse`);
+        }
         if (phase && phase.show_wins_losses) {
             const wins = node.wins ?? 0;
             const losses = node.losses ?? 0;
@@ -196,9 +201,17 @@ const CompareView = (() => {
             case "chain_middle": {
                 // Median loop: report the exact-middle resolution state.
                 const median = pair.median_status;
-                const medianPart = median.resolved
-                    ? `middle image: ${median.candidate_filename}`
-                    : `${median.remaining_count.toLocaleString()} middle candidates left (closest: ${median.known_better} better / ${median.known_worse} worse known)`;
+                let medianPart;
+                if (!median) {
+                    medianPart = "resolving middle image";
+                } else if (median.resolved) {
+                    medianPart = `Middle found: ${median.candidate_filename} (rank ${median.target_rank})`;
+                } else {
+                    const estText = median.est_comparisons_min === median.est_comparisons_max
+                        ? `${median.est_comparisons_min}`
+                        : `${median.est_comparisons_min}–${median.est_comparisons_max}`;
+                    medianPart = `${median.remaining_count.toLocaleString()} middle candidates left (~${estText} comparisons to find middle, target rank ${median.target_rank})`;
+                }
                 line = `Chain middle - ${medianPart} - ${pair.total_nodes.toLocaleString()} images - ${pair.total_links.toLocaleString()} comparisons`;
                 break;
             }
@@ -258,6 +271,7 @@ const CompareView = (() => {
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Is Seed</td><td class="text-white text-right">${node.is_seed ? "yes" : "no"}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Is Top</td><td class="text-white text-right">${node.is_top ? "yes" : "no"}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Is Bottom</td><td class="text-white text-right">${node.is_bottom ? "yes" : "no"}</td></tr>
+            <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Known Better / Worse</td><td class="text-white text-right font-mono">${node.known_better ?? 0} / ${node.known_worse ?? 0}</td></tr>
             <tr class="h-6 border-b border-white/5"><td class="text-gray-500 pr-4">Extremes</td><td class="text-white text-right">top ${node._extremes.top} / bottom ${node._extremes.bottom}</td></tr>
         `;
 
@@ -271,6 +285,11 @@ const CompareView = (() => {
                         <tr class="h-6"><td class="text-gray-500 pr-4">Same Component</td><td class="text-white">${sameComponent}</td></tr>
                         <tr class="h-6"><td class="text-gray-500 pr-4">${winnerText} / right (${Math.round(probB * 100)}%)</td><td class="text-white text-right">left ${probA.toFixed(4)}</td></tr>
                         <tr class="h-6"><td class="text-gray-500 pr-4">Prediction Accuracy</td><td class="text-white text-right">${accuracyText()}</td></tr>
+                        ${pair.median_status ? `
+                        <tr class="h-6"><td class="text-gray-500 pr-4">Middle Candidates Left</td><td class="text-yellow-400 font-bold text-right">${pair.median_status.remaining_count}</td></tr>
+                        <tr class="h-6"><td class="text-gray-500 pr-4">Est. Comps to Middle</td><td class="text-green-400 font-bold text-right">${pair.median_status.est_comparisons_min === pair.median_status.est_comparisons_max ? pair.median_status.est_comparisons_min : pair.median_status.est_comparisons_min + "–" + pair.median_status.est_comparisons_max}</td></tr>
+                        <tr class="h-6"><td class="text-gray-500 pr-4">Target Median Rank</td><td class="text-white text-right">${pair.median_status.target_rank}</td></tr>
+                        ` : ""}
                     </tbody>
                 </table>
                 <table class="w-full text-left border-collapse">

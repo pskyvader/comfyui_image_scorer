@@ -146,6 +146,7 @@ class MemoryImageRepository:
         prompt_tags: str | None,
         rating_mu: float,
         rating_sigma: float,
+        added_at: float,
     ) -> bool:
         self.rows[filename] = ImageRow(
             filename=filename,
@@ -156,6 +157,7 @@ class MemoryImageRepository:
             last_compared_at=None,
             ranking_generation=0,
             prompt_tags=prompt_tags,
+            added_at=added_at,
         )
         return True
 
@@ -168,6 +170,7 @@ class MemoryImageRepository:
                 prompt_tags=row["prompt_tags"],
                 rating_mu=row["rating_mu"],
                 rating_sigma=row["rating_sigma"],
+                added_at=row["added_at"],
             )
         return len(rows)
 
