@@ -381,21 +381,32 @@ def phase_chain_middle(
     opponents: list[NodeProxy] = pool[1:]
 
     pair_list: list[Pair] = form_candidate_pairs(anchor, opponents)
-    valid_pairs: list[Pair] | None = filter_cross_chain_pairs(
-        pair_list, existing_pair_set, cg
-    )
-    if valid_pairs is None:
+    ranked: list[tuple[bool, int, Pair]] = [
+        (prefer_better_side, anchor_count, pair) for pair in pair_list
+    ]
+    ranked.sort(key=_middle_opponent_key)
+    ordered_pairs: list[Pair] = [item[2] for item in ranked]
+
+    lru_size: int = int(config["ranking"]["lru_size"])
+    shortlist: list[Pair] = []
+    offset: int = 0
+    while len(shortlist) < lru_size and offset < len(ordered_pairs):
+        batch: list[Pair] = ordered_pairs[offset : offset + lru_size]
+        valid_batch: list[Pair] | None = filter_cross_chain_pairs(
+            batch, existing_pair_set, cg
+        )
+        if valid_batch is not None:
+            shortlist.extend(valid_batch)
+        offset += lru_size
+    shortlist = shortlist[:lru_size]
+    if not shortlist:
         _mark_recent(pairing_processor, anchor.filename)
         logger.debug("no untested opponent for the middle anchor", start_timer=_start)
         return None
 
-    lru_size: int = int(config["ranking"]["lru_size"])
-    ranked: list[tuple[bool, int, Pair]] = [
-        (prefer_better_side, anchor_count, pair) for pair in valid_pairs
-    ]
-    ranked.sort(key=_middle_opponent_key)
-    shortlist: list[Pair] = [item[2] for item in ranked[:lru_size]]
-    result: Pair | None = closest_score_pair(shortlist, closest=True, sigma_cap=math.inf)
+    result: Pair | None = closest_score_pair(
+        shortlist, closest=True, sigma_cap=math.inf
+    )
     if result is None:
         _mark_recent(pairing_processor, anchor.filename)
         logger.debug("no pair inside the middle shortlist", start_timer=_start)
