@@ -494,7 +494,7 @@ def test_chain_middle_pairs_two_remaining_candidates_without_special_case() -> N
     assert set(result) == {first, second}
 
 
-def test_chain_middle_filters_opponents_before_trimming(
+def test_chain_middle_trims_before_filtering(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _config()
@@ -504,15 +504,17 @@ def test_chain_middle_filters_opponents_before_trimming(
     blocked = _middle_node("best-above", 2, 1)
     allowed = _middle_node("allowed", 1, 1)
     graph = _SamePathGraph([], node_count=7)
+    processor = _FakePairingProcessor()
 
     result = pair_active.phase_chain_middle(
         [anchor, blocked, allowed],
         set(),
         cast("CrystalGraphPort", graph),
-        _processor(),
+        cast("PairingProcessorPort", processor),
     )
 
-    assert result == (anchor, allowed)
+    assert result is None
+    assert list(processor.recent_images) == ["best-below"]
 
 
 def test_chain_middle_marks_anchor_recent_without_valid_opponents() -> None:

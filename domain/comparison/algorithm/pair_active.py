@@ -183,10 +183,9 @@ def _middle_anchor_key(node: NodeProxy) -> tuple[int, int]:
     return -_middle_matching_count(node), position_key
 
 
-def _middle_opponent_key(item: tuple[bool, int, Pair]) -> tuple[int, int]:
+def _middle_opponent_key(item: tuple[bool, int, NodeProxy]) -> tuple[int, int]:
     """Order opponents by how close their matching count is to the anchor's."""
-    prefer_better_side, anchor_count, pair = item
-    opponent: NodeProxy = pair[1]
+    prefer_better_side, anchor_count, opponent = item
     side_count: int = (
         opponent.known_better_count
         if prefer_better_side
@@ -380,32 +379,24 @@ def phase_chain_middle(
     anchor_count: int = _middle_matching_count(anchor)
     opponents: list[NodeProxy] = pool[1:]
 
-    pair_list: list[Pair] = form_candidate_pairs(anchor, opponents)
-    ranked: list[tuple[bool, int, Pair]] = [
-        (prefer_better_side, anchor_count, pair) for pair in pair_list
+    ranked: list[tuple[bool, int, NodeProxy]] = [
+        (prefer_better_side, anchor_count, opponent) for opponent in opponents
     ]
     ranked.sort(key=_middle_opponent_key)
-    ordered_pairs: list[Pair] = [item[2] for item in ranked]
-
     lru_size: int = int(config["ranking"]["lru_size"])
-    shortlist: list[Pair] = []
-    offset: int = 0
-    while len(shortlist) < lru_size and offset < len(ordered_pairs):
-        batch: list[Pair] = ordered_pairs[offset : offset + lru_size]
-        valid_batch: list[Pair] | None = filter_cross_chain_pairs(
-            batch, existing_pair_set, cg
-        )
-        if valid_batch is not None:
-            shortlist.extend(valid_batch)
-        offset += lru_size
-    shortlist = shortlist[:lru_size]
-    if not shortlist:
+    trimmed: list[NodeProxy] = [item[2] for item in ranked[:lru_size]]
+
+    pair_list: list[Pair] = form_candidate_pairs(anchor, trimmed)
+    valid_pairs: list[Pair] | None = filter_cross_chain_pairs(
+        pair_list, existing_pair_set, cg
+    )
+    if valid_pairs is None:
         _mark_recent(pairing_processor, anchor.filename)
         logger.debug("no untested opponent for the middle anchor", start_timer=_start)
         return None
 
     result: Pair | None = closest_score_pair(
-        shortlist, closest=True, sigma_cap=math.inf
+        valid_pairs, closest=True, sigma_cap=math.inf
     )
     if result is None:
         _mark_recent(pairing_processor, anchor.filename)
