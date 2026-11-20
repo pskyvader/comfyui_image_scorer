@@ -144,6 +144,9 @@ class _Graph:
     def are_in_same_path(self, filename_a: str, filename_b: str) -> bool:
         return filename_a == filename_b
 
+    def get_cascade_score(self, _first: str, _second: str) -> int:
+        return 0
+
     def get_node(self, filename: str) -> NodeProxy | None:
         return next(
             (
@@ -161,6 +164,21 @@ class _SamePathGraph(_Graph):
 
     def are_in_same_path(self, filename_a: str, filename_b: str) -> bool:
         return {filename_a, filename_b} == {"best-below", "best-above"}
+
+
+class _CascadeGraph(_Graph):
+    """Graph variant giving a configured cascade score to specific pairs."""
+
+    def __init__(
+        self,
+        scores: dict[frozenset[str], int],
+        node_count: int,
+    ) -> None:
+        super().__init__([], node_count)
+        self.scores = scores
+
+    def get_cascade_score(self, first: str, second: str) -> int:
+        return self.scores.get(frozenset((first, second)), 0)
 
 
 class _FakePairingProcessor:
@@ -538,7 +556,7 @@ def test_chain_middle_picks_closest_skill_from_shortlist(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _config()
-    cfg["ranking"]["lru_size"] = 3
+    cfg["ranking"]["lru_size"] = 12
     monkeypatch.setattr(pair_active, "config", cfg)
     anchor = cast(
         "NodeProxy",
@@ -566,6 +584,36 @@ def test_chain_middle_picks_closest_skill_from_shortlist(
     )
 
     assert result == (anchor, close_score)
+
+
+def test_chain_middle_prefers_high_cascade_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _config()
+    cfg["ranking"]["lru_size"] = 8
+    monkeypatch.setattr(pair_active, "config", cfg)
+    anchor = _middle_node("anchor", 4, 0)
+    near = _middle_node("near", 3, 0)
+    middle = _middle_node("middle", 2, 0)
+    far = _middle_node("far", 1, 0)
+    graph = _CascadeGraph(
+        {
+            frozenset(("anchor", "far")): 10,
+            frozenset(("anchor", "middle")): 5,
+            frozenset(("anchor", "near")): 1,
+        },
+        node_count=9,
+    )
+
+    result = pair_active.phase_chain_middle(
+        [anchor, near, middle, far],
+        set(),
+        cast("CrystalGraphPort", graph),
+        _processor(),
+    )
+
+    assert result is not None
+    assert result[1] in (far, middle)
 
 
 def test_phase_pipeline_uses_data_arguments_instead_of_rule_callbacks() -> None:

@@ -62,6 +62,10 @@ def _key_position_gap(pair: Pair) -> tuple[int, int]:
     )
 
 
+def _key_cascade_score(item: tuple[int, Pair]) -> int:
+    return -item[0]
+
+
 def _log_selected_pair(result: Pair, _start: float) -> None:
     """Log the standard success message for all phases."""
     logger.debug(
@@ -395,8 +399,14 @@ def phase_chain_middle(
         logger.debug("no untested opponent for the middle anchor", start_timer=_start)
         return None
 
+    scored: list[tuple[int, Pair]] = [
+        (cg.get_cascade_score(pair[0].filename, pair[1].filename), pair)
+        for pair in valid_pairs
+    ]
+    scored.sort(key=_key_cascade_score)
+    shortlist: list[Pair] = [item[1] for item in scored[: lru_size // 4]]
     result: Pair | None = closest_score_pair(
-        valid_pairs, closest=True, sigma_cap=math.inf
+        shortlist, closest=True, sigma_cap=math.inf
     )
     if result is None:
         _mark_recent(pairing_processor, anchor.filename)

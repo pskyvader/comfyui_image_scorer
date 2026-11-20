@@ -367,6 +367,9 @@ class CrystalGraph:
     def are_in_same_path(self, img1: str, img2: str) -> bool:
         return self._chain.are_in_same_path(img1, img2)
 
+    def get_cascade_score(self, first: str, second: str) -> int:
+        return self._chain.get_cascade_score(first, second)
+
     # -- Repository facade (#47): the single DB-facing surface ----------
 
     def add_image(

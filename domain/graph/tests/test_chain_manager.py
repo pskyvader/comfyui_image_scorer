@@ -324,6 +324,21 @@ def test_apply_link_returns_the_record_it_touched() -> None:
     assert len(history) == 2
 
 
+def test_cascade_score_prefers_disjoint_reachability() -> None:
+    comparisons: list[ComparisonRow] = [
+        {"filename_a": "a", "filename_b": "b", "winner": "a"},
+        {"filename_a": "b", "filename_b": "c", "winner": "b"},
+        {"filename_a": "c", "filename_b": "d", "winner": "c"},
+        {"filename_a": "x", "filename_b": "y", "winner": "x"},
+        {"filename_a": "y", "filename_b": "z", "winner": "y"},
+        {"filename_a": "z", "filename_b": "w", "winner": "z"},
+    ]
+
+    cm = _build_manager(comparisons, all_filenames={"a", "b", "c", "d", "x", "y", "z", "w"})
+
+    assert cm.get_cascade_score("a", "x") > cm.get_cascade_score("b", "c")
+
+
 def test_main_chain_positions_are_indexed_once() -> None:
     images = ["a", "b", "c", "d"]
     comparisons: list[ComparisonRow] = [

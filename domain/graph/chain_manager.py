@@ -925,6 +925,28 @@ class ChainManager:
     def get_node_known_worse_count(self, node_id: str) -> int:
         return self._node_known_worse.get(node_id, 0)
 
+    def get_cascade_score(self, first: str, second: str) -> int:
+        """Guaranteed new ordering facts from comparing two images."""
+        first_group: int | None = self._node_group.get(first)
+        second_group: int | None = self._node_group.get(second)
+        if first_group is None or second_group is None:
+            return 0
+
+        first_better: int = self._better_group_bits[first_group]
+        second_better: int = self._better_group_bits[second_group]
+        first_worse: int = self._worse_group_bits[first_group]
+        second_worse: int = self._worse_group_bits[second_group]
+
+        first_wins: int = (
+            (first_better & ~second_better).bit_count()
+            + (second_worse & ~first_worse).bit_count()
+        )
+        second_wins: int = (
+            (second_better & ~first_better).bit_count()
+            + (first_worse & ~second_worse).bit_count()
+        )
+        return min(first_wins, second_wins)
+
     def get_main_chain_node(self, chain_id: int, position: int) -> str | None:
         nodes = self._main_chain_nodes.get(chain_id, [])
         if 0 <= position < len(nodes):
