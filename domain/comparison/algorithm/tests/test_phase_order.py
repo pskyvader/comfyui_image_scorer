@@ -133,6 +133,7 @@ def test_first_phase_skips_seed_pool_setup(
         candidates: list[NodeProxy],
         existing_pairs: set[tuple[str, str]],
         _pairing_processor: PairingProcessorPort,
+        _graph: CrystalGraphPort,
         *,
         bottom: bool,
         count: int,
@@ -207,6 +208,7 @@ def test_seed_and_anchor_reuse_lazily_prepared_objects(
         existing_pairs: set[tuple[str, str]],
         seed_pool: list[NodeProxy],
         all_images_length: int,
+        _graph: CrystalGraphPort,
     ) -> tuple[NodeProxy, NodeProxy] | None:
         assert candidates == nodes
         assert existing_pairs == set()
@@ -218,6 +220,7 @@ def test_seed_and_anchor_reuse_lazily_prepared_objects(
         candidates: list[NodeProxy],
         existing_pairs: set[tuple[str, str]],
         _pairing_processor: PairingProcessorPort,
+        _graph: CrystalGraphPort,
     ) -> tuple[NodeProxy, NodeProxy]:
         assert candidates == nodes
         assert existing_pairs == set()
@@ -285,6 +288,7 @@ def test_family_phase_receives_metadata_flags(
         _candidates: list[NodeProxy],
         _existing_pairs: set[tuple[str, str]],
         _pairing_processor: PairingProcessorPort,
+        _graph: CrystalGraphPort,
     ) -> None:
         calls.append("anchor")
         return None
@@ -293,6 +297,7 @@ def test_family_phase_receives_metadata_flags(
         candidates: list[NodeProxy],
         _existing_pairs: set[tuple[str, str]],
         _pairing_processor: PairingProcessorPort,
+        _graph: CrystalGraphPort,
         *,
         bottom: bool,
         count: int,

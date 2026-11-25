@@ -80,7 +80,6 @@ graph = CrystalGraph(
     cache=InMemoryCache(
         default_ttl=int(config["ranking"]["image_cache_ttl_seconds"])
     ),
-    file_port=FileManager(),
 )
 
 

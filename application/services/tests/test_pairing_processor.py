@@ -26,48 +26,12 @@ from comfyui_image_scorer.domain.ports.repository import (
 
 
 class TempFilePort:
-    """FilePort rooted in a temporary directory that records every delegated call."""
+    """FilePort rooted in a temporary directory that records delegated calls."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
         self.calls: list[str] = []
         self.sync_calls: list[tuple[str, float, float, float, int]] = []
-
-    def read_json(self, path: str) -> dict[str, object]:
-        self.calls.append("read_json")
-        with Path(path).open(encoding="utf-8") as handle:
-            value = json.load(handle)
-        assert isinstance(value, dict)
-        return cast(dict[str, object], value)
-
-    def write_json(self, path: str, data: dict[str, object]) -> None:
-        self.calls.append("write_json")
-        target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2)
-
-    def file_exists(self, path: str) -> bool:
-        self.calls.append("file_exists")
-        return Path(path).is_file()
-
-    def list_directory(self, path: str) -> list[str]:
-        self.calls.append("list_directory")
-        return [entry.name for entry in Path(path).iterdir() if entry.is_file()]
-
-    def make_directory(self, path: str) -> None:
-        self.calls.append("make_directory")
-        Path(path).mkdir(parents=True, exist_ok=True)
-
-    def move_file(self, src: Path, dst: Path) -> bool:
-        self.calls.append("move_file")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        src.replace(dst)
-        return True
-
-    def remove_file(self, path: Path) -> None:
-        self.calls.append("remove_file")
-        path.unlink(missing_ok=True)
 
     def ranked_root(self) -> Path:
         return self.root
@@ -339,11 +303,11 @@ def test_get_fast_total_count_owns_source_scan(tmp_path: Path) -> None:
     pairing_processor, port = _pairing_processor(tmp_path)
 
     assert pairing_processor.get_fast_total_count(str(source)) == 2
-    assert "list_directory" not in port.calls
+    assert port.calls == []
 
 
 def test_reorganize_folder_structure_moves_loose_files(tmp_path: Path) -> None:
-    """Tier scanning is owned; the resulting moves are delegated to the port."""
+    """Tier scanning is owned; the resulting moves use core filesystem operations."""
     loose = tmp_path / "scored_0.5" / "loose.png"
     _touch(loose)
     (tmp_path / "scored_0.5" / "scored_0.55").mkdir(parents=True)
@@ -357,13 +321,12 @@ def test_reorganize_folder_structure_moves_loose_files(tmp_path: Path) -> None:
     assert (tmp_path / "scored_0.7" / "loose.png").is_file()
     assert (tmp_path / "scored_0.7" / "loose.json").is_file()
     assert not loose.exists()
-    assert "list_directory" not in port.calls
     assert "compute_path" in port.calls
-    assert "move_file" in port.calls
+    assert "move_file" not in port.calls
 
 
-def test_process_image_file_delegates_to_file_port(tmp_path: Path) -> None:
-    """Reads, writes, and moves of one candidate image run through FilePort."""
+def test_process_image_file_uses_core_file_operations(tmp_path: Path) -> None:
+    """Reads, writes, and moves of one candidate image use core file operations."""
     image = tmp_path / "incoming" / "shot.png"
     _touch(image)
     image.with_suffix(".json").write_text(
@@ -376,11 +339,11 @@ def test_process_image_file_delegates_to_file_port(tmp_path: Path) -> None:
     assert success, message
     assert (tmp_path / "scored_0.5" / "shot.png").is_file()
     assert (tmp_path / "scored_0.5" / "shot.json").is_file()
-    assert {"read_json", "write_json", "move_file", "compute_path"} <= set(port.calls)
+    assert "compute_path" in port.calls
 
 
-def test_file_port_is_the_only_destructive_move_path(tmp_path: Path) -> None:
-    """Deletion of a duplicate candidate is delegated rather than done inline."""
+def test_duplicate_candidate_is_deleted_permanently(tmp_path: Path) -> None:
+    """Deletion of a duplicate candidate uses permanent core deletion."""
     existing = tmp_path / "scored_0.5" / "dup.png"
     _touch(existing, b"same-size")
     incoming = tmp_path / "incoming" / "dup.png"
@@ -389,11 +352,10 @@ def test_file_port_is_the_only_destructive_move_path(tmp_path: Path) -> None:
         json.dumps({"prompt_tags": "tag", "score": 0.5}), encoding="utf-8"
     )
 
-    pairing_processor, port = _pairing_processor(tmp_path)
+    pairing_processor, _port = _pairing_processor(tmp_path)
     success, message, *_rest = pairing_processor.process_image_file(incoming)
 
     assert success, message
-    assert "remove_file" in port.calls
     assert not incoming.exists()
 
 

@@ -4,7 +4,8 @@ import torch
 from typing import Any
 from .....application.services.scoring_service import ScoringService
 from ...services import get_scoring_service
-from ...services import verify_models_present
+
+# from ...services import verify_models_present
 
 
 class AestheticScoreNode:
@@ -73,7 +74,7 @@ class AestheticScoreNode:
         max_images: int = 10,
         denoise: float = 0.9,
     ) -> tuple[torch.Tensor, torch.Tensor, bool, list[float]]:
-        verify_models_present()
+        # verify_models_present()
         return self._scoring_service.score(
             image=image,
             threshold=threshold,

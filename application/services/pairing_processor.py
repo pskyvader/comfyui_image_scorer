@@ -15,6 +15,14 @@ from tqdm import tqdm
 
 from ...core.observability.logger import get_logger, ModuleLogger
 from ...core.configuration.settings import config
+from ...core.filesystem.operations import (
+    DeletionMode,
+    delete_file,
+    file_exists,
+    make_directory,
+    move_file,
+)
+from ...core.io.operations import read_json, write_json
 from ...core.io.serialization import (
     clean_json_metadata,
     CollectedFile,
@@ -82,7 +90,7 @@ class PairingProcessor:
         filename = image_path.name
         json_path = image_path.with_suffix(".json")
 
-        if not self._path_ops.file_exists(str(json_path)):
+        if not file_exists(str(json_path)):
             with self.processed_lock:
                 self.processed_images.add(filename)
             return (
@@ -97,7 +105,7 @@ class PairingProcessor:
         if filename in self.processed_images:
             return (False, "Already processed", None, None, False, None)
 
-        json_data = self._path_ops.read_json(str(json_path))
+        json_data = read_json(str(json_path))
 
         cleaned_json = clean_json_metadata(
             json_data,
@@ -123,20 +131,20 @@ class PairingProcessor:
             cleaned_json["comparison_count"] = 0
 
         tmp_json = json_path.parent / f"{json_path.name}.tmp"
-        self._path_ops.write_json(str(tmp_json), cleaned_json)
-        self._path_ops.move_file(tmp_json, json_path)
+        write_json(str(tmp_json), cleaned_json)
+        move_file(tmp_json, json_path)
 
         dest_image = self._path_ops.compute_path(filename, chosen_score)
-        self._path_ops.make_directory(str(dest_image.parent))
+        make_directory(str(dest_image.parent))
         dest_json = dest_image.with_suffix(".json")
 
-        if self._path_ops.file_exists(str(dest_image)) and self._path_ops.file_exists(
+        if file_exists(str(dest_image)) and file_exists(
             str(image_path)
         ):
             if image_path.stat().st_size == dest_image.stat().st_size:
-                if self._path_ops.file_exists(str(json_path)):
-                    self._path_ops.move_file(json_path, dest_json)
-                self._path_ops.remove_file(image_path)
+                if file_exists(str(json_path)):
+                    move_file(json_path, dest_json)
+                delete_file(image_path, mode=DeletionMode.PERMANENT)
                 with self.processed_lock:
                     self.processed_images.add(dest_image.name)
                 return (
@@ -153,20 +161,15 @@ class PairingProcessor:
             index = 1
             while True:
                 candidate = dest_image.parent / f"{stem}_{index}{suffix}"
-                if not self._path_ops.file_exists(str(candidate)):
+                if not file_exists(str(candidate)):
                     dest_image = candidate
                     dest_json = candidate.with_suffix(".json")
                     break
                 index += 1
 
-        def safe_move(src: Path, dst: Path) -> bool:
-            return self._path_ops.move_file(src, dst)
-
-        if not safe_move(image_path, dest_image):
+        if not move_file(image_path, dest_image):
             return (False, "Image move failed", None, None, False, None)
-        if self._path_ops.file_exists(str(json_path)) and not safe_move(
-            json_path, dest_json
-        ):
+        if file_exists(str(json_path)) and not move_file(json_path, dest_json):
             return (False, "JSON move failed", None, None, False, None)
 
         with self.processed_lock:
@@ -619,8 +622,8 @@ class PairingProcessor:
                     continue
                 json_path = loose_file.with_suffix(".json")
                 score = self.default_score
-                if self._path_ops.file_exists(str(json_path)):
-                    meta = self._path_ops.read_json(str(json_path))
+                if file_exists(str(json_path)):
+                    meta = read_json(str(json_path))
                     raw_score = meta.get("score")
                     if isinstance(raw_score, (int, float)):
                         score = float(raw_score)
@@ -639,10 +642,10 @@ class PairingProcessor:
         ) as pbar:
             for loose_file, target_path in moves:
                 json_path = loose_file.with_suffix(".json")
-                self._path_ops.make_directory(str(target_path.parent))
-                self._path_ops.move_file(loose_file, target_path)
-                if self._path_ops.file_exists(str(json_path)):
-                    self._path_ops.move_file(
+                make_directory(str(target_path.parent))
+                move_file(loose_file, target_path)
+                if file_exists(str(json_path)):
+                    move_file(
                         json_path, target_path.with_suffix(".json")
                     )
                 moved_count += 1

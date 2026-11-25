@@ -1,8 +1,10 @@
 import os
 import shutil
 import urllib.request
+from pathlib import Path
 
 from ...core.configuration.settings import config
+from ...core.filesystem.operations import DeletionMode, delete_file
 from ...core.filesystem.paths import mediapipe_models_dir
 from ...core.observability.logger import get_logger
 
@@ -30,5 +32,5 @@ def _download_to(url: str, dest: str, key: str) -> None:
         os.replace(tmp, dest)
     finally:
         if os.path.exists(tmp):
-            os.remove(tmp)
+            delete_file(Path(tmp), mode=DeletionMode.PERMANENT)
     logger.info("MediaPipe model '%s' downloaded", key)

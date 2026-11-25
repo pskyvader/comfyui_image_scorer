@@ -314,26 +314,28 @@ def main() -> int:
             return 1
 
     elif args.command == "files":
-        from ...core.utilities.helpers import (
-            delete_full_vectors,
-            remove_models,
-            remove_directory,
+        from ...core.utilities.helpers import delete_full_vectors
+        from ...core.filesystem.operations import DeletionMode, delete_directory
+        from ...core.filesystem.paths import (
+            maps_dir,
+            mediapipe_models_dir,
+            models_dir,
+            split_dir,
         )
-        from ...core.filesystem.paths import maps_dir, mediapipe_models_dir, split_dir
 
         if args.files_command == "remove":
             if args.remove_command == "vectors":
                 delete_full_vectors()
                 return 0
             elif args.remove_command == "generated-models":
-                remove_models()
+                delete_directory(Path(models_dir), mode=DeletionMode.PERMANENT)
                 return 0
             elif args.remove_command == "vector-maps":
-                remove_directory(Path(maps_dir))
-                remove_directory(Path(split_dir) / "map")
+                delete_directory(Path(maps_dir), mode=DeletionMode.PERMANENT)
+                delete_directory(Path(split_dir) / "map", mode=DeletionMode.PERMANENT)
                 return 0
             elif args.remove_command == "downloaded-models":
-                remove_directory(Path(mediapipe_models_dir))
+                delete_directory(Path(mediapipe_models_dir), mode=DeletionMode.PERMANENT)
                 return 0
             else:
                 files_remove_parser.print_help()

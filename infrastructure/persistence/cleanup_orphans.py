@@ -20,6 +20,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 from ...core.observability.logger import get_logger, ModuleLogger, configure_package_logging
+from ...core.filesystem.operations import DeletionMode, delete_file
 from ...core.filesystem.paths import image_root_processed
 
 logger: ModuleLogger = get_logger(__name__)
@@ -142,8 +143,7 @@ def cleanup_orphans(
             if len(examples) < 3:
                 examples.append(f"{stem}: pair moved to {score_05.name}")
         else:
-            for f in files:
-                f.unlink(missing_ok=True)
+            delete_file(files, mode=DeletionMode.TRASH)
             deleted += len(files)
             if len(examples) < 3:
                 examples.append(f"{stem}: {len(files)} singleton(s) deleted")

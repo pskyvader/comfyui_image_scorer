@@ -3,7 +3,8 @@ from typing import Any, cast
 
 import pytest
 
-from comfyui_image_scorer.infrastructure.persistence.file_manager import FileManager
+from comfyui_image_scorer.core.filesystem.operations import file_exists, list_directory
+from comfyui_image_scorer.core.io.operations import read_json, write_json
 from comfyui_image_scorer.application.services.graph_service import CrystalGraph
 
 
@@ -32,15 +33,14 @@ class FailingLinkStore:
         raise RuntimeError("database unavailable")
 
 
-def test_file_manager_round_trip(tmp_path: Path) -> None:
-    manager = FileManager()
+def test_core_io_operations_round_trip(tmp_path: Path) -> None:
     target = tmp_path / "nested" / "record.json"
 
-    manager.write_json(str(target), {"value": 3})
+    write_json(str(target), {"value": 3})
 
-    assert manager.file_exists(str(target))
-    assert manager.read_json(str(target)) == {"value": 3}
-    assert manager.list_directory(str(target.parent)) == ["record.json"]
+    assert file_exists(str(target))
+    assert read_json(str(target)) == {"value": 3}
+    assert list_directory(str(target.parent)) == ["record.json"]
 
 
 def test_clearing_comparisons_unloads_graph() -> None:

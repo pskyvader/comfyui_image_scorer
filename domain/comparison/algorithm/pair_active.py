@@ -30,10 +30,9 @@ from .pair_opponents import (
 from .pair_pipeline import (
     Pair,
     closest_score_pair,
-    filter_cross_chain_pairs,
     filter_existing_pairs,
-    filter_uncertainty_refine_pairs,
     form_candidate_pairs,
+    shortlist_by_cascade,
     sigma_range_cap,
 )
 
@@ -60,10 +59,6 @@ def _key_position_gap(pair: Pair) -> tuple[int, int]:
         abs(pair[0].position_score - pair[1].position_score),
         pair[1].link_count,
     )
-
-
-def _key_cascade_score(item: tuple[int, Pair]) -> int:
-    return -item[0]
 
 
 def _log_selected_pair(result: Pair, _start: float) -> None:
@@ -104,6 +99,7 @@ def select_exact_count_pair(
     candidate_nodes: list[NodeProxy],
     existing_pair_set: set[tuple[str, str]],
     pairing_processor: PairingProcessorPort,
+    cg: CrystalGraphPort,
     *,
     bottom: bool,
     count: int,
@@ -132,7 +128,7 @@ def select_exact_count_pair(
     anchor_index: int = random.randrange(pool_size)
     node_a: NodeProxy = pool.pop(anchor_index)
     pair_list: list[Pair] = form_candidate_pairs(node_a, pool)
-    pair_list = filter_existing_pairs(pair_list, existing_pair_set)
+    pair_list = filter_existing_pairs(pair_list, existing_pair_set, cg)
     if not pair_list:
         logger.debug("no new pair inside the exact-count pool", start_timer=_start)
         _mark_recent(pairing_processor, node_a.filename)
@@ -142,6 +138,7 @@ def select_exact_count_pair(
             candidate_nodes,
             existing_pair_set,
             pairing_processor,
+            cg,
             bottom=bottom,
             count=count,
             closest=closest,
@@ -149,11 +146,9 @@ def select_exact_count_pair(
         )
         return result
 
-    pair_list.sort(key=_key_position_gap)
-    result = pair_list[0] if pair_list else None
-
-    # sigma_cap: float = sigma_range_cap(node_a)
-    # result = closest_score_pair(pair_list, closest, sigma_cap)
+    shortlist: list[Pair] = shortlist_by_cascade(pair_list, cg)
+    shortlist.sort(key=_key_position_gap)
+    result = shortlist[0] if shortlist else None
 
     if result is None:
         _mark_recent(pairing_processor, node_a.filename)
@@ -162,14 +157,15 @@ def select_exact_count_pair(
                 candidate_nodes,
                 existing_pair_set,
                 pairing_processor,
+                cg,
                 bottom=bottom,
                 count=count,
                 closest=closest,
                 retry=retry + 1,
             )
             return result
-        _log_sigma_miss(pair_list, _start)
-        return closest_score_pair(pair_list, closest, math.inf)
+        _log_sigma_miss(shortlist, _start)
+        return closest_score_pair(shortlist, closest, math.inf)
     return result
 
 
@@ -211,6 +207,7 @@ def phase_seed_coverage(
     existing_pair_set: set[tuple[str, str]],
     seed_pool: list[NodeProxy],
     all_images_length: int,
+    cg: CrystalGraphPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     """Select a similar untested pair while the seed pool is below its target."""
     _start: float = time.perf_counter()
@@ -237,10 +234,11 @@ def phase_seed_coverage(
         logger.debug("no compatible opponents", start_timer=_start)
         return None
     pair_list: list[Pair] = form_candidate_pairs(node_a, compatible_nodes)
-    pair_list = filter_existing_pairs(pair_list, existing_pair_set)
+    pair_list = filter_existing_pairs(pair_list, existing_pair_set, cg)
+    shortlist: list[Pair] = shortlist_by_cascade(pair_list, cg)
     sigma_cap: float = sigma_range_cap(node_a)
     result: Pair | None = closest_score_pair(
-        pair_list, closest=False, sigma_cap=sigma_cap
+        shortlist, closest=False, sigma_cap=sigma_cap
     )
     if result is None:
         logger.debug("no eligible pair", start_timer=_start)
@@ -253,6 +251,7 @@ def phase_anchor_insert(
     candidate_images: list[NodeProxy],
     existing_pair_set: set[tuple[str, str]],
     pairing_processor: PairingProcessorPort,
+    cg: CrystalGraphPort,
     retry: int = 0,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     """Pair a low-comparison candidate with an eligible seed-pool opponent."""
@@ -289,26 +288,23 @@ def phase_anchor_insert(
         if retry > _MAX_RETRIES:
             return None
         result: tuple[NodeProxy, NodeProxy] | None = phase_anchor_insert(
-            candidate_images, existing_pair_set, pairing_processor, retry + 1
+            candidate_images, existing_pair_set, pairing_processor, cg, retry + 1
         )
         return result
 
     pair_list: list[Pair] = form_candidate_pairs(node_a, compatible_nodes)
-    pair_list = filter_existing_pairs(pair_list, existing_pair_set)
-
-    pair_list.sort(key=_key_position_gap)
-    result = pair_list[0] if pair_list else None
-
-    # sigma_cap: float = sigma_range_cap(node_a)
-    # result = closest_score_pair(pair_list, closest=True, sigma_cap=sigma_cap)
+    pair_list = filter_existing_pairs(pair_list, existing_pair_set, cg)
+    shortlist: list[Pair] = shortlist_by_cascade(pair_list, cg)
+    shortlist.sort(key=_key_position_gap)
+    result = shortlist[0] if shortlist else None
 
     if result is None:
-        _log_sigma_miss(pair_list, _start)
+        _log_sigma_miss(shortlist, _start)
         _mark_recent(pairing_processor, node_a.filename)
         if retry > _MAX_RETRIES:
             return None
         result = phase_anchor_insert(
-            candidate_images, existing_pair_set, pairing_processor, retry + 1
+            candidate_images, existing_pair_set, pairing_processor, cg, retry + 1
         )
         return result
     _log_selected_pair(result, _start)
@@ -319,6 +315,7 @@ def phase_exact_count_pair(
     candidate_nodes: list[NodeProxy],
     existing_pair_set: set[tuple[str, str]],
     pairing_processor: PairingProcessorPort,
+    cg: CrystalGraphPort,
     bottom: bool,
     count: int,
     closest: bool,
@@ -330,6 +327,7 @@ def phase_exact_count_pair(
         candidate_nodes,
         existing_pair_set,
         pairing_processor,
+        cg,
         bottom=bottom,
         count=count,
         closest=closest,
@@ -346,6 +344,7 @@ def phase_chain_middle(
     existing_pair_set: set[tuple[str, str]],
     cg: CrystalGraphPort,
     pairing_processor: PairingProcessorPort,
+    retry: int = 0,
 ) -> tuple[NodeProxy, NodeProxy] | None:
     """Resolve the middle image by voting on a candidate about to be ruled out.
 
@@ -357,8 +356,9 @@ def phase_chain_middle(
     good and the countdown cannot go back up.
 
     Candidates are ordered by how close they are to an exit and by chain
-    position. Opponents are filtered before being trimmed to the closest
-    counts, and the final pair is the closest skill match in that shortlist.
+    position. Opponents are ordered by matching-count proximity, then the
+    shared pair filter and cascade shortlist narrow the pairs before the
+    closest-skill selector runs.
     """
     _start: float = time.perf_counter()
     total_images: int = cg.get_node_count()
@@ -376,40 +376,47 @@ def phase_chain_middle(
             start_timer=_start,
         )
         return None
-
+    lru_size = int(config["ranking"]["lru_size"])
     pool.sort(key=_middle_anchor_key)
-    anchor: NodeProxy = pool[0]
-    prefer_better_side: bool = anchor.known_better_count >= anchor.known_worse_count
-    anchor_count: int = _middle_matching_count(anchor)
-    opponents: list[NodeProxy] = pool[1:]
+    pool = pool[:lru_size]
+    node_a: NodeProxy = random.choice(pool)
+    prefer_better_side: bool = node_a.known_better_count >= node_a.known_worse_count
+    anchor_count: int = _middle_matching_count(node_a)
+    opponents: list[NodeProxy] = [
+        node for node in pool if node.filename != node_a.filename
+    ]
 
     ranked: list[tuple[bool, int, NodeProxy]] = [
         (prefer_better_side, anchor_count, opponent) for opponent in opponents
     ]
     ranked.sort(key=_middle_opponent_key)
-    lru_size: int = int(config["ranking"]["lru_size"])
-    trimmed: list[NodeProxy] = [item[2] for item in ranked[:lru_size]]
+    ranked_opponents: list[NodeProxy] = [item[2] for item in ranked]
 
-    pair_list: list[Pair] = form_candidate_pairs(anchor, trimmed)
-    valid_pairs: list[Pair] | None = filter_cross_chain_pairs(
-        pair_list, existing_pair_set, cg
+    pair_list: list[Pair] = form_candidate_pairs(node_a, ranked_opponents)
+    check_same_path: bool = True
+    if retry > _MAX_RETRIES:
+        check_same_path = False
+    valid_pairs: list[Pair] = filter_existing_pairs(
+        pair_list, existing_pair_set, cg, check_same_path
     )
-    if valid_pairs is None:
-        _mark_recent(pairing_processor, anchor.filename)
-        logger.debug("no untested opponent for the middle anchor", start_timer=_start)
-        return None
 
-    scored: list[tuple[int, Pair]] = [
-        (cg.get_cascade_score(pair[0].filename, pair[1].filename), pair)
-        for pair in valid_pairs
-    ]
-    scored.sort(key=_key_cascade_score)
-    shortlist: list[Pair] = [item[1] for item in scored[: lru_size // 4]]
+    if not valid_pairs:
+        _mark_recent(pairing_processor, node_a.filename)
+        if retry > _MAX_RETRIES:
+            logger.debug(
+                "no untested opponent for the middle anchor", start_timer=_start
+            )
+            return None
+        return phase_chain_middle(
+            candidate_images, existing_pair_set, cg, pairing_processor, retry + 1
+        )
+
+    shortlist: list[Pair] = shortlist_by_cascade(valid_pairs, cg)
     result: Pair | None = closest_score_pair(
         shortlist, closest=True, sigma_cap=math.inf
     )
     if result is None:
-        _mark_recent(pairing_processor, anchor.filename)
+        _mark_recent(pairing_processor, node_a.filename)
         logger.debug("no pair inside the middle shortlist", start_timer=_start)
         return None
     _log_selected_pair(result, _start)
@@ -449,18 +456,17 @@ def phase_uncertainty_refine(
         )
         return result
     pair_list: list[Pair] = form_candidate_pairs(node_a, compatible_nodes)
-    filtered_pairs: list[Pair] | None = filter_uncertainty_refine_pairs(
-        pair_list, pair_set, cg
-    )
-    if filtered_pairs is None:
+    filtered_pairs: list[Pair] = filter_existing_pairs(pair_list, pair_set, cg)
+    if not filtered_pairs:
         logger.debug("no valid pair after filtering", start_timer=_start)
         return None
 
+    shortlist: list[Pair] = shortlist_by_cascade(filtered_pairs, cg)
     sigma_cap: float = sigma_range_cap(node_a)
-    result = closest_score_pair(filtered_pairs, closest=True, sigma_cap=sigma_cap)
+    result = closest_score_pair(shortlist, closest=True, sigma_cap=sigma_cap)
 
     if result is None:
-        _log_sigma_miss(filtered_pairs, _start)
+        _log_sigma_miss(shortlist, _start)
         _mark_recent(pairing_processor, node_a.filename)
         if retry > _MAX_RETRIES:
             return None
@@ -524,10 +530,10 @@ def phase_chain_small(
         logger.debug("no long-chain opponent candidates", start_timer=_start)
         return None
     pair_list: list[Pair] = form_candidate_pairs(node_a, opponents)
-    pair_list_filtered: list[Pair] | None = filter_cross_chain_pairs(
+    pair_list_filtered: list[Pair] = filter_existing_pairs(
         pair_list, existing_pair_set, cg
     )
-    if pair_list_filtered is None:
+    if not pair_list_filtered:
         logger.debug(
             "no valid pair after filtering",
             start_timer=_start,
@@ -539,11 +545,12 @@ def phase_chain_small(
             candidate_images, existing_pair_set, cg, pairing_processor, retry + 1
         )
         return result
+    shortlist: list[Pair] = shortlist_by_cascade(pair_list_filtered, cg)
     sigma_cap: float = sigma_range_cap(node_a)
-    result = closest_score_pair(pair_list_filtered, closest=True, sigma_cap=sigma_cap)
+    result = closest_score_pair(shortlist, closest=True, sigma_cap=sigma_cap)
 
     if result is None:
-        _log_sigma_miss(pair_list_filtered, _start)
+        _log_sigma_miss(shortlist, _start)
         _mark_recent(pairing_processor, node_a.filename)
         if retry > _MAX_RETRIES:
             return None
@@ -558,8 +565,9 @@ def phase_chain_small(
 def phase_fallback(
     candidate_images: list[NodeProxy],
     pair_set: set[tuple[str, str]],
+    cg: CrystalGraphPort,
 ) -> tuple[NodeProxy, NodeProxy] | None:
-    """Return the first untested pair found by scanning candidates in comparison-count order."""
+    """Return the highest-cascade untested pair from the first anchor with one."""
     _start: float = time.perf_counter()
     ordered: list[NodeProxy] = sorted(candidate_images, key=_key_link_count)
     result: Pair | None = None
@@ -571,8 +579,11 @@ def phase_fallback(
         if compatible_nodes is None:
             continue
         pair_list: list[Pair] = form_candidate_pairs(node_a, compatible_nodes)
-        pair_list = filter_existing_pairs(pair_list, pair_set)
-        result = pair_list[0] if pair_list else None
+        pair_list = filter_existing_pairs(
+            pair_list, pair_set, cg, check_same_path=False
+        )
+        shortlist: list[Pair] = shortlist_by_cascade(pair_list, cg)
+        result = shortlist[0] if shortlist else None
         if result is not None:
             break
     if result is None:

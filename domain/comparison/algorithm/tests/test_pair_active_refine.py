@@ -80,13 +80,16 @@ class _Stub:
 
 
 class _Graph:
-    """Only are_in_same_path is consulted by this phase."""
+    """Only path and cascade queries are consulted by this phase."""
 
     def __init__(self, same: set[tuple[str, str]] | None = None) -> None:
         self._same = same or set()
 
     def are_in_same_path(self, a: str, b: str) -> bool:
         return (a, b) in self._same or (b, a) in self._same
+
+    def get_cascade_score(self, _first: str, _second: str) -> int:
+        return 0
 
 
 def _nodes(stubs: list[_Stub]) -> list[NodeProxy]:
@@ -100,8 +103,8 @@ class _FakePairingProcessor:
 
 
 def _graph(same: set[tuple[str, str]] | None = None) -> CrystalGraphPort:
-    # The phase takes a full CrystalGraphPort but only calls are_in_same_path,
-    # so a narrow stand-in is passed through a cast instead of a real graph.
+    # The phase takes a full CrystalGraphPort but only makes path and cascade
+    # queries, so a narrow stand-in is passed through a cast instead of a real graph.
     return cast("CrystalGraphPort", _Graph(same))
 
 

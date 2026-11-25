@@ -29,6 +29,7 @@ dependencies = [
     "joblib>=1.5.3",
     "polars>=1.37.1",
     "scikit-image>=0.26.0",
+    "send2trash>=2.1.0",
 ]
 
 [[tool.uv.index]]

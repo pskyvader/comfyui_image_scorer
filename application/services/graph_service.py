@@ -9,6 +9,7 @@ import time
 
 
 from ...core.observability.logger import get_logger, ModuleLogger
+from ...core.io.operations import read_json, write_json
 
 from ...domain.ports.repository import (
     ComparisonRow,
@@ -24,7 +25,6 @@ from ...domain.graph.chain_proxy import ChainProxy
 from ...domain.graph.component_proxy import ComponentProxy
 from ...domain.graph.link_proxy import LinkProxy, LinkRecord
 from ...domain.ports.cache import CacheProvider
-from ...domain.ports.files import FilePort
 from ...domain.ports.graph import GraphStructure
 
 logger: ModuleLogger = get_logger(__name__)
@@ -43,7 +43,6 @@ class CrystalGraph:
         image_repo: ImageRepository | None = None,
         comparison_repo: ComparisonRepository | None = None,
         cache: CacheProvider | None = None,
-        file_port: FilePort | None = None,
     ) -> None:
         self._chain: ChainManager = ChainManager()
         self._node_data: dict[str, ImageRow] = {}
@@ -53,7 +52,6 @@ class CrystalGraph:
         self._image_repo = image_repo
         self._comparison_repo = comparison_repo
         self._cache = cache
-        self._file_port = file_port
         self._loaded: bool = False
         # Selection working memory (#49/#50): replaces the former module-level
         # _skip_before/_existing_pairs/_last_chains_index globals.
@@ -73,14 +71,10 @@ class CrystalGraph:
         return LinkProxy(self._chain, record)
 
     def read_json_file(self, path: str) -> dict[str, object]:
-        if self._file_port is None:
-            raise RuntimeError("No filesystem port provided")
-        return self._file_port.read_json(path)
+        return read_json(path)
 
     def write_json_file(self, path: str, data: dict[str, object]) -> None:
-        if self._file_port is None:
-            raise RuntimeError("No filesystem port provided")
-        self._file_port.write_json(path, data)
+        write_json(path, data)
 
     # -- Lifecycle ------------------------------------------------------
     def is_loaded(self) -> bool:

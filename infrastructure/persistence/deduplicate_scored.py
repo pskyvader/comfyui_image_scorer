@@ -19,6 +19,7 @@ from typing import Any
 
 from tqdm import tqdm
 
+from ...core.filesystem.operations import DeletionMode, delete_file
 from ...core.observability.logger import get_logger, ModuleLogger, configure_package_logging
 from ...core.io.serialization import atomic_write_json, discover_files, load_json
 from ...core.utilities.concurrency import parallel_for
@@ -147,9 +148,10 @@ def deduplicate_scored(
 
                 atomic_write_json(str(keeper_jf), keeper_data, indent=2)
 
-                for dimg, djf, _ddata in discard_list:
-                    dimg.unlink(missing_ok=True)
-                    djf.unlink(missing_ok=True)
+                delete_file(
+                    [path for entry in discard_list for path in entry[:2]],
+                    mode=DeletionMode.PERMANENT,
+                )
 
                 total_removed += len(discard_list)
 
@@ -253,10 +255,12 @@ def deduplicate_scored(
         for _img, _jf, ddata in discard_list:
             _merge_comparison_histories(keeper_data, [ddata], keeper_jf.stem)
         atomic_write_json(str(keeper_jf), keeper_data, indent=2)
-        for dimg, djf, _ddata in discard_list:
+        for dimg, _djf, _ddata in discard_list:
             logger.debug(f"Removing cross-stem duplicate {dimg.name}")
-            dimg.unlink(missing_ok=True)
-            djf.unlink(missing_ok=True)
+        delete_file(
+            [path for entry in discard_list for path in entry[:2]],
+            mode=DeletionMode.PERMANENT,
+        )
 
         total_removed += len(discard_list)
 

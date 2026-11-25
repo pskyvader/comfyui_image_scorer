@@ -27,7 +27,6 @@ import torch
 from torch import nn
 from safetensors.torch import load_file as load_safetensors
 from torchvision import transforms
-from torchvision.transforms import Compose
 import timm
 from timm.data import resolve_model_data_config
 import comfy.model_management
@@ -84,9 +83,7 @@ def _processor_input_size(processor: ImageProcessor, model_key: str) -> tuple[in
 
 
 def _offload_device() -> torch.device:
-    return cast(
-        "torch.device", comfy.model_management.text_encoder_offload_device()
-    )
+    return cast("torch.device", comfy.model_management.text_encoder_offload_device())
 
 
 def _missing_model_error(description: str) -> RuntimeError:
@@ -254,7 +251,7 @@ class ModelLoader:
         self.prepare_config = config["prepare"]
 
     @staticmethod
-    def _select_transform(name: str) -> Compose:
+    def _select_transform(name: str) -> transforms.Compose:
         if "clip" in name.lower():
             return ModelLoader._CLIP_NORM
         return ModelLoader._IMAGENET_NORM
@@ -320,9 +317,7 @@ class ModelLoader:
 
         total_memory = self._device_total_memory(load_device)
 
-        data_config = cast(
-            "dict[str, object]", resolve_model_data_config(model)
-        )
+        data_config = cast("dict[str, object]", resolve_model_data_config(model))
         input_size = cast("tuple[int, int, int]", data_config["input_size"])
         model_input_size = (input_size[2], input_size[1])
 
@@ -338,7 +333,12 @@ class ModelLoader:
         # torchvision.transforms.Compose ships no annotations, so pyright cannot
         # see that its __call__ already takes a PIL image and returns a tensor.
         wrapped_transform = cast("Transform", transform)
-        result = (ComfyVisionModel(patcher), output_dim, total_memory, wrapped_transform)
+        result = (
+            ComfyVisionModel(patcher),
+            output_dim,
+            total_memory,
+            wrapped_transform,
+        )
         self.vision_model_cache[model_key] = result
         self._model_info_cache[model_key] = ModelInfo(
             variable_input=variable_input, input_size=model_input_size
@@ -437,7 +437,9 @@ class ModelLoader:
                     "Attribute model '%s' targets device: %s", model_key, load_device
                 )
                 result = (
-                    ComfyAttributeModel(ModelPatcher(model, load_device, offload_device)),
+                    ComfyAttributeModel(
+                        ModelPatcher(model, load_device, offload_device)
+                    ),
                     output_dim,
                     processor,
                 )
@@ -453,7 +455,9 @@ class ModelLoader:
                     "NSFW model '%s' targets device: %s", model_key, load_device
                 )
                 result = (
-                    ComfyAttributeModel(ModelPatcher(model, load_device, offload_device)),
+                    ComfyAttributeModel(
+                        ModelPatcher(model, load_device, offload_device)
+                    ),
                     output_dim,
                     processor,
                 )

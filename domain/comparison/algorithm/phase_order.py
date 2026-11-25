@@ -103,30 +103,30 @@ PHASES: tuple[PhaseMetadata | CountPhaseMetadata, ...] = (
         "closest": True,
         "name": "only_winners",
     },
-    {
-        "phase_label": "Phase 5 / Mostly Losers",
-        "color": "#22d3ee",
-        "description": "compares images with exactly one win against their many losses, picking the widest score gap inside the sigma range",
-        "show_chain_info": False,
-        "show_mu_sigma": False,
-        "show_wins_losses": True,
-        "bottom": True,
-        "count": 1,
-        "closest": True,
-        "name": "mostly_losers",
-    },
-    {
-        "phase_label": "Phase 6 / Mostly Winners",
-        "color": "#60a5fa",
-        "description": "compares images with exactly one loss against their many wins, picking the widest score gap inside the sigma range",
-        "show_chain_info": False,
-        "show_mu_sigma": False,
-        "show_wins_losses": True,
-        "bottom": False,
-        "count": 1,
-        "closest": True,
-        "name": "mostly_winners",
-    },
+    # {
+    #     "phase_label": "Phase 5 / Mostly Losers",
+    #     "color": "#22d3ee",
+    #     "description": "compares images with exactly one win against their many losses, picking the widest score gap inside the sigma range",
+    #     "show_chain_info": False,
+    #     "show_mu_sigma": False,
+    #     "show_wins_losses": True,
+    #     "bottom": True,
+    #     "count": 1,
+    #     "closest": True,
+    #     "name": "mostly_losers",
+    # },
+    # {
+    #     "phase_label": "Phase 6 / Mostly Winners",
+    #     "color": "#60a5fa",
+    #     "description": "compares images with exactly one loss against their many wins, picking the widest score gap inside the sigma range",
+    #     "show_chain_info": False,
+    #     "show_mu_sigma": False,
+    #     "show_wins_losses": True,
+    #     "bottom": False,
+    #     "count": 1,
+    #     "closest": True,
+    #     "name": "mostly_winners",
+    # },
     {
         "phase_label": "Phase 7 / Chain Middle",
         "color": "#c084fc",
@@ -256,10 +256,11 @@ def select_pair(
                 existing_pairs_set,
                 seed_pool,
                 len(all_images),
+                cg,
             )
         elif name == "anchor":
             result = phase_anchor_insert(
-                candidate_nodes, existing_pairs_set, pairing_processor
+                candidate_nodes, existing_pairs_set, pairing_processor, cg
             )
         elif name in COUNT_FAMILY_PHASES:
             count_entry: CountPhaseMetadata = cast(CountPhaseMetadata, PHASES[idx])
@@ -267,6 +268,7 @@ def select_pair(
                 candidate_nodes,
                 existing_pairs_set,
                 pairing_processor,
+                cg,
                 bottom=count_entry["bottom"],
                 count=count_entry["count"],
                 closest=count_entry["closest"],
@@ -288,7 +290,7 @@ def select_pair(
                 candidate_nodes, existing_pairs_set, cg, pairing_processor
             )
         elif name == "fallback":
-            result = phase_fallback(candidate_nodes, existing_pairs_set)
+            result = phase_fallback(candidate_nodes, existing_pairs_set, cg)
         else:
             result = None
 

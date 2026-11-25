@@ -191,6 +191,10 @@ def _processor() -> PairingProcessorPort:
     return cast("PairingProcessorPort", _FakePairingProcessor())
 
 
+def _empty_graph() -> CrystalGraphPort:
+    return cast("CrystalGraphPort", _Graph([]))
+
+
 def _nodes(*values: tuple[str, int]) -> list[NodeProxy]:
     return [
         cast("NodeProxy", _Node(filename, link_count))
@@ -291,7 +295,7 @@ def test_seed_coverage_skips_when_ready_pool_reaches_target() -> None:
         ("ready-e", 9),
     )
 
-    assert pair_active.phase_seed_coverage([], set(), seed_pool, 10) is None
+    assert pair_active.phase_seed_coverage([], set(), seed_pool, 10, _empty_graph()) is None
 
 
 def test_seed_coverage_selects_anchor_from_candidate_nodes(
@@ -300,7 +304,7 @@ def test_seed_coverage_selects_anchor_from_candidate_nodes(
     monkeypatch.setattr(pair_active.random, "choice", _pick_first_node)
     candidates = _nodes(("most-ready", 4), ("less-ready", 2), ("over-target", 6))
 
-    result = pair_active.phase_seed_coverage(candidates, set(), [], 10)
+    result = pair_active.phase_seed_coverage(candidates, set(), [], 10, _empty_graph())
 
     assert result == (candidates[0], candidates[1])
 
@@ -319,7 +323,14 @@ def test_exact_count_selector_counts_wins_for_bottom_pool_and_allows_orphans(
     ]
 
     result = pair_active.select_exact_count_pair(
-        candidates, set(), _processor(), bottom=True, count=0, closest=False, retry=0
+        candidates,
+        set(),
+        _processor(),
+        _empty_graph(),
+        bottom=True,
+        count=0,
+        closest=False,
+        retry=0,
     )
 
     assert result == (candidates[0], candidates[1])
@@ -339,7 +350,14 @@ def test_exact_count_selector_counts_losses_for_top_pool(
     ]
 
     result = pair_active.select_exact_count_pair(
-        candidates, set(), _processor(), bottom=False, count=0, closest=False, retry=0
+        candidates,
+        set(),
+        _processor(),
+        _empty_graph(),
+        bottom=False,
+        count=0,
+        closest=False,
+        retry=0,
     )
 
     assert result == (candidates[0], candidates[1])
@@ -349,7 +367,14 @@ def test_exact_count_selector_returns_none_when_pool_too_small() -> None:
     candidates = [cast("NodeProxy", _CountNode("lonely"))]
 
     result = pair_active.select_exact_count_pair(
-        candidates, set(), _processor(), bottom=True, count=0, closest=False, retry=0
+        candidates,
+        set(),
+        _processor(),
+        _empty_graph(),
+        bottom=True,
+        count=0,
+        closest=False,
+        retry=0,
     )
 
     assert result is None
@@ -371,6 +396,7 @@ def test_exact_count_selector_skips_existing_pairs_without_marking_recent(
         candidates,
         existing_pair_set,
         cast("PairingProcessorPort", processor),
+        _empty_graph(),
         bottom=True,
         count=0,
         closest=False,
@@ -396,6 +422,7 @@ def test_exact_count_selector_uses_position_gap_when_scores_are_far_apart(
         candidates,
         set(),
         cast("PairingProcessorPort", processor),
+        _empty_graph(),
         bottom=True,
         count=0,
         closest=False,
@@ -403,6 +430,54 @@ def test_exact_count_selector_uses_position_gap_when_scores_are_far_apart(
     )
 
     assert result == (candidates[0], candidates[1])
+
+
+def test_exact_count_prefers_high_cascade_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pair_active.random, "randrange", _zero_pool_index)
+    candidates = [
+        cast("NodeProxy", _CountNode("anchor")),
+        cast("NodeProxy", _CountNode("high")),
+        cast("NodeProxy", _CountNode("low")),
+    ]
+    graph = _CascadeGraph(
+        {
+            frozenset(("anchor", "high")): 10,
+            frozenset(("anchor", "low")): 1,
+        },
+        node_count=3,
+    )
+
+    result = pair_active.select_exact_count_pair(
+        candidates,
+        set(),
+        _processor(),
+        cast("CrystalGraphPort", graph),
+        bottom=True,
+        count=0,
+        closest=False,
+        retry=0,
+    )
+
+    assert result == (candidates[0], candidates[1])
+
+
+def test_pair_pipeline_caps_filter_and_cascade_shortlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cfg = _config()
+    cfg["ranking"]["lru_size"] = 8
+    monkeypatch.setattr(pair_pipeline, "config", cfg)
+    anchor = cast("NodeProxy", _Node("anchor", 0))
+    opponents = [cast("NodeProxy", _Node(f"n{i}", 0)) for i in range(20)]
+    graph = _empty_graph()
+
+    pair_list = pair_pipeline.form_candidate_pairs(anchor, opponents)
+    filtered = pair_pipeline.filter_existing_pairs(pair_list, set(), graph)
+
+    assert len(filtered) == 8
+    assert len(pair_pipeline.shortlist_by_cascade(filtered, graph)) == 2
 
 
 def test_chain_small_pairs_small_chain_extreme_with_long_chain_member(
@@ -512,12 +587,13 @@ def test_chain_middle_pairs_two_remaining_candidates_without_special_case() -> N
     assert set(result) == {first, second}
 
 
-def test_chain_middle_trims_before_filtering(
+def test_chain_middle_skips_same_path_opponent_after_filtering(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg = _config()
-    cfg["ranking"]["lru_size"] = 1
-    monkeypatch.setattr(pair_active, "config", cfg)
+    cfg["ranking"]["lru_size"] = 8
+    for module in (pair_active, pair_candidates, pair_opponents, pair_pipeline):
+        monkeypatch.setattr(module, "config", cfg)
     anchor = _middle_node("best-below", 3, 1)
     blocked = _middle_node("best-above", 2, 1)
     allowed = _middle_node("allowed", 1, 1)
@@ -531,8 +607,8 @@ def test_chain_middle_trims_before_filtering(
         cast("PairingProcessorPort", processor),
     )
 
-    assert result is None
-    assert list(processor.recent_images) == ["best-below"]
+    assert result == (anchor, allowed)
+    assert list(processor.recent_images) == []
 
 
 def test_chain_middle_marks_anchor_recent_without_valid_opponents() -> None:

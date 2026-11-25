@@ -69,17 +69,17 @@ CONTRACT: list[tuple[str, tuple[str, ...], set[str]]] = [
     (
         "/api/files/remove-generated-models",
         ("files", "remove", "generated-models"),
-        {"remove_models"},
+        {"delete_directory"},
     ),
     (
         "/api/files/remove-vector-maps",
         ("files", "remove", "vector-maps"),
-        {"remove_directory"},
+        {"delete_directory"},
     ),
     (
         "/api/files/remove-downloaded-models",
         ("files", "remove", "downloaded-models"),
-        {"remove_directory"},
+        {"delete_directory"},
     ),
     (
         "/api/files/download-models",

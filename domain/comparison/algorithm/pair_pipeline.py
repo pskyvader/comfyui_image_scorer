@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from tqdm import tqdm
-
 from ....core.configuration.settings import config
 from ...graph.node_proxy import NodeProxy
 from ....domain.ports.graph import CrystalGraphPort
@@ -20,53 +18,38 @@ def form_candidate_pairs(
 
 
 def filter_existing_pairs(
-    pair_list: list[Pair], existing_pair_set: set[tuple[str, str]]
+    pair_list: list[Pair],
+    existing_pair_set: set[tuple[str, str]],
+    cg: CrystalGraphPort,
+    check_same_path: bool = True,
 ) -> list[Pair]:
-    """Remove pairs already present in comparison history."""
-    return [
+    """Drop compared or connected pairs, then cap the survivors at lru_size."""
+    filtered: list[Pair] = [
         pair
         for pair in pair_list
         if canonicalize_pair(pair[0].filename, pair[1].filename)
         not in existing_pair_set
+        and (
+            not check_same_path
+            or not cg.are_in_same_path(pair[0].filename, pair[1].filename)
+        )
     ]
+    return filtered[: int(config["ranking"]["lru_size"])]
 
 
-def filter_cross_chain_pairs(
-    pair_list: list[Pair],
-    existing_pair_set: set[tuple[str, str]],
-    cg: CrystalGraphPort,
-) -> list[Pair] | None:
-    """Keep new pairs from different main chains that are not already connected."""
-    filtered_list: list[Pair] = [
-        pair
-        for pair in filter_existing_pairs(pair_list, existing_pair_set)
-        if not cg.are_in_same_path(pair[0].filename, pair[1].filename)
+def _key_cascade_score(item: tuple[int, Pair]) -> int:
+    return -item[0]
+
+
+def shortlist_by_cascade(pair_list: list[Pair], cg: CrystalGraphPort) -> list[Pair]:
+    """Keep the highest-cascade pairs from an already lru-sized list."""
+    scored: list[tuple[int, Pair]] = [
+        (cg.get_cascade_score(pair[0].filename, pair[1].filename), pair)
+        for pair in pair_list
     ]
-
-    if not filtered_list:
-        return None
-    return filtered_list
-
-
-def filter_uncertainty_refine_pairs(
-    pair_list: list[Pair],
-    pair_set: set[tuple[str, str]],
-    cg: CrystalGraphPort,
-) -> list[Pair] | None:
-    """Remove previously compared and already-connected pairs."""
-    filtered_pairs: list[Pair] = []
-    pair_count: int = len(pair_list)
-    with tqdm(total=pair_count, desc="Creating pair list", delay=3.0) as pbar:
-        for pair in pair_list:
-            pbar.update(1)
-            if canonicalize_pair(pair[0].filename, pair[1].filename) in pair_set:
-                continue
-            if cg.are_in_same_path(pair[0].filename, pair[1].filename):
-                continue
-            filtered_pairs.append(pair)
-    if not filtered_pairs:
-        return None
-    return filtered_pairs
+    scored.sort(key=_key_cascade_score)
+    lru_size: int = int(config["ranking"]["lru_size"])
+    return [pair for _, pair in scored[: lru_size // 4]]
 
 
 def sigma_range_cap(node_a: NodeProxy) -> float:

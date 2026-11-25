@@ -27,6 +27,7 @@ from comfyui_image_scorer.domain.comparison.algorithm.pair_active import (
 )
 from comfyui_image_scorer.domain.graph.node_proxy import NodeProxy
 from comfyui_image_scorer.domain.ports.comparison import PairingProcessorPort
+from comfyui_image_scorer.domain.ports.graph import CrystalGraphPort
 
 
 @dataclass
@@ -56,6 +57,14 @@ class _FakePairingProcessor:
         self.recent_lock = Lock()
 
 
+class _Graph:
+    def are_in_same_path(self, _a: str, _b: str) -> bool:
+        return False
+
+    def get_cascade_score(self, _first: str, _second: str) -> int:
+        return 0
+
+
 def _nodes(stubs: list[_Stub]) -> list[NodeProxy]:
     return [cast("NodeProxy", stub) for stub in stubs]
 
@@ -73,6 +82,7 @@ def _anchor_insert(
         nodes,
         existing_pair_set or set(),
         processor or cast("PairingProcessorPort", _FakePairingProcessor()),
+        cast("CrystalGraphPort", _Graph()),
     )
 
 

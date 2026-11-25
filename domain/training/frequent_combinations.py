@@ -16,6 +16,7 @@ import numpy as np
 from tqdm import tqdm
 
 from ...core.configuration.settings import config
+from ...core.filesystem.operations import DeletionMode, delete_directory, delete_file
 from ...core.filesystem.paths import analysis_dir
 from ...core.io.serialization import atomic_write_json
 from ...core.observability.logger import ModuleLogger, get_logger
@@ -1302,7 +1303,7 @@ def _merge_sparse_shards(
     combinations_path, offsets_path, image_ids_path, complete_path = (
         _sparse_level_paths(cache_directory, level)
     )
-    complete_path.unlink(missing_ok=True)
+    delete_file(complete_path, mode=DeletionMode.PERMANENT)
     # Shards may hold different condition tuples whose matching image sets are
     # identical; keep the first occurrence in merge order and drop the rest.
     seen_sets: set[bytes] = set()
@@ -1435,8 +1436,7 @@ def _merge_sparse_shards(
     level_data = _load_sparse_level(cache_directory, level)
     if level_data is None:
         raise RuntimeError(f"Failed to save sparse combination level {level}.")
-    for shard_path in shard_paths:
-        shard_path.unlink(missing_ok=True)
+    delete_file(shard_paths, mode=DeletionMode.PERMANENT)
     return level_data
 
 
@@ -1460,7 +1460,7 @@ def _seed_sparse_level(
     combinations_path, offsets_path, image_ids_path, complete_path = (
         _sparse_level_paths(cache_directory, 1)
     )
-    complete_path.unlink(missing_ok=True)
+    delete_file(complete_path, mode=DeletionMode.PERMANENT)
     temporary_paths = [
         path.with_name(path.name + ".tmp")
         for path in (combinations_path, offsets_path, image_ids_path)
@@ -1784,10 +1784,11 @@ def generate_combinations_sparse(
             depth,
             image_row_ids.dtype,
         )
-        for stale_shard in shard_directory.iterdir():
-            if stale_shard.is_file():
-                stale_shard.unlink()
-        shard_directory.rmdir()
+        delete_file(
+            [path for path in shard_directory.iterdir() if path.is_file()],
+            mode=DeletionMode.PERMANENT,
+        )
+        delete_directory(shard_directory, mode=DeletionMode.PERMANENT)
         logger.info(
             "sparse level %d complete: %s combinations, %s matching image IDs",
             depth,

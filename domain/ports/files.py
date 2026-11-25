@@ -1,6 +1,6 @@
 """Filesystem protocol port, moved from ``domain/files/ports.py``.
 
-Only the narrow filesystem operations required by ``CrystalGraph`` are exposed
+Only the ranked-file operations required by application services are exposed
 here. Implementations live in ``infrastructure``; callers depend only on this
 protocol, not on concrete paths or JSON formats.
 """
@@ -14,25 +14,12 @@ from .repository import ComparisonRow, ImageRow
 
 
 class FilePort(Protocol):
-    """Narrow filesystem protocol required by CrystalGraph.
+    """Ranked-file filesystem protocol required by application services.
 
-    Only the operations CrystalGraph truly needs are exposed here.
-    Implementations live in infrastructure; callers depend only on this
-    protocol, not on concrete paths or JSON formats.
+    Generic file operations live in ``core.io.operations`` and
+    ``core.filesystem.operations``. Implementations of this port live in
+    infrastructure; callers depend only on the protocol.
     """
-
-    def read_json(self, path: str) -> dict[str, object]: ...
-    def write_json(self, path: str, data: dict[str, object]) -> None: ...
-    def file_exists(self, path: str) -> bool: ...
-    def list_directory(self, path: str) -> list[str]: ...
-    def make_directory(self, path: str) -> None: ...
-
-    def move_file(self, src: Path, dst: Path) -> bool:
-        """Move a file from src to dst through the filesystem port."""
-        ...
-
-    def remove_file(self, path: Path) -> None:
-        """Delete a file through the filesystem port."""
 
     def ranked_root(self) -> Path: ...
 
